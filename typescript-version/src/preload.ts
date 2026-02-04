@@ -5,6 +5,7 @@ interface CustomClip {
     startSec: number;
     durationSec: number;
     startPart: number;
+    filenameFormat: 'simple' | 'timestamp';
 }
 
 interface QueueItem {

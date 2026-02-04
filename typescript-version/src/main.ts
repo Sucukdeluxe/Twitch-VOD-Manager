@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.6.1';
+const APP_VERSION = '3.6.2';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -55,6 +55,7 @@ interface CustomClip {
     startSec: number;
     durationSec: number;
     startPart: number;
+    filenameFormat: 'simple' | 'timestamp';
 }
 
 interface QueueItem {
@@ -681,6 +682,19 @@ async function downloadVOD(
         const clip = item.customClip;
         const partDuration = config.part_minutes * 60;
 
+        // Helper to generate filename based on format
+        const makeClipFilename = (partNum: number, startOffset: number): string => {
+            if (clip.filenameFormat === 'timestamp') {
+                const h = Math.floor(startOffset / 3600);
+                const m = Math.floor((startOffset % 3600) / 60);
+                const s = Math.floor(startOffset % 60);
+                const timeStr = `${h.toString().padStart(2, '0')}-${m.toString().padStart(2, '0')}-${s.toString().padStart(2, '0')}`;
+                return path.join(folder, `${dateStr}_CLIP_${timeStr}_${partNum}.mp4`);
+            } else {
+                return path.join(folder, `${dateStr}_${partNum}.mp4`);
+            }
+        };
+
         // If clip is longer than part duration, split into parts
         if (clip.durationSec > partDuration) {
             const numParts = Math.ceil(clip.durationSec / partDuration);
@@ -694,7 +708,7 @@ async function downloadVOD(
                 const remainingDuration = clip.durationSec - (i * partDuration);
                 const thisDuration = Math.min(partDuration, remainingDuration);
 
-                const partFilename = path.join(folder, `${dateStr}_Part${partNum.toString().padStart(2, '0')}.mp4`);
+                const partFilename = makeClipFilename(partNum, startOffset);
 
                 const success = await downloadVODPart(
                     item.url,
@@ -714,7 +728,7 @@ async function downloadVOD(
             return downloadedFiles.length === numParts;
         } else {
             // Single clip file
-            const filename = path.join(folder, `${dateStr}_Part${clip.startPart.toString().padStart(2, '0')}.mp4`);
+            const filename = makeClipFilename(clip.startPart, clip.startSec);
             return await downloadVODPart(
                 item.url,
                 filename,

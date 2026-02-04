@@ -959,22 +959,28 @@
             font-size: 13px;
         }
 
-        .slider-group input[type="range"] {
+        .slider-group input[type="range"],
+        .modal input[type="range"] {
             width: 100%;
             height: 6px;
             -webkit-appearance: none;
-            background: var(--bg-main);
+            background: #1a1a1a;
             border-radius: 3px;
             outline: none;
         }
 
-        .slider-group input[type="range"]::-webkit-slider-thumb {
+        .slider-group input[type="range"]::-webkit-slider-thumb,
+        .modal input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
             width: 16px;
             height: 16px;
-            background: var(--accent);
+            background: #E5A00D;
             border-radius: 50%;
             cursor: pointer;
+        }
+
+        .modal input[type="range"]::-webkit-slider-thumb:hover {
+            background: #ffb825;
         }
 
         .clip-time-display {
@@ -1049,41 +1055,71 @@
 
     <!-- Clip Dialog Modal -->
     <div class="modal-overlay" id="clipModal">
-        <div class="modal">
+        <div class="modal" style="background: #2b2b2b; max-width: 500px;">
             <button class="modal-close" onclick="closeClipDialog()">x</button>
-            <h2>Clip erstellen</h2>
-            <p style="color: var(--text-secondary); margin-bottom: 15px;" id="clipDialogTitle"></p>
+            <h2 style="color: #E5A00D; text-align: center; margin-bottom: 20px;" id="clipDialogTitle">Clip zuschneiden</h2>
 
-            <div class="slider-group">
-                <label>Startzeit</label>
-                <input type="range" id="clipStartSlider" min="0" max="100" value="0" oninput="updateClipSliders()">
-                <div class="clip-time-display">
-                    <input type="text" id="clipStartTime" value="00:00:00" style="width: 80px; background: var(--bg-main); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px 8px; color: var(--text); text-align: center; font-family: monospace;" onchange="updateClipFromInput()">
+            <!-- Start Zeit mit Slider -->
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px;">Start:</label>
+                <input type="range" id="clipStartSlider" min="0" max="100" value="0"
+                    style="width: 100%; height: 6px; -webkit-appearance: none; background: #1a1a1a; border-radius: 3px; cursor: pointer;"
+                    oninput="updateFromSlider('start')">
+                <div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">
+                    <label style="color: #888;">Startzeit (HH:MM:SS):</label>
+                    <input type="text" id="clipStartTime" value="00:00:00"
+                        style="width: 100px; background: #333; border: 1px solid #444; border-radius: 4px; padding: 6px 10px; color: white; font-family: monospace; text-align: center;"
+                        onchange="updateFromInput('start')">
                 </div>
             </div>
 
-            <div class="slider-group">
-                <label>Endzeit</label>
-                <input type="range" id="clipEndSlider" min="0" max="100" value="100" oninput="updateClipSliders()">
-                <div class="clip-time-display">
-                    <input type="text" id="clipEndTime" value="00:00:00" style="width: 80px; background: var(--bg-main); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px 8px; color: var(--text); text-align: center; font-family: monospace;" onchange="updateClipFromInput()">
+            <!-- End Zeit mit Slider -->
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px;">Ende:</label>
+                <input type="range" id="clipEndSlider" min="0" max="100" value="60"
+                    style="width: 100%; height: 6px; -webkit-appearance: none; background: #1a1a1a; border-radius: 3px; cursor: pointer;"
+                    oninput="updateFromSlider('end')">
+                <div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">
+                    <label style="color: #888;">Endzeit (HH:MM:SS):</label>
+                    <input type="text" id="clipEndTime" value="00:01:00"
+                        style="width: 100px; background: #333; border: 1px solid #444; border-radius: 4px; padding: 6px 10px; color: white; font-family: monospace; text-align: center;"
+                        onchange="updateFromInput('end')">
                 </div>
             </div>
 
-            <div class="clip-info-row">
-                <div class="label">Clip Dauer</div>
-                <div class="value" id="clipDurationDisplay">00:00:00</div>
+            <!-- Dauer Anzeige -->
+            <div style="text-align: center; margin-bottom: 20px;">
+                <span style="color: #888;">Dauer: </span>
+                <span id="clipDurationDisplay" style="color: #00c853;">00:01:00</span>
             </div>
 
-            <div class="part-number-group">
-                <label style="display: block; margin-bottom: 6px; color: var(--text-secondary); font-size: 13px;">Start Part-Nummer (optional)</label>
-                <input type="number" id="clipStartPart" value="1" min="1">
-                <small>Fur Fortsetzung eines Downloads</small>
+            <!-- Part Nummer -->
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 8px;">Start Part-Nummer (optional, fur Fortsetzung):</label>
+                <input type="text" id="clipStartPart" placeholder="z.B. 42"
+                    style="width: 100px; background: #333; border: 1px solid #444; border-radius: 4px; padding: 8px 12px; color: white;"
+                    oninput="updateFilenameExamples()">
+                <div style="color: #888; font-size: 12px; margin-top: 5px;">Leer lassen = Part 1</div>
             </div>
 
-            <div class="modal-actions">
-                <button class="btn-secondary" onclick="closeClipDialog()">Abbrechen</button>
-                <button class="btn-primary" id="clipConfirmBtn" onclick="confirmClipDialog()">Zur Queue hinzufugen</button>
+            <!-- Dateinamen Format -->
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 10px;">Dateinamen-Format:</label>
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 8px;">
+                    <input type="radio" name="filenameFormat" value="simple" checked
+                        style="width: 18px; height: 18px; accent-color: #9146FF;">
+                    <span id="formatSimple" style="color: #aaa;">01.02.2026_1.mp4 (Standard)</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="radio" name="filenameFormat" value="timestamp"
+                        style="width: 18px; height: 18px; accent-color: #9146FF;">
+                    <span id="formatTimestamp" style="color: #aaa;">01.02.2026_CLIP_00-00-00_1.mp4 (mit Zeitstempel)</span>
+                </label>
+            </div>
+
+            <!-- Button -->
+            <div style="text-align: center;">
+                <button class="btn-primary" style="background: #00c853; padding: 12px 30px; border: none; border-radius: 4px; color: white; font-weight: 600; cursor: pointer;" onclick="confirmClipDialog()">Zur Queue hinzufugen</button>
             </div>
         </div>
     </div>
@@ -1334,7 +1370,7 @@
 
                     <div class="settings-card">
                         <h3>Updates</h3>
-                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v3.6.1</p>
+                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v3.6.2</p>
                         <button class="btn-secondary" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
                 </div>
@@ -1345,7 +1381,7 @@
                     <div class="status-dot" id="statusDot"></div>
                     <span id="statusText">Nicht verbunden</span>
                 </div>
-                <span id="versionText">v3.6.1</span>
+                <span id="versionText">v3.6.2</span>
             </div>
         </main>
     </div>
@@ -1635,6 +1671,13 @@
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         }
 
+        function formatSecondsToTimeDashed(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return `${h.toString().padStart(2, '0')}-${m.toString().padStart(2, '0')}-${s.toString().padStart(2, '0')}`;
+        }
+
         function parseTimeToSeconds(timeStr) {
             const parts = timeStr.split(':').map(p => parseInt(p) || 0);
             if (parts.length === 3) {
@@ -1647,14 +1690,20 @@
             clipDialogData = { url, title, date, streamer, duration };
             clipTotalSeconds = parseDurationToSeconds(duration);
 
-            document.getElementById('clipDialogTitle').textContent = title.substring(0, 50) + (title.length > 50 ? '...' : '') + ' (' + duration + ')';
+            document.getElementById('clipDialogTitle').textContent = 'Clip zuschneiden (' + duration + ')';
+
+            // Setup sliders
             document.getElementById('clipStartSlider').max = clipTotalSeconds;
             document.getElementById('clipEndSlider').max = clipTotalSeconds;
             document.getElementById('clipStartSlider').value = 0;
-            document.getElementById('clipEndSlider').value = Math.min(3600, clipTotalSeconds); // Default 1 hour or max
-            document.getElementById('clipStartPart').value = 1;
+            document.getElementById('clipEndSlider').value = Math.min(60, clipTotalSeconds);
 
-            updateClipSliders();
+            document.getElementById('clipStartTime').value = '00:00:00';
+            document.getElementById('clipEndTime').value = formatSecondsToTime(Math.min(60, clipTotalSeconds));
+            document.getElementById('clipStartPart').value = '';
+
+            updateClipDuration();
+            updateFilenameExamples();
             document.getElementById('clipModal').classList.add('show');
         }
 
@@ -1663,44 +1712,78 @@
             clipDialogData = null;
         }
 
-        function updateClipSliders() {
-            const startSec = parseInt(document.getElementById('clipStartSlider').value);
-            const endSec = parseInt(document.getElementById('clipEndSlider').value);
+        function updateFromSlider(which) {
+            const startSlider = document.getElementById('clipStartSlider');
+            const endSlider = document.getElementById('clipEndSlider');
 
-            document.getElementById('clipStartTime').value = formatSecondsToTime(startSec);
-            document.getElementById('clipEndTime').value = formatSecondsToTime(endSec);
+            if (which === 'start') {
+                document.getElementById('clipStartTime').value = formatSecondsToTime(parseInt(startSlider.value));
+            } else {
+                document.getElementById('clipEndTime').value = formatSecondsToTime(parseInt(endSlider.value));
+            }
 
+            updateClipDuration();
+        }
+
+        function updateFromInput(which) {
+            const startSec = parseTimeToSeconds(document.getElementById('clipStartTime').value);
+            const endSec = parseTimeToSeconds(document.getElementById('clipEndTime').value);
+
+            if (which === 'start') {
+                document.getElementById('clipStartSlider').value = Math.max(0, Math.min(startSec, clipTotalSeconds));
+            } else {
+                document.getElementById('clipEndSlider').value = Math.max(0, Math.min(endSec, clipTotalSeconds));
+            }
+
+            updateClipDuration();
+        }
+
+        function updateClipDuration() {
+            const startSec = parseTimeToSeconds(document.getElementById('clipStartTime').value);
+            const endSec = parseTimeToSeconds(document.getElementById('clipEndTime').value);
             const duration = endSec - startSec;
             const durationDisplay = document.getElementById('clipDurationDisplay');
 
             if (duration > 0) {
                 durationDisplay.textContent = formatSecondsToTime(duration);
-                durationDisplay.classList.remove('error');
+                durationDisplay.style.color = '#00c853';
             } else {
-                durationDisplay.textContent = 'Ungultig';
-                durationDisplay.classList.add('error');
+                durationDisplay.textContent = 'Ungultig!';
+                durationDisplay.style.color = '#ff4444';
             }
+
+            updateFilenameExamples();
         }
 
-        function updateClipFromInput() {
+        function updateFilenameExamples() {
+            if (!clipDialogData) return;
+
+            const date = new Date(clipDialogData.date);
+            const dateStr = `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getFullYear()}`;
+            const partNum = document.getElementById('clipStartPart').value || '1';
             const startSec = parseTimeToSeconds(document.getElementById('clipStartTime').value);
-            const endSec = parseTimeToSeconds(document.getElementById('clipEndTime').value);
+            const timeStr = formatSecondsToTimeDashed(startSec);
 
-            document.getElementById('clipStartSlider').value = Math.max(0, Math.min(startSec, clipTotalSeconds));
-            document.getElementById('clipEndSlider').value = Math.max(0, Math.min(endSec, clipTotalSeconds));
-
-            updateClipSliders();
+            document.getElementById('formatSimple').textContent = `${dateStr}_${partNum}.mp4 (Standard)`;
+            document.getElementById('formatTimestamp').textContent = `${dateStr}_CLIP_${timeStr}_${partNum}.mp4 (mit Zeitstempel)`;
         }
 
         async function confirmClipDialog() {
             if (!clipDialogData) return;
 
-            const startSec = parseInt(document.getElementById('clipStartSlider').value);
-            const endSec = parseInt(document.getElementById('clipEndSlider').value);
-            const startPart = parseInt(document.getElementById('clipStartPart').value) || 1;
+            const startSec = parseTimeToSeconds(document.getElementById('clipStartTime').value);
+            const endSec = parseTimeToSeconds(document.getElementById('clipEndTime').value);
+            const startPartStr = document.getElementById('clipStartPart').value.trim();
+            const startPart = startPartStr ? parseInt(startPartStr) : 1;
+            const filenameFormat = document.querySelector('input[name="filenameFormat"]:checked').value;
 
             if (endSec <= startSec) {
                 alert('Endzeit muss grosser als Startzeit sein!');
+                return;
+            }
+
+            if (startSec < 0 || endSec > clipTotalSeconds) {
+                alert('Zeit ausserhalb des VOD-Bereichs!');
                 return;
             }
 
@@ -1715,7 +1798,8 @@
                 customClip: {
                     startSec: startSec,
                     durationSec: durationSec,
-                    startPart: startPart
+                    startPart: startPart,
+                    filenameFormat: filenameFormat
                 }
             });
 
