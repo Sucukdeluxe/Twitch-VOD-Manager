@@ -382,7 +382,9 @@
         }
 
         .tab-content.active {
-            display: block;
+            display: flex;
+            flex-direction: column;
+            min-height: 100%;
         }
 
         /* VOD Grid */
@@ -390,6 +392,13 @@
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
             gap: 20px;
+            flex: 1;
+        }
+
+        .vod-grid:has(.empty-state) {
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .vod-card {
@@ -1477,6 +1486,7 @@
 
             document.getElementById('versionText').textContent = `v${version}`;
             document.getElementById('versionInfo').textContent = `Version: v${version}`;
+            document.title = `Twitch VOD Manager v${version}`;
             document.getElementById('clientId').value = config.client_id || '';
             document.getElementById('clientSecret').value = config.client_secret || '';
             document.getElementById('downloadPath').value = config.download_path || '';
@@ -1490,6 +1500,10 @@
 
             if (config.client_id && config.client_secret) {
                 await connect();
+                // Auto-select first streamer if available
+                if (config.streamers && config.streamers.length > 0) {
+                    selectStreamer(config.streamers[0]);
+                }
             }
 
             // Event listeners
