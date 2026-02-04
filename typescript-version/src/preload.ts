@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 // Types
+interface CustomClip {
+    startSec: number;
+    durationSec: number;
+    startPart: number;
+}
+
 interface QueueItem {
     id: string;
     title: string;
@@ -14,6 +20,7 @@ interface QueueItem {
     totalParts?: number;
     speed?: string;
     eta?: string;
+    customClip?: CustomClip;
 }
 
 interface DownloadProgress {

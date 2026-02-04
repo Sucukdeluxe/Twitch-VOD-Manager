@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.6.0';
+const APP_VERSION = '3.6.1';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -51,6 +51,12 @@ interface VOD {
     stream_id: string;
 }
 
+interface CustomClip {
+    startSec: number;
+    durationSec: number;
+    startPart: number;
+}
+
 interface QueueItem {
     id: string;
     title: string;
@@ -66,6 +72,7 @@ interface QueueItem {
     eta?: string;
     downloadedBytes?: number;
     totalBytes?: number;
+    customClip?: CustomClip;
 }
 
 interface DownloadProgress {
@@ -669,6 +676,58 @@ async function downloadVOD(
     const safeTitle = item.title.replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50);
     const totalDuration = parseDuration(item.duration_str);
 
+    // Custom Clip - download specific time range
+    if (item.customClip) {
+        const clip = item.customClip;
+        const partDuration = config.part_minutes * 60;
+
+        // If clip is longer than part duration, split into parts
+        if (clip.durationSec > partDuration) {
+            const numParts = Math.ceil(clip.durationSec / partDuration);
+            const downloadedFiles: string[] = [];
+
+            for (let i = 0; i < numParts; i++) {
+                if (currentDownloadCancelled) break;
+
+                const partNum = clip.startPart + i;
+                const startOffset = clip.startSec + (i * partDuration);
+                const remainingDuration = clip.durationSec - (i * partDuration);
+                const thisDuration = Math.min(partDuration, remainingDuration);
+
+                const partFilename = path.join(folder, `${dateStr}_Part${partNum.toString().padStart(2, '0')}.mp4`);
+
+                const success = await downloadVODPart(
+                    item.url,
+                    partFilename,
+                    formatDuration(startOffset),
+                    formatDuration(thisDuration),
+                    onProgress,
+                    item.id,
+                    i + 1,
+                    numParts
+                );
+
+                if (!success) return false;
+                downloadedFiles.push(partFilename);
+            }
+
+            return downloadedFiles.length === numParts;
+        } else {
+            // Single clip file
+            const filename = path.join(folder, `${dateStr}_Part${clip.startPart.toString().padStart(2, '0')}.mp4`);
+            return await downloadVODPart(
+                item.url,
+                filename,
+                formatDuration(clip.startSec),
+                formatDuration(clip.durationSec),
+                onProgress,
+                item.id,
+                1,
+                1
+            );
+        }
+    }
+
     // Check download mode
     if (config.download_mode === 'full' || totalDuration <= config.part_minutes * 60) {
         // Full download
@@ -687,7 +746,7 @@ async function downloadVOD(
             const endSec = Math.min((i + 1) * partDuration, totalDuration);
             const duration = endSec - startSec;
 
-            const partFilename = path.join(folder, `${safeTitle}_Part${(i + 1).toString().padStart(2, '0')}.mp4`);
+            const partFilename = path.join(folder, `${dateStr}_Part${(i + 1).toString().padStart(2, '0')}.mp4`);
 
             const success = await downloadVODPart(
                 item.url,

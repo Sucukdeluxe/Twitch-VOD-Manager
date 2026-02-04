@@ -899,12 +899,193 @@
             --accent: #0A84FF;
             --accent-hover: #0071e3;
         }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 25px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal h2 {
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+
+        .modal-close {
+            float: right;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: var(--text);
+        }
+
+        .slider-group {
+            margin-bottom: 20px;
+        }
+
+        .slider-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .slider-group input[type="range"] {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            background: var(--bg-main);
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .slider-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: var(--accent);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .clip-time-display {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        .clip-info-row {
+            background: var(--bg-main);
+            padding: 12px 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .clip-info-row .label {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+
+        .clip-info-row .value {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--success);
+        }
+
+        .clip-info-row .value.error {
+            color: var(--error);
+        }
+
+        .part-number-group {
+            margin-bottom: 20px;
+        }
+
+        .part-number-group input {
+            width: 100px;
+            background: var(--bg-main);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: var(--text);
+            font-size: 14px;
+        }
+
+        .part-number-group small {
+            display: block;
+            margin-top: 5px;
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .modal-actions button {
+            flex: 1;
+        }
     </style>
 </head>
 <body class="theme-twitch">
     <div class="update-banner" id="updateBanner">
         <span id="updateText">Neue Version verfugbar!</span>
         <button onclick="downloadUpdate()">Jetzt aktualisieren</button>
+    </div>
+
+    <!-- Clip Dialog Modal -->
+    <div class="modal-overlay" id="clipModal">
+        <div class="modal">
+            <button class="modal-close" onclick="closeClipDialog()">x</button>
+            <h2>Clip erstellen</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 15px;" id="clipDialogTitle"></p>
+
+            <div class="slider-group">
+                <label>Startzeit</label>
+                <input type="range" id="clipStartSlider" min="0" max="100" value="0" oninput="updateClipSliders()">
+                <div class="clip-time-display">
+                    <input type="text" id="clipStartTime" value="00:00:00" style="width: 80px; background: var(--bg-main); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px 8px; color: var(--text); text-align: center; font-family: monospace;" onchange="updateClipFromInput()">
+                </div>
+            </div>
+
+            <div class="slider-group">
+                <label>Endzeit</label>
+                <input type="range" id="clipEndSlider" min="0" max="100" value="100" oninput="updateClipSliders()">
+                <div class="clip-time-display">
+                    <input type="text" id="clipEndTime" value="00:00:00" style="width: 80px; background: var(--bg-main); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px 8px; color: var(--text); text-align: center; font-family: monospace;" onchange="updateClipFromInput()">
+                </div>
+            </div>
+
+            <div class="clip-info-row">
+                <div class="label">Clip Dauer</div>
+                <div class="value" id="clipDurationDisplay">00:00:00</div>
+            </div>
+
+            <div class="part-number-group">
+                <label style="display: block; margin-bottom: 6px; color: var(--text-secondary); font-size: 13px;">Start Part-Nummer (optional)</label>
+                <input type="number" id="clipStartPart" value="1" min="1">
+                <small>Fur Fortsetzung eines Downloads</small>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeClipDialog()">Abbrechen</button>
+                <button class="btn-primary" id="clipConfirmBtn" onclick="confirmClipDialog()">Zur Queue hinzufugen</button>
+            </div>
+        </div>
     </div>
 
     <div class="app">
@@ -1153,7 +1334,7 @@
 
                     <div class="settings-card">
                         <h3>Updates</h3>
-                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v3.6.0</p>
+                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v3.6.1</p>
                         <button class="btn-secondary" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
                 </div>
@@ -1164,7 +1345,7 @@
                     <div class="status-dot" id="statusDot"></div>
                     <span id="statusText">Nicht verbunden</span>
                 </div>
-                <span id="versionText">v3.6.0</span>
+                <span id="versionText">v3.6.1</span>
             </div>
         </main>
     </div>
@@ -1360,6 +1541,7 @@
             grid.innerHTML = vods.map(vod => {
                 const thumb = vod.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180');
                 const date = new Date(vod.created_at).toLocaleDateString('de-DE');
+                const escapedTitle = vod.title.replace(/'/g, "\\'").replace(/"/g, "&quot;");
                 return `
                     <div class="vod-card">
                         <img class="vod-thumbnail" src="${thumb}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 320 180%22><rect fill=%22%23333%22 width=%22320%22 height=%22180%22/></svg>'">
@@ -1372,7 +1554,8 @@
                             </div>
                         </div>
                         <div class="vod-actions">
-                            <button class="vod-btn primary" onclick="addToQueue('${vod.url}', '${vod.title.replace(/'/g, "\\'")}', '${vod.created_at}', '${streamer}', '${vod.duration}')">+ Warteschlange</button>
+                            <button class="vod-btn secondary" onclick="openClipDialog('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">Clip</button>
+                            <button class="vod-btn primary" onclick="addToQueue('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">+ Queue</button>
                         </div>
                     </div>
                 `;
@@ -1410,13 +1593,16 @@
                 return;
             }
 
-            list.innerHTML = queue.map(item => `
-                <div class="queue-item">
-                    <div class="status ${item.status}"></div>
-                    <div class="title" title="${item.title}">${item.title}</div>
-                    <span class="remove" onclick="removeFromQueue('${item.id}')">x</span>
-                </div>
-            `).join('');
+            list.innerHTML = queue.map(item => {
+                const isClip = item.customClip ? '* ' : '';
+                return `
+                    <div class="queue-item">
+                        <div class="status ${item.status}"></div>
+                        <div class="title" title="${item.title}">${isClip}${item.title}</div>
+                        <span class="remove" onclick="removeFromQueue('${item.id}')">x</span>
+                    </div>
+                `;
+            }).join('');
         }
 
         async function toggleDownload() {
@@ -1425,6 +1611,116 @@
             } else {
                 await window.api.startDownload();
             }
+        }
+
+        // Clip Dialog
+        let clipDialogData = null;
+        let clipTotalSeconds = 0;
+
+        function parseDurationToSeconds(durStr) {
+            let seconds = 0;
+            const hours = durStr.match(/(\d+)h/);
+            const minutes = durStr.match(/(\d+)m/);
+            const secs = durStr.match(/(\d+)s/);
+            if (hours) seconds += parseInt(hours[1]) * 3600;
+            if (minutes) seconds += parseInt(minutes[1]) * 60;
+            if (secs) seconds += parseInt(secs[1]);
+            return seconds;
+        }
+
+        function formatSecondsToTime(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function parseTimeToSeconds(timeStr) {
+            const parts = timeStr.split(':').map(p => parseInt(p) || 0);
+            if (parts.length === 3) {
+                return parts[0] * 3600 + parts[1] * 60 + parts[2];
+            }
+            return 0;
+        }
+
+        function openClipDialog(url, title, date, streamer, duration) {
+            clipDialogData = { url, title, date, streamer, duration };
+            clipTotalSeconds = parseDurationToSeconds(duration);
+
+            document.getElementById('clipDialogTitle').textContent = title.substring(0, 50) + (title.length > 50 ? '...' : '') + ' (' + duration + ')';
+            document.getElementById('clipStartSlider').max = clipTotalSeconds;
+            document.getElementById('clipEndSlider').max = clipTotalSeconds;
+            document.getElementById('clipStartSlider').value = 0;
+            document.getElementById('clipEndSlider').value = Math.min(3600, clipTotalSeconds); // Default 1 hour or max
+            document.getElementById('clipStartPart').value = 1;
+
+            updateClipSliders();
+            document.getElementById('clipModal').classList.add('show');
+        }
+
+        function closeClipDialog() {
+            document.getElementById('clipModal').classList.remove('show');
+            clipDialogData = null;
+        }
+
+        function updateClipSliders() {
+            const startSec = parseInt(document.getElementById('clipStartSlider').value);
+            const endSec = parseInt(document.getElementById('clipEndSlider').value);
+
+            document.getElementById('clipStartTime').value = formatSecondsToTime(startSec);
+            document.getElementById('clipEndTime').value = formatSecondsToTime(endSec);
+
+            const duration = endSec - startSec;
+            const durationDisplay = document.getElementById('clipDurationDisplay');
+
+            if (duration > 0) {
+                durationDisplay.textContent = formatSecondsToTime(duration);
+                durationDisplay.classList.remove('error');
+            } else {
+                durationDisplay.textContent = 'Ungultig';
+                durationDisplay.classList.add('error');
+            }
+        }
+
+        function updateClipFromInput() {
+            const startSec = parseTimeToSeconds(document.getElementById('clipStartTime').value);
+            const endSec = parseTimeToSeconds(document.getElementById('clipEndTime').value);
+
+            document.getElementById('clipStartSlider').value = Math.max(0, Math.min(startSec, clipTotalSeconds));
+            document.getElementById('clipEndSlider').value = Math.max(0, Math.min(endSec, clipTotalSeconds));
+
+            updateClipSliders();
+        }
+
+        async function confirmClipDialog() {
+            if (!clipDialogData) return;
+
+            const startSec = parseInt(document.getElementById('clipStartSlider').value);
+            const endSec = parseInt(document.getElementById('clipEndSlider').value);
+            const startPart = parseInt(document.getElementById('clipStartPart').value) || 1;
+
+            if (endSec <= startSec) {
+                alert('Endzeit muss grosser als Startzeit sein!');
+                return;
+            }
+
+            const durationSec = endSec - startSec;
+
+            queue = await window.api.addToQueue({
+                url: clipDialogData.url,
+                title: clipDialogData.title,
+                date: clipDialogData.date,
+                streamer: clipDialogData.streamer,
+                duration_str: clipDialogData.duration,
+                customClip: {
+                    startSec: startSec,
+                    durationSec: durationSec,
+                    startPart: startPart
+                }
+            });
+
+            renderQueue();
+            closeClipDialog();
         }
 
         // Settings
