@@ -1,6 +1,6 @@
 {
   "name": "twitch-vod-manager",
-  "version": "3.6.9",
+  "version": "3.7.0",
   "description": "Twitch VOD Manager - Download Twitch VODs easily",
   "main": "dist/main.js",
   "author": "xRangerDE",
@@ -30,7 +30,8 @@
     },
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "artifactName": "Twitch-VOD-Manager-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
