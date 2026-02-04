@@ -1,6 +1,6 @@
 {
   "name": "twitch-vod-manager",
-  "version": "3.6.3",
+  "version": "3.6.8",
   "description": "Twitch VOD Manager - Download Twitch VODs easily",
   "main": "dist/main.js",
   "author": "xRangerDE",
@@ -35,11 +35,16 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Twitch VOD Manager v${version}",
+      "include": "build/installer.nsh"
     },
     "publish": {
-      "provider": "generic",
-      "url": "http://24-music.de/"
+      "provider": "github",
+      "owner": "Sucukdeluxe",
+      "repo": "Twitch-VOD-Manager"
     }
   }
 }

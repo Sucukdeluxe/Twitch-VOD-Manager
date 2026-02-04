@@ -88,6 +88,9 @@ contextBridge.exposeInMainWorld('api', {
     // App
     getVersion: () => ipcRenderer.invoke('get-version'),
     checkUpdate: () => ipcRenderer.invoke('check-update'),
+    downloadUpdate: () => ipcRenderer.invoke('download-update'),
+    installUpdate: () => ipcRenderer.invoke('install-update'),
+    openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
 
     // Events
     onDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
@@ -107,5 +110,16 @@ contextBridge.exposeInMainWorld('api', {
     },
     onMergeProgress: (callback: (percent: number) => void) => {
         ipcRenderer.on('merge-progress', (_, percent) => callback(percent));
+    },
+
+    // Auto-Update Events
+    onUpdateAvailable: (callback: (info: { version: string; releaseDate?: string }) => void) => {
+        ipcRenderer.on('update-available', (_, info) => callback(info));
+    },
+    onUpdateDownloadProgress: (callback: (progress: { percent: number; bytesPerSecond: number; transferred: number; total: number }) => void) => {
+        ipcRenderer.on('update-download-progress', (_, progress) => callback(progress));
+    },
+    onUpdateDownloaded: (callback: (info: { version: string }) => void) => {
+        ipcRenderer.on('update-downloaded', (_, info) => callback(info));
     }
 });

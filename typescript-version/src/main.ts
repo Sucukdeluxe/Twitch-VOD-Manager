@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.6.3';
+const APP_VERSION = '3.6.8';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -836,28 +836,66 @@ function createWindow(): void {
         mainWindow = null;
     });
 
+    // Setup auto-updater after window is ready
     setTimeout(() => {
-        checkForUpdates();
+        setupAutoUpdater();
     }, 3000);
 }
 
-async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?: string; changelog?: string; downloadUrl?: string }> {
-    try {
-        const response = await axios.get(UPDATE_CHECK_URL, { timeout: 5000 });
-        const latest = response.data.version;
+// ==========================================
+// AUTO-UPDATER (electron-updater)
+// ==========================================
+function setupAutoUpdater() {
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = true;
 
-        if (latest !== APP_VERSION) {
-            return {
-                hasUpdate: true,
-                version: latest,
-                changelog: response.data.changelog,
-                downloadUrl: response.data.download_url
-            };
+    autoUpdater.on('checking-for-update', () => {
+        console.log('Checking for updates...');
+    });
+
+    autoUpdater.on('update-available', (info) => {
+        console.log('Update available:', info.version);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-available', {
+                version: info.version,
+                releaseDate: info.releaseDate
+            });
         }
-    } catch (e) {
-        console.error('Update check failed:', e);
-    }
-    return { hasUpdate: false };
+    });
+
+    autoUpdater.on('update-not-available', () => {
+        console.log('No updates available');
+    });
+
+    autoUpdater.on('download-progress', (progress) => {
+        console.log(`Download progress: ${progress.percent.toFixed(1)}%`);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-download-progress', {
+                percent: progress.percent,
+                bytesPerSecond: progress.bytesPerSecond,
+                transferred: progress.transferred,
+                total: progress.total
+            });
+        }
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+        console.log('Update downloaded:', info.version);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-downloaded', {
+                version: info.version
+            });
+        }
+    });
+
+    autoUpdater.on('error', (err) => {
+        console.error('Auto-updater error:', err);
+    });
+
+    // Check for updates
+    autoUpdater.checkForUpdates().catch(err => {
+        console.error('Update check failed:', err);
+    });
 }
 
 // ==========================================
@@ -949,7 +987,31 @@ ipcMain.handle('open-folder', (_, folderPath: string) => {
 ipcMain.handle('get-version', () => APP_VERSION);
 
 ipcMain.handle('check-update', async () => {
-    return await checkForUpdates();
+    try {
+        const result = await autoUpdater.checkForUpdates();
+        return { checking: true };
+    } catch (err) {
+        console.error('Update check failed:', err);
+        return { error: true };
+    }
+});
+
+ipcMain.handle('download-update', async () => {
+    try {
+        await autoUpdater.downloadUpdate();
+        return { downloading: true };
+    } catch (err) {
+        console.error('Download failed:', err);
+        return { error: true };
+    }
+});
+
+ipcMain.handle('install-update', () => {
+    autoUpdater.quitAndInstall(false, true);
+});
+
+ipcMain.handle('open-external', async (_, url: string) => {
+    await shell.openExternal(url);
 });
 
 ipcMain.handle('download-clip', async (_, clipUrl: string) => {

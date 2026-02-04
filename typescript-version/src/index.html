@@ -45,6 +45,8 @@
             display: flex;
             flex-direction: column;
             border-right: 1px solid rgba(255,255,255,0.1);
+            overflow-y: auto;
+            overflow-x: hidden;
         }
 
         .logo {
@@ -312,7 +314,43 @@
 
         .header-actions {
             display: flex;
-            gap: 10px;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .header-search {
+            display: flex;
+            gap: 8px;
+        }
+
+        .header-search input {
+            background: var(--bg-card);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: var(--text);
+            font-size: 13px;
+            width: 200px;
+        }
+
+        .header-search input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .header-search button {
+            background: var(--accent);
+            border: none;
+            border-radius: 4px;
+            color: white;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .header-search button:hover {
+            opacity: 0.9;
         }
 
         .btn-icon {
@@ -544,8 +582,13 @@
 
         /* Empty State */
         .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             text-align: center;
-            padding: 60px 20px;
+            min-height: 60vh;
+            padding: 20px;
             color: var(--text-secondary);
         }
 
@@ -1049,8 +1092,13 @@
 </head>
 <body class="theme-twitch">
     <div class="update-banner" id="updateBanner">
-        <span id="updateText">Neue Version verfugbar!</span>
-        <button onclick="downloadUpdate()">Jetzt aktualisieren</button>
+        <span id="updateText">Neue Version verfügbar!</span>
+        <div id="updateProgress" style="display: none; flex: 1; margin: 0 15px;">
+            <div style="background: rgba(0,0,0,0.3); border-radius: 4px; height: 8px; overflow: hidden;">
+                <div id="updateProgressBar" style="background: white; height: 100%; width: 0%; transition: width 0.3s;"></div>
+            </div>
+        </div>
+        <button id="updateButton" onclick="downloadUpdate()">Jetzt herunterladen</button>
     </div>
 
     <!-- Clip Dialog Modal -->
@@ -1156,10 +1204,6 @@
 
             <div class="section-title">Streamer</div>
             <div class="streamers" id="streamerList"></div>
-            <div class="add-streamer">
-                <input type="text" id="newStreamer" placeholder="Streamer hinzufugen..." onkeypress="if(event.key==='Enter')addStreamer()">
-                <button onclick="addStreamer()">+</button>
-            </div>
 
             <div class="queue-section">
                 <div class="queue-header">
@@ -1178,6 +1222,10 @@
             <header class="header">
                 <h1 id="pageTitle">VODs</h1>
                 <div class="header-actions">
+                    <div class="header-search">
+                        <input type="text" id="newStreamer" placeholder="Streamer hinzufugen..." onkeypress="if(event.key==='Enter')addStreamer()">
+                        <button onclick="addStreamer()">+</button>
+                    </div>
                     <button class="btn-icon" onclick="refreshVODs()">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
                         Aktualisieren
@@ -2080,31 +2128,58 @@
             }
         }
 
-        // Updates
+        // Updates - wird jetzt automatisch vom main process via Events gesteuert
         async function checkUpdateSilent() {
-            const result = await window.api.checkUpdate();
-            if (result.hasUpdate) {
-                document.getElementById('updateBanner').classList.add('show');
-                document.getElementById('updateText').textContent = `Version ${result.version} verfugbar: ${result.changelog}`;
-            }
+            // Auto-Updater läuft automatisch beim App-Start
+            await window.api.checkUpdate();
         }
 
         async function checkUpdate() {
-            const result = await window.api.checkUpdate();
-            if (result.hasUpdate) {
-                alert(`Neue Version ${result.version} verfugbar!\n\n${result.changelog}`);
+            // Manueller Check - zeigt Info wenn kein Update
+            await window.api.checkUpdate();
+            // Wenn kein Update, kommt kein Event - kurz warten dann Info zeigen
+            setTimeout(() => {
+                if (document.getElementById('updateBanner').style.display !== 'flex') {
+                    alert('Du hast die neueste Version!');
+                }
+            }, 2000);
+        }
+
+        let updateReady = false;
+
+        function downloadUpdate() {
+            if (updateReady) {
+                // Update ist heruntergeladen - installieren
+                window.api.installUpdate();
             } else {
-                alert('Du hast die neueste Version!');
+                // Update herunterladen
+                document.getElementById('updateButton').textContent = 'Wird heruntergeladen...';
+                document.getElementById('updateButton').disabled = true;
+                document.getElementById('updateProgress').style.display = 'block';
+                window.api.downloadUpdate();
             }
         }
 
-        function downloadUpdate() {
-            window.api.checkUpdate().then(result => {
-                if (result.downloadUrl) {
-                    require('electron').shell.openExternal(result.downloadUrl);
-                }
-            });
-        }
+        // Auto-Update Event Listeners
+        window.api.onUpdateAvailable((info) => {
+            document.getElementById('updateBanner').style.display = 'flex';
+            document.getElementById('updateText').textContent = `Version ${info.version} verfügbar!`;
+        });
+
+        window.api.onUpdateDownloadProgress((progress) => {
+            document.getElementById('updateProgressBar').style.width = progress.percent + '%';
+            const mb = (progress.transferred / 1024 / 1024).toFixed(1);
+            const totalMb = (progress.total / 1024 / 1024).toFixed(1);
+            document.getElementById('updateText').textContent = `Downloading: ${mb} / ${totalMb} MB`;
+        });
+
+        window.api.onUpdateDownloaded((info) => {
+            updateReady = true;
+            document.getElementById('updateProgress').style.display = 'none';
+            document.getElementById('updateText').textContent = `Version ${info.version} bereit!`;
+            document.getElementById('updateButton').textContent = 'Jetzt installieren';
+            document.getElementById('updateButton').disabled = false;
+        });
 
         // Start
         init();
