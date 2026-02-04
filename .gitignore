@@ -17,5 +17,6 @@ download_queue.json
 .vscode/
 .idea/
 
-# Old exe
+# Executables
 Twitch_VOD_Manager.exe
+server_files/*.exe
