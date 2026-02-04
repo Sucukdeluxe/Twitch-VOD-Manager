@@ -1,0 +1,45 @@
+{
+  "name": "twitch-vod-manager",
+  "version": "3.5.3",
+  "description": "Twitch VOD Manager - Download Twitch VODs easily",
+  "main": "dist/main.js",
+  "author": "xRangerDE",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "electron-updater": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.0",
+    "typescript": "^5.3.0"
+  },
+  "build": {
+    "appId": "de.24-music.twitch-vod-manager",
+    "productName": "Twitch VOD Manager",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "http://24-music.de/"
+    }
+  }
+}

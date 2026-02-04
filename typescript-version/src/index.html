@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:;">
+    <title>Twitch VOD Manager</title>
+    <style>
+        :root {
+            --bg-main: #0e0e10;
+            --bg-sidebar: #18181b;
+            --bg-card: #1f1f23;
+            --accent: #9146FF;
+            --accent-hover: #772ce8;
+            --text: #efeff1;
+            --text-secondary: #adadb8;
+            --success: #00c853;
+            --error: #ff4444;
+            --warning: #ffab00;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-main);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .app {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 300px;
+            background: var(--bg-sidebar);
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .logo {
+            padding: 20px;
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .logo svg {
+            width: 28px;
+            height: 28px;
+            fill: currentColor;
+        }
+
+        .nav {
+            padding: 15px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+
+        .nav-item:hover {
+            background: rgba(145, 71, 255, 0.15);
+            color: var(--text);
+        }
+
+        .nav-item.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .nav-item svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .section-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            padding: 15px 15px 8px;
+            letter-spacing: 0.5px;
+        }
+
+        .streamers {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 10px;
+        }
+
+        .streamer-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+            font-size: 14px;
+        }
+
+        .streamer-item:hover {
+            background: rgba(255,255,255,0.05);
+            color: var(--text);
+        }
+
+        .streamer-item.active {
+            background: rgba(145, 71, 255, 0.2);
+            color: var(--text);
+            border-left: 3px solid var(--accent);
+        }
+
+        .streamer-item .remove {
+            margin-left: auto;
+            opacity: 0;
+            color: var(--error);
+            cursor: pointer;
+        }
+
+        .streamer-item:hover .remove {
+            opacity: 1;
+        }
+
+        .add-streamer {
+            padding: 10px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .add-streamer input {
+            flex: 1;
+            background: var(--bg-card);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: var(--text);
+            font-size: 13px;
+        }
+
+        .add-streamer input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .add-streamer button {
+            background: var(--accent);
+            border: none;
+            border-radius: 4px;
+            color: white;
+            width: 36px;
+            cursor: pointer;
+            font-size: 18px;
+        }
+
+        /* Queue Section */
+        .queue-section {
+            border-top: 1px solid rgba(255,255,255,0.1);
+            padding: 15px;
+        }
+
+        .queue-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .queue-title {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .queue-count {
+            background: var(--accent);
+            color: white;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .queue-list {
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .queue-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            background: var(--bg-card);
+            border-radius: 4px;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .queue-item .status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+        }
+
+        .queue-item .status.pending { background: var(--warning); }
+        .queue-item .status.downloading { background: var(--accent); animation: pulse 1s infinite; }
+        .queue-item .status.completed { background: var(--success); }
+        .queue-item .status.error { background: var(--error); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .queue-item .title {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .queue-item .remove {
+            cursor: pointer;
+            color: var(--error);
+            opacity: 0.7;
+        }
+
+        .queue-item .remove:hover {
+            opacity: 1;
+        }
+
+        .queue-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .btn-start {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-start:hover {
+            background: #00a844;
+        }
+
+        .btn-start.downloading {
+            background: var(--error);
+        }
+
+        .btn-clear {
+            background: var(--bg-card);
+            color: var(--text-secondary);
+        }
+
+        .btn-clear:hover {
+            background: #2a2a2e;
+        }
+
+        /* Main Content */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            padding: 20px 30px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 22px;
+            font-weight: 600;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-icon {
+            background: var(--bg-card);
+            border: none;
+            border-radius: 4px;
+            color: var(--text);
+            padding: 8px 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+        }
+
+        .btn-icon:hover {
+            background: #2a2a2e;
+        }
+
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 25px 30px;
+        }
+
+        /* Tabs */
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* VOD Grid */
+        .vod-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .vod-card {
+            background: var(--bg-card);
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+
+        .vod-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+        }
+
+        .vod-thumbnail {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #333;
+            object-fit: cover;
+        }
+
+        .vod-info {
+            padding: 12px 15px;
+        }
+
+        .vod-title {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 6px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.4;
+        }
+
+        .vod-meta {
+            display: flex;
+            gap: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .vod-actions {
+            padding: 10px 15px 15px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .vod-btn {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .vod-btn.primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .vod-btn.primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .vod-btn.secondary {
+            background: rgba(255,255,255,0.1);
+            color: var(--text);
+        }
+
+        .vod-btn.secondary:hover {
+            background: rgba(255,255,255,0.15);
+        }
+
+        /* Settings */
+        .settings-card {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .settings-card h3 {
+            font-size: 16px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            background: var(--bg-main);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 4px;
+            padding: 10px 12px;
+            color: var(--text);
+            font-size: 14px;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .form-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .form-row input {
+            flex: 1;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--text);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 4px;
+            padding: 10px 20px;
+            cursor: pointer;
+        }
+
+        /* Clips */
+        .clip-input {
+            max-width: 600px;
+            margin: 0 auto;
+            text-align: center;
+            padding: 40px 20px;
+        }
+
+        .clip-input h2 {
+            margin-bottom: 20px;
+        }
+
+        .clip-input input {
+            width: 100%;
+            background: var(--bg-card);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 4px;
+            padding: 12px 15px;
+            color: var(--text);
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+
+        .clip-status {
+            margin-top: 15px;
+            font-size: 14px;
+        }
+
+        .clip-status.success { color: var(--success); }
+        .clip-status.error { color: var(--error); }
+        .clip-status.loading { color: var(--warning); }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 8px;
+            color: var(--text);
+        }
+
+        /* Status Bar */
+        .status-bar {
+            padding: 10px 30px;
+            background: var(--bg-sidebar);
+            border-top: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+        }
+
+        .status-dot.connected { background: var(--success); }
+        .status-dot.error { background: var(--error); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.15);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255,255,255,0.25);
+        }
+
+        /* Update Banner */
+        .update-banner {
+            background: linear-gradient(90deg, var(--accent), #5a2d82);
+            padding: 10px 20px;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            font-size: 13px;
+        }
+
+        .update-banner.show {
+            display: flex;
+        }
+
+        .update-banner button {
+            background: white;
+            color: var(--accent);
+            border: none;
+            border-radius: 4px;
+            padding: 6px 15px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        /* Theme variations */
+        body.theme-discord {
+            --bg-main: #36393f;
+            --bg-sidebar: #202225;
+            --bg-card: #2f3136;
+            --accent: #5865F2;
+            --accent-hover: #4752C4;
+        }
+
+        body.theme-youtube {
+            --bg-main: #0f0f0f;
+            --bg-sidebar: #0f0f0f;
+            --bg-card: #272727;
+            --accent: #FF0000;
+            --accent-hover: #cc0000;
+        }
+
+        body.theme-apple {
+            --bg-main: #1c1c1e;
+            --bg-sidebar: #2c2c2e;
+            --bg-card: #3a3a3c;
+            --accent: #0A84FF;
+            --accent-hover: #0071e3;
+        }
+    </style>
+</head>
+<body class="theme-twitch">
+    <div class="update-banner" id="updateBanner">
+        <span id="updateText">Neue Version verfügbar!</span>
+        <button onclick="downloadUpdate()">Jetzt aktualisieren</button>
+    </div>
+
+    <div class="app">
+        <aside class="sidebar">
+            <div class="logo">
+                <svg viewBox="0 0 24 24"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>
+                Twitch VOD Manager
+            </div>
+
+            <nav class="nav">
+                <div class="nav-item active" data-tab="vods" onclick="showTab('vods')">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM9 8l7 4-7 4V8z"/></svg>
+                    Twitch VODs
+                </div>
+                <div class="nav-item" data-tab="clips" onclick="showTab('clips')">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+                    Twitch Clips
+                </div>
+                <div class="nav-item" data-tab="settings" onclick="showTab('settings')">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                    Einstellungen
+                </div>
+            </nav>
+
+            <div class="section-title">Streamer</div>
+            <div class="streamers" id="streamerList"></div>
+            <div class="add-streamer">
+                <input type="text" id="newStreamer" placeholder="Streamer hinzufügen..." onkeypress="if(event.key==='Enter')addStreamer()">
+                <button onclick="addStreamer()">+</button>
+            </div>
+
+            <div class="queue-section">
+                <div class="queue-header">
+                    <span class="queue-title">Warteschlange</span>
+                    <span class="queue-count" id="queueCount">0</span>
+                </div>
+                <div class="queue-list" id="queueList"></div>
+                <div class="queue-actions">
+                    <button class="btn btn-start" id="btnStart" onclick="toggleDownload()">▶ Start</button>
+                    <button class="btn btn-clear" onclick="clearCompleted()">🗑 Leeren</button>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main">
+            <header class="header">
+                <h1 id="pageTitle">VODs</h1>
+                <div class="header-actions">
+                    <button class="btn-icon" onclick="refreshVODs()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                        Aktualisieren
+                    </button>
+                </div>
+            </header>
+
+            <div class="content">
+                <!-- VODs Tab -->
+                <div class="tab-content active" id="vodsTab">
+                    <div class="vod-grid" id="vodGrid">
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-4 5-4v8zm2-8l5 4-5 4V9z"/></svg>
+                            <h3>Keine VODs</h3>
+                            <p>Wähle einen Streamer aus der Liste oder füge einen neuen hinzu.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Clips Tab -->
+                <div class="tab-content" id="clipsTab">
+                    <div class="clip-input">
+                        <h2>Twitch Clip Downloader</h2>
+                        <input type="text" id="clipUrl" placeholder="https://clips.twitch.tv/... oder https://www.twitch.tv/.../clip/...">
+                        <button class="btn-primary" onclick="downloadClip()" id="btnClip">⬇ Clip herunterladen</button>
+                        <div class="clip-status" id="clipStatus"></div>
+                    </div>
+
+                    <div class="settings-card" style="max-width: 600px; margin: 20px auto;">
+                        <h3>ℹ️ Info</h3>
+                        <p style="color: var(--text-secondary); line-height: 1.6;">
+                            Unterstützte Formate:<br>
+                            • https://clips.twitch.tv/ClipName<br>
+                            • https://www.twitch.tv/streamer/clip/ClipName<br><br>
+                            Clips werden im Download-Ordner unter "Clips/StreamerName/" gespeichert.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Settings Tab -->
+                <div class="tab-content" id="settingsTab">
+                    <div class="settings-card">
+                        <h3>🎨 Design</h3>
+                        <div class="form-group">
+                            <label>Theme</label>
+                            <select id="themeSelect" onchange="changeTheme(this.value)">
+                                <option value="twitch">Twitch</option>
+                                <option value="discord">Discord</option>
+                                <option value="youtube">YouTube</option>
+                                <option value="apple">Apple</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>🔑 Twitch API</h3>
+                        <div class="form-group">
+                            <label>Client ID</label>
+                            <input type="text" id="clientId" placeholder="Twitch Client ID">
+                        </div>
+                        <div class="form-group">
+                            <label>Client Secret</label>
+                            <input type="password" id="clientSecret" placeholder="Twitch Client Secret">
+                        </div>
+                        <button class="btn-primary" onclick="saveSettings()">Speichern & Verbinden</button>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>📁 Download-Einstellungen</h3>
+                        <div class="form-group">
+                            <label>Speicherort</label>
+                            <div class="form-row">
+                                <input type="text" id="downloadPath" readonly>
+                                <button class="btn-secondary" onclick="selectFolder()">📂</button>
+                                <button class="btn-secondary" onclick="openFolder()">↗</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Download-Modus</label>
+                            <select id="downloadMode">
+                                <option value="full">Ganzes VOD</option>
+                                <option value="parts">In Teile splitten</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Teil-Länge (Minuten)</label>
+                            <input type="number" id="partMinutes" value="120" min="10" max="480">
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>🔄 Updates</h3>
+                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v3.5.3</p>
+                        <button class="btn-secondary" onclick="checkUpdate()">Nach Updates suchen</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="status-bar">
+                <div class="status-indicator">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Nicht verbunden</span>
+                </div>
+                <span id="versionText">v3.5.3</span>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // State
+        let config = {};
+        let currentStreamer = null;
+        let isConnected = false;
+        let downloading = false;
+        let queue = [];
+
+        // Init
+        async function init() {
+            config = await window.api.getConfig();
+            queue = await window.api.getQueue();
+            const version = await window.api.getVersion();
+
+            document.getElementById('versionText').textContent = `v${version}`;
+            document.getElementById('versionInfo').textContent = `Version: v${version}`;
+            document.getElementById('clientId').value = config.client_id || '';
+            document.getElementById('clientSecret').value = config.client_secret || '';
+            document.getElementById('downloadPath').value = config.download_path || '';
+            document.getElementById('themeSelect').value = config.theme || 'twitch';
+            document.getElementById('downloadMode').value = config.download_mode || 'full';
+            document.getElementById('partMinutes').value = config.part_minutes || 120;
+
+            changeTheme(config.theme || 'twitch');
+            renderStreamers();
+            renderQueue();
+
+            if (config.client_id && config.client_secret) {
+                await connect();
+            }
+
+            // Event listeners
+            window.api.onQueueUpdated((q) => {
+                queue = q;
+                renderQueue();
+            });
+
+            window.api.onDownloadProgress((progress) => {
+                // Update progress in queue
+                const item = queue.find(i => i.id === progress.id);
+                if (item) {
+                    item.progress = progress.progress;
+                    renderQueue();
+                }
+            });
+
+            window.api.onDownloadStarted(() => {
+                downloading = true;
+                document.getElementById('btnStart').textContent = '⏹ Stoppen';
+                document.getElementById('btnStart').classList.add('downloading');
+            });
+
+            window.api.onDownloadFinished(() => {
+                downloading = false;
+                document.getElementById('btnStart').textContent = '▶ Start';
+                document.getElementById('btnStart').classList.remove('downloading');
+            });
+
+            // Check for updates
+            setTimeout(checkUpdateSilent, 3000);
+        }
+
+        async function connect() {
+            updateStatus('Verbinde...', false);
+            const success = await window.api.login();
+            isConnected = success;
+            updateStatus(success ? 'Verbunden' : 'Verbindung fehlgeschlagen', success);
+        }
+
+        function updateStatus(text, connected) {
+            document.getElementById('statusText').textContent = text;
+            const dot = document.getElementById('statusDot');
+            dot.classList.remove('connected', 'error');
+            dot.classList.add(connected ? 'connected' : 'error');
+        }
+
+        // Navigation
+        function showTab(tab) {
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+            document.querySelector(`.nav-item[data-tab="${tab}"]`).classList.add('active');
+            document.getElementById(tab + 'Tab').classList.add('active');
+
+            const titles = { vods: 'VODs', clips: 'Clips', settings: 'Einstellungen' };
+            document.getElementById('pageTitle').textContent = currentStreamer || titles[tab];
+        }
+
+        // Streamers
+        function renderStreamers() {
+            const list = document.getElementById('streamerList');
+            list.innerHTML = '';
+
+            (config.streamers || []).forEach(streamer => {
+                const item = document.createElement('div');
+                item.className = 'streamer-item' + (currentStreamer === streamer ? ' active' : '');
+                item.innerHTML = `
+                    <span>${streamer}</span>
+                    <span class="remove" onclick="event.stopPropagation(); removeStreamer('${streamer}')">✕</span>
+                `;
+                item.onclick = () => selectStreamer(streamer);
+                list.appendChild(item);
+            });
+        }
+
+        async function addStreamer() {
+            const input = document.getElementById('newStreamer');
+            const name = input.value.trim().toLowerCase();
+            if (!name || (config.streamers || []).includes(name)) return;
+
+            config.streamers = [...(config.streamers || []), name];
+            config = await window.api.saveConfig({ streamers: config.streamers });
+            input.value = '';
+            renderStreamers();
+            selectStreamer(name);
+        }
+
+        async function removeStreamer(name) {
+            config.streamers = (config.streamers || []).filter(s => s !== name);
+            config = await window.api.saveConfig({ streamers: config.streamers });
+            renderStreamers();
+            if (currentStreamer === name) {
+                currentStreamer = null;
+                document.getElementById('vodGrid').innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-4 5-4v8zm2-8l5 4-5 4V9z"/></svg>
+                        <h3>Keine VODs</h3>
+                        <p>Wähle einen Streamer aus der Liste.</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function selectStreamer(name) {
+            currentStreamer = name;
+            renderStreamers();
+            document.getElementById('pageTitle').textContent = name;
+
+            if (!isConnected) {
+                updateStatus('Nicht verbunden', false);
+                return;
+            }
+
+            document.getElementById('vodGrid').innerHTML = '<div class="empty-state"><p>Lade VODs...</p></div>';
+
+            const userId = await window.api.getUserId(name);
+            if (!userId) {
+                document.getElementById('vodGrid').innerHTML = '<div class="empty-state"><h3>Streamer nicht gefunden</h3></div>';
+                return;
+            }
+
+            const vods = await window.api.getVODs(userId);
+            renderVODs(vods, name);
+        }
+
+        function renderVODs(vods, streamer) {
+            const grid = document.getElementById('vodGrid');
+
+            if (!vods || vods.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><h3>Keine VODs gefunden</h3><p>Dieser Streamer hat keine VODs.</p></div>';
+                return;
+            }
+
+            grid.innerHTML = vods.map(vod => {
+                const thumb = vod.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180');
+                const date = new Date(vod.created_at).toLocaleDateString('de-DE');
+                return `
+                    <div class="vod-card">
+                        <img class="vod-thumbnail" src="${thumb}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 320 180%22><rect fill=%22%23333%22 width=%22320%22 height=%22180%22/></svg>'">
+                        <div class="vod-info">
+                            <div class="vod-title">${vod.title}</div>
+                            <div class="vod-meta">
+                                <span>${date}</span>
+                                <span>${vod.duration}</span>
+                                <span>${vod.view_count.toLocaleString()} Views</span>
+                            </div>
+                        </div>
+                        <div class="vod-actions">
+                            <button class="vod-btn primary" onclick="addToQueue('${vod.url}', '${vod.title.replace(/'/g, "\\'")}', '${vod.created_at}', '${streamer}', '${vod.duration}')">+ Warteschlange</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function refreshVODs() {
+            if (currentStreamer) {
+                await selectStreamer(currentStreamer);
+            }
+        }
+
+        // Queue
+        async function addToQueue(url, title, date, streamer, duration) {
+            queue = await window.api.addToQueue({ url, title, date, streamer, duration_str: duration });
+            renderQueue();
+        }
+
+        async function removeFromQueue(id) {
+            queue = await window.api.removeFromQueue(id);
+            renderQueue();
+        }
+
+        async function clearCompleted() {
+            queue = await window.api.clearCompleted();
+            renderQueue();
+        }
+
+        function renderQueue() {
+            const list = document.getElementById('queueList');
+            document.getElementById('queueCount').textContent = queue.length;
+
+            if (queue.length === 0) {
+                list.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; text-align: center; padding: 15px;">Keine Downloads in der Warteschlange</div>';
+                return;
+            }
+
+            list.innerHTML = queue.map(item => `
+                <div class="queue-item">
+                    <div class="status ${item.status}"></div>
+                    <div class="title" title="${item.title}">${item.title}</div>
+                    <span class="remove" onclick="removeFromQueue('${item.id}')">✕</span>
+                </div>
+            `).join('');
+        }
+
+        async function toggleDownload() {
+            if (downloading) {
+                await window.api.cancelDownload();
+            } else {
+                await window.api.startDownload();
+            }
+        }
+
+        // Settings
+        async function saveSettings() {
+            const clientId = document.getElementById('clientId').value;
+            const clientSecret = document.getElementById('clientSecret').value;
+            const downloadPath = document.getElementById('downloadPath').value;
+            const downloadMode = document.getElementById('downloadMode').value;
+            const partMinutes = parseInt(document.getElementById('partMinutes').value);
+
+            config = await window.api.saveConfig({
+                client_id: clientId,
+                client_secret: clientSecret,
+                download_path: downloadPath,
+                download_mode: downloadMode,
+                part_minutes: partMinutes
+            });
+
+            await connect();
+        }
+
+        async function selectFolder() {
+            const folder = await window.api.selectFolder();
+            if (folder) {
+                document.getElementById('downloadPath').value = folder;
+                config = await window.api.saveConfig({ download_path: folder });
+            }
+        }
+
+        function openFolder() {
+            window.api.openFolder(config.download_path);
+        }
+
+        function changeTheme(theme) {
+            document.body.className = `theme-${theme}`;
+            window.api.saveConfig({ theme });
+        }
+
+        // Clips
+        async function downloadClip() {
+            const url = document.getElementById('clipUrl').value.trim();
+            const status = document.getElementById('clipStatus');
+            const btn = document.getElementById('btnClip');
+
+            if (!url) {
+                status.textContent = 'Bitte URL eingeben';
+                status.className = 'clip-status error';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Lade...';
+            status.textContent = 'Download läuft...';
+            status.className = 'clip-status loading';
+
+            const result = await window.api.downloadClip(url);
+
+            btn.disabled = false;
+            btn.textContent = '⬇ Clip herunterladen';
+
+            if (result.success) {
+                status.textContent = 'Download erfolgreich!';
+                status.className = 'clip-status success';
+            } else {
+                status.textContent = 'Fehler: ' + result.error;
+                status.className = 'clip-status error';
+            }
+        }
+
+        // Updates
+        async function checkUpdateSilent() {
+            const result = await window.api.checkUpdate();
+            if (result.hasUpdate) {
+                document.getElementById('updateBanner').classList.add('show');
+                document.getElementById('updateText').textContent = `Version ${result.version} verfügbar: ${result.changelog}`;
+            }
+        }
+
+        async function checkUpdate() {
+            const result = await window.api.checkUpdate();
+            if (result.hasUpdate) {
+                alert(`Neue Version ${result.version} verfügbar!\n\n${result.changelog}`);
+            } else {
+                alert('Du hast die neueste Version!');
+            }
+        }
+
+        function downloadUpdate() {
+            window.api.checkUpdate().then(result => {
+                if (result.downloadUrl) {
+                    require('electron').shell.openExternal(result.downloadUrl);
+                }
+            });
+        }
+
+        // Start
+        init();
+    </script>
+</body>
+</html>
