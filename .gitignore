@@ -1,0 +1,21 @@
+# Build artifacts
+build/
+dist/
+installer_output/
+__pycache__/
+*.pyc
+
+# Config with credentials
+config.json
+
+# Temp files
+*.log
+nul
+download_queue.json
+
+# IDE
+.vscode/
+.idea/
+
+# Old exe
+Twitch_VOD_Manager.exe
