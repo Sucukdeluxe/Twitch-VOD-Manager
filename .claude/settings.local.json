@@ -61,7 +61,12 @@
       "Bash(\"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" auth status)",
       "Bash(\"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" release create:*)",
       "Bash(npm start)",
-      "Bash(\"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" release create v3.6.1 \"release/Twitch VOD Manager Setup 3.6.1.exe\" --title \"Twitch VOD Manager v3.6.1\" --notes \"## What''s New in v3.6.1\n\n### New Feature: Clip erstellen\n- **Time-Range Downloads** - Download specific portions of VODs\n  - Click ''Clip'' button on any VOD\n  - Use sliders or time inputs to select start/end times\n  - Set custom part numbers for continuations\n  - Downloads only the selected time range\n\n### All Features \\(v3.6.x\\)\n- VOD Downloads \\(full or part-based\\)\n- Clip Downloads from Twitch\n- Video Cutter for local files \\(FFmpeg\\)\n- Video Merge \\(combine multiple videos\\)\n- Time-Range VOD Downloads \\(new\\)\n- Multiple Themes \\(Twitch/Discord/YouTube/Apple\\)\n- Auto-Update Check\n\n### Technical\n- Uses streamlink --hls-start-offset and --hls-duration for precise downloads\n- CustomClip data structure for queue items\")"
+      "Bash(\"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" release create v3.6.1 \"release/Twitch VOD Manager Setup 3.6.1.exe\" --title \"Twitch VOD Manager v3.6.1\" --notes \"## What''s New in v3.6.1\n\n### New Feature: Clip erstellen\n- **Time-Range Downloads** - Download specific portions of VODs\n  - Click ''Clip'' button on any VOD\n  - Use sliders or time inputs to select start/end times\n  - Set custom part numbers for continuations\n  - Downloads only the selected time range\n\n### All Features \\(v3.6.x\\)\n- VOD Downloads \\(full or part-based\\)\n- Clip Downloads from Twitch\n- Video Cutter for local files \\(FFmpeg\\)\n- Video Merge \\(combine multiple videos\\)\n- Time-Range VOD Downloads \\(new\\)\n- Multiple Themes \\(Twitch/Discord/YouTube/Apple\\)\n- Auto-Update Check\n\n### Technical\n- Uses streamlink --hls-start-offset and --hls-duration for precise downloads\n- CustomClip data structure for queue items\")",
+      "Bash(explorer \"C:\\\\Users\\\\ploet\\\\Desktop\\\\Twitch Downloader\\\\typescript-version\\\\release\")",
+      "Bash(wmic:*)",
+      "Bash(reg query \"HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\" /s)",
+      "Bash(dir /b /ad \"C:\\\\Users\\\\ploet\\\\AppData\\\\Local\")",
+      "Bash(start \"\" \"C:\\\\Program Files \\(x86\\)\\\\Twitch VOD Manager\\\\unins000.exe\")"
     ]
   }
 }
