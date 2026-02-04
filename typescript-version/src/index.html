@@ -674,6 +674,22 @@
             font-weight: 600;
         }
 
+        .update-banner button:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        #updateProgressBar.downloading {
+            width: 30% !important;
+            animation: indeterminate 1.5s ease-in-out infinite;
+        }
+
+        @keyframes indeterminate {
+            0% { margin-left: 0; width: 30%; }
+            50% { margin-left: 35%; width: 30%; }
+            100% { margin-left: 70%; width: 30%; }
+        }
+
         /* Video Cutter Styles */
         .cutter-container {
             max-width: 900px;
@@ -2156,6 +2172,8 @@
                 document.getElementById('updateButton').textContent = 'Wird heruntergeladen...';
                 document.getElementById('updateButton').disabled = true;
                 document.getElementById('updateProgress').style.display = 'block';
+                // Start animated progress bar
+                document.getElementById('updateProgressBar').classList.add('downloading');
                 window.api.downloadUpdate();
             }
         }
@@ -2164,19 +2182,24 @@
         window.api.onUpdateAvailable((info) => {
             document.getElementById('updateBanner').style.display = 'flex';
             document.getElementById('updateText').textContent = `Version ${info.version} verfügbar!`;
+            document.getElementById('updateButton').textContent = 'Jetzt herunterladen';
         });
 
         window.api.onUpdateDownloadProgress((progress) => {
-            document.getElementById('updateProgressBar').style.width = progress.percent + '%';
+            const bar = document.getElementById('updateProgressBar');
+            bar.classList.remove('downloading');
+            bar.style.width = progress.percent + '%';
             const mb = (progress.transferred / 1024 / 1024).toFixed(1);
             const totalMb = (progress.total / 1024 / 1024).toFixed(1);
-            document.getElementById('updateText').textContent = `Downloading: ${mb} / ${totalMb} MB`;
+            document.getElementById('updateText').textContent = `Download: ${mb} / ${totalMb} MB (${progress.percent.toFixed(0)}%)`;
         });
 
         window.api.onUpdateDownloaded((info) => {
             updateReady = true;
-            document.getElementById('updateProgress').style.display = 'none';
-            document.getElementById('updateText').textContent = `Version ${info.version} bereit!`;
+            const bar = document.getElementById('updateProgressBar');
+            bar.classList.remove('downloading');
+            bar.style.width = '100%';
+            document.getElementById('updateText').textContent = `Version ${info.version} bereit zur Installation!`;
             document.getElementById('updateButton').textContent = 'Jetzt installieren';
             document.getElementById('updateButton').disabled = false;
         });
