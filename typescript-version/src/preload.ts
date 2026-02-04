@@ -10,6 +10,10 @@ interface QueueItem {
     duration_str: string;
     status: 'pending' | 'downloading' | 'completed' | 'error';
     progress: number;
+    currentPart?: number;
+    totalParts?: number;
+    speed?: string;
+    eta?: string;
 }
 
 interface DownloadProgress {
@@ -18,6 +22,17 @@ interface DownloadProgress {
     speed: string;
     eta: string;
     status: string;
+    currentPart?: number;
+    totalParts?: number;
+    downloadedBytes?: number;
+    totalBytes?: number;
+}
+
+interface VideoInfo {
+    duration: number;
+    width: number;
+    height: number;
+    fps: number;
 }
 
 // Expose protected methods to renderer
@@ -47,7 +62,20 @@ contextBridge.exposeInMainWorld('api', {
 
     // Files
     selectFolder: () => ipcRenderer.invoke('select-folder'),
+    selectVideoFile: () => ipcRenderer.invoke('select-video-file'),
+    selectMultipleVideos: () => ipcRenderer.invoke('select-multiple-videos'),
+    saveVideoDialog: (defaultName: string) => ipcRenderer.invoke('save-video-dialog', defaultName),
     openFolder: (path: string) => ipcRenderer.invoke('open-folder', path),
+
+    // Video Cutter
+    getVideoInfo: (filePath: string): Promise<VideoInfo | null> => ipcRenderer.invoke('get-video-info', filePath),
+    extractFrame: (filePath: string, timeSeconds: number): Promise<string | null> => ipcRenderer.invoke('extract-frame', filePath, timeSeconds),
+    cutVideo: (inputFile: string, startTime: number, endTime: number): Promise<{ success: boolean; outputFile: string | null }> =>
+        ipcRenderer.invoke('cut-video', inputFile, startTime, endTime),
+
+    // Merge Videos
+    mergeVideos: (inputFiles: string[], outputFile: string): Promise<{ success: boolean; outputFile: string | null }> =>
+        ipcRenderer.invoke('merge-videos', inputFiles, outputFile),
 
     // App
     getVersion: () => ipcRenderer.invoke('get-version'),
@@ -65,5 +93,11 @@ contextBridge.exposeInMainWorld('api', {
     },
     onDownloadFinished: (callback: () => void) => {
         ipcRenderer.on('download-finished', () => callback());
+    },
+    onCutProgress: (callback: (percent: number) => void) => {
+        ipcRenderer.on('cut-progress', (_, percent) => callback(percent));
+    },
+    onMergeProgress: (callback: (percent: number) => void) => {
+        ipcRenderer.on('merge-progress', (_, percent) => callback(percent));
     }
 });

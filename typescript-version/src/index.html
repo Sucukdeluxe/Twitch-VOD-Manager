@@ -496,6 +496,11 @@
             background: var(--accent-hover);
         }
 
+        .btn-primary:disabled {
+            background: var(--text-secondary);
+            cursor: not-allowed;
+        }
+
         .btn-secondary {
             background: var(--bg-card);
             color: var(--text);
@@ -626,6 +631,250 @@
             font-weight: 600;
         }
 
+        /* Video Cutter Styles */
+        .cutter-container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .video-preview {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            aspect-ratio: 16/9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .video-preview img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .video-preview .placeholder {
+            color: var(--text-secondary);
+            text-align: center;
+        }
+
+        .timeline-container {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .timeline {
+            position: relative;
+            height: 60px;
+            background: var(--bg-main);
+            border-radius: 4px;
+            margin: 15px 0;
+            cursor: pointer;
+        }
+
+        .timeline-selection {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            background: rgba(145, 71, 255, 0.3);
+            border-left: 3px solid var(--accent);
+            border-right: 3px solid var(--accent);
+        }
+
+        .timeline-handle {
+            position: absolute;
+            top: -5px;
+            width: 12px;
+            height: 70px;
+            background: var(--accent);
+            border-radius: 3px;
+            cursor: ew-resize;
+        }
+
+        .timeline-handle.start { left: 0; transform: translateX(-50%); }
+        .timeline-handle.end { right: 0; transform: translateX(50%); }
+
+        .timeline-current {
+            position: absolute;
+            top: 0;
+            width: 2px;
+            height: 100%;
+            background: var(--success);
+            pointer-events: none;
+        }
+
+        .time-inputs {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
+        .time-input-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .time-input-group label {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .time-input-group input {
+            width: 100px;
+            background: var(--bg-main);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 4px;
+            padding: 8px 10px;
+            color: var(--text);
+            text-align: center;
+            font-family: monospace;
+        }
+
+        .cutter-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .cutter-info {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-around;
+            text-align: center;
+        }
+
+        .cutter-info-item {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .cutter-info-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .cutter-info-value {
+            font-size: 16px;
+            font-weight: 600;
+            font-family: monospace;
+        }
+
+        /* Merge Styles */
+        .merge-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .file-list {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            min-height: 200px;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px 15px;
+            background: var(--bg-main);
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .file-item .file-order {
+            width: 30px;
+            height: 30px;
+            background: var(--accent);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .file-item .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-item .file-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .file-item .file-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 5px;
+            font-size: 16px;
+        }
+
+        .file-item .file-btn:hover {
+            color: var(--text);
+        }
+
+        .file-item .file-btn.remove:hover {
+            color: var(--error);
+        }
+
+        .merge-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .progress-container.show {
+            display: block;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--bg-main);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: var(--accent);
+            transition: width 0.3s;
+        }
+
+        .progress-text {
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
         /* Theme variations */
         body.theme-discord {
             --bg-main: #36393f;
@@ -654,7 +903,7 @@
 </head>
 <body class="theme-twitch">
     <div class="update-banner" id="updateBanner">
-        <span id="updateText">Neue Version verfügbar!</span>
+        <span id="updateText">Neue Version verfugbar!</span>
         <button onclick="downloadUpdate()">Jetzt aktualisieren</button>
     </div>
 
@@ -674,6 +923,14 @@
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
                     Twitch Clips
                 </div>
+                <div class="nav-item" data-tab="cutter" onclick="showTab('cutter')">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm0 12c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm6-7.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zM19 3l-6 6 2 2 7-7V3h-3z"/></svg>
+                    Video Cutter
+                </div>
+                <div class="nav-item" data-tab="merge" onclick="showTab('merge')">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z"/></svg>
+                    Videos Zusammenfugen
+                </div>
                 <div class="nav-item" data-tab="settings" onclick="showTab('settings')">
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
                     Einstellungen
@@ -683,7 +940,7 @@
             <div class="section-title">Streamer</div>
             <div class="streamers" id="streamerList"></div>
             <div class="add-streamer">
-                <input type="text" id="newStreamer" placeholder="Streamer hinzufügen..." onkeypress="if(event.key==='Enter')addStreamer()">
+                <input type="text" id="newStreamer" placeholder="Streamer hinzufugen..." onkeypress="if(event.key==='Enter')addStreamer()">
                 <button onclick="addStreamer()">+</button>
             </div>
 
@@ -694,8 +951,8 @@
                 </div>
                 <div class="queue-list" id="queueList"></div>
                 <div class="queue-actions">
-                    <button class="btn btn-start" id="btnStart" onclick="toggleDownload()">▶ Start</button>
-                    <button class="btn btn-clear" onclick="clearCompleted()">🗑 Leeren</button>
+                    <button class="btn btn-start" id="btnStart" onclick="toggleDownload()">Start</button>
+                    <button class="btn btn-clear" onclick="clearCompleted()">Leeren</button>
                 </div>
             </div>
         </aside>
@@ -718,7 +975,7 @@
                         <div class="empty-state">
                             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-4 5-4v8zm2-8l5 4-5 4V9z"/></svg>
                             <h3>Keine VODs</h3>
-                            <p>Wähle einen Streamer aus der Liste oder füge einen neuen hinzu.</p>
+                            <p>Wahle einen Streamer aus der Liste oder fuge einen neuen hinzu.</p>
                         </div>
                     </div>
                 </div>
@@ -728,25 +985,125 @@
                     <div class="clip-input">
                         <h2>Twitch Clip Downloader</h2>
                         <input type="text" id="clipUrl" placeholder="https://clips.twitch.tv/... oder https://www.twitch.tv/.../clip/...">
-                        <button class="btn-primary" onclick="downloadClip()" id="btnClip">⬇ Clip herunterladen</button>
+                        <button class="btn-primary" onclick="downloadClip()" id="btnClip">Clip herunterladen</button>
                         <div class="clip-status" id="clipStatus"></div>
                     </div>
 
                     <div class="settings-card" style="max-width: 600px; margin: 20px auto;">
-                        <h3>ℹ️ Info</h3>
+                        <h3>Info</h3>
                         <p style="color: var(--text-secondary); line-height: 1.6;">
-                            Unterstützte Formate:<br>
-                            • https://clips.twitch.tv/ClipName<br>
-                            • https://www.twitch.tv/streamer/clip/ClipName<br><br>
+                            Unterstutzte Formate:<br>
+                            - https://clips.twitch.tv/ClipName<br>
+                            - https://www.twitch.tv/streamer/clip/ClipName<br><br>
                             Clips werden im Download-Ordner unter "Clips/StreamerName/" gespeichert.
                         </p>
+                    </div>
+                </div>
+
+                <!-- Video Cutter Tab -->
+                <div class="tab-content" id="cutterTab">
+                    <div class="cutter-container">
+                        <div class="settings-card">
+                            <h3>Video auswahlen</h3>
+                            <div class="form-row">
+                                <input type="text" id="cutterFilePath" readonly placeholder="Keine Datei ausgewahlt...">
+                                <button class="btn-secondary" onclick="selectCutterVideo()">Durchsuchen</button>
+                            </div>
+                        </div>
+
+                        <div class="video-preview" id="cutterPreview">
+                            <div class="placeholder">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor" style="opacity:0.3"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM9 8l7 4-7 4V8z"/></svg>
+                                <p style="margin-top:10px">Video auswahlen um Vorschau zu sehen</p>
+                            </div>
+                        </div>
+
+                        <div class="cutter-info" id="cutterInfo" style="display:none">
+                            <div class="cutter-info-item">
+                                <span class="cutter-info-label">Dauer</span>
+                                <span class="cutter-info-value" id="infoDuration">--:--:--</span>
+                            </div>
+                            <div class="cutter-info-item">
+                                <span class="cutter-info-label">Auflosung</span>
+                                <span class="cutter-info-value" id="infoResolution">----x----</span>
+                            </div>
+                            <div class="cutter-info-item">
+                                <span class="cutter-info-label">FPS</span>
+                                <span class="cutter-info-value" id="infoFps">--</span>
+                            </div>
+                            <div class="cutter-info-item">
+                                <span class="cutter-info-label">Auswahl</span>
+                                <span class="cutter-info-value" id="infoSelection">--:--:--</span>
+                            </div>
+                        </div>
+
+                        <div class="timeline-container" id="timelineContainer" style="display:none">
+                            <div class="timeline" id="timeline" onclick="seekTimeline(event)">
+                                <div class="timeline-selection" id="timelineSelection"></div>
+                                <div class="timeline-current" id="timelineCurrent"></div>
+                            </div>
+
+                            <div class="time-inputs">
+                                <div class="time-input-group">
+                                    <label>Start:</label>
+                                    <input type="text" id="startTime" value="00:00:00" onchange="updateTimeFromInput()">
+                                </div>
+                                <div class="time-input-group">
+                                    <label>Ende:</label>
+                                    <input type="text" id="endTime" value="00:00:00" onchange="updateTimeFromInput()">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="progress-container" id="cutProgress">
+                            <div class="progress-bar">
+                                <div class="progress-bar-fill" id="cutProgressBar"></div>
+                            </div>
+                            <div class="progress-text" id="cutProgressText">0%</div>
+                        </div>
+
+                        <div class="cutter-actions">
+                            <button class="btn-primary" id="btnCut" onclick="startCutting()" disabled>Schneiden</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Merge Tab -->
+                <div class="tab-content" id="mergeTab">
+                    <div class="merge-container">
+                        <div class="settings-card">
+                            <h3>Videos zusammenfugen</h3>
+                            <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                                Wahle mehrere Videos aus um sie zu einem Video zusammenzufugen.
+                                Die Reihenfolge kann per Drag & Drop geandert werden.
+                            </p>
+                            <button class="btn-secondary" onclick="addMergeFiles()">+ Videos hinzufugen</button>
+                        </div>
+
+                        <div class="file-list" id="mergeFileList">
+                            <div class="empty-state" style="padding: 40px 20px;">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" style="opacity:0.3"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                                <p style="margin-top:10px">Keine Videos ausgewahlt</p>
+                            </div>
+                        </div>
+
+                        <div class="progress-container" id="mergeProgress">
+                            <div class="progress-bar">
+                                <div class="progress-bar-fill" id="mergeProgressBar"></div>
+                            </div>
+                            <div class="progress-text" id="mergeProgressText">0%</div>
+                        </div>
+
+                        <div class="merge-actions">
+                            <button class="btn-primary" id="btnMerge" onclick="startMerging()" disabled>Zusammenfugen</button>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Settings Tab -->
                 <div class="tab-content" id="settingsTab">
                     <div class="settings-card">
-                        <h3>🎨 Design</h3>
+                        <h3>Design</h3>
                         <div class="form-group">
                             <label>Theme</label>
                             <select id="themeSelect" onchange="changeTheme(this.value)">
@@ -759,7 +1116,7 @@
                     </div>
 
                     <div class="settings-card">
-                        <h3>🔑 Twitch API</h3>
+                        <h3>Twitch API</h3>
                         <div class="form-group">
                             <label>Client ID</label>
                             <input type="text" id="clientId" placeholder="Twitch Client ID">
@@ -772,13 +1129,13 @@
                     </div>
 
                     <div class="settings-card">
-                        <h3>📁 Download-Einstellungen</h3>
+                        <h3>Download-Einstellungen</h3>
                         <div class="form-group">
                             <label>Speicherort</label>
                             <div class="form-row">
                                 <input type="text" id="downloadPath" readonly>
-                                <button class="btn-secondary" onclick="selectFolder()">📂</button>
-                                <button class="btn-secondary" onclick="openFolder()">↗</button>
+                                <button class="btn-secondary" onclick="selectFolder()">Ordner</button>
+                                <button class="btn-secondary" onclick="openFolder()">Offnen</button>
                             </div>
                         </div>
                         <div class="form-group">
@@ -789,14 +1146,14 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>Teil-Länge (Minuten)</label>
+                            <label>Teil-Lange (Minuten)</label>
                             <input type="number" id="partMinutes" value="120" min="10" max="480">
                         </div>
                     </div>
 
                     <div class="settings-card">
-                        <h3>🔄 Updates</h3>
-                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v3.5.3</p>
+                        <h3>Updates</h3>
+                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v3.6.0</p>
                         <button class="btn-secondary" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
                 </div>
@@ -807,7 +1164,7 @@
                     <div class="status-dot" id="statusDot"></div>
                     <span id="statusText">Nicht verbunden</span>
                 </div>
-                <span id="versionText">v3.5.3</span>
+                <span id="versionText">v3.6.0</span>
             </div>
         </main>
     </div>
@@ -819,6 +1176,17 @@
         let isConnected = false;
         let downloading = false;
         let queue = [];
+
+        // Cutter State
+        let cutterFile = null;
+        let cutterVideoInfo = null;
+        let cutterStartTime = 0;
+        let cutterEndTime = 0;
+        let isCutting = false;
+
+        // Merge State
+        let mergeFiles = [];
+        let isMerging = false;
 
         // Init
         async function init() {
@@ -850,7 +1218,6 @@
             });
 
             window.api.onDownloadProgress((progress) => {
-                // Update progress in queue
                 const item = queue.find(i => i.id === progress.id);
                 if (item) {
                     item.progress = progress.progress;
@@ -860,17 +1227,26 @@
 
             window.api.onDownloadStarted(() => {
                 downloading = true;
-                document.getElementById('btnStart').textContent = '⏹ Stoppen';
+                document.getElementById('btnStart').textContent = 'Stoppen';
                 document.getElementById('btnStart').classList.add('downloading');
             });
 
             window.api.onDownloadFinished(() => {
                 downloading = false;
-                document.getElementById('btnStart').textContent = '▶ Start';
+                document.getElementById('btnStart').textContent = 'Start';
                 document.getElementById('btnStart').classList.remove('downloading');
             });
 
-            // Check for updates
+            window.api.onCutProgress((percent) => {
+                document.getElementById('cutProgressBar').style.width = percent + '%';
+                document.getElementById('cutProgressText').textContent = Math.round(percent) + '%';
+            });
+
+            window.api.onMergeProgress((percent) => {
+                document.getElementById('mergeProgressBar').style.width = percent + '%';
+                document.getElementById('mergeProgressText').textContent = Math.round(percent) + '%';
+            });
+
             setTimeout(checkUpdateSilent, 3000);
         }
 
@@ -896,7 +1272,13 @@
             document.querySelector(`.nav-item[data-tab="${tab}"]`).classList.add('active');
             document.getElementById(tab + 'Tab').classList.add('active');
 
-            const titles = { vods: 'VODs', clips: 'Clips', settings: 'Einstellungen' };
+            const titles = {
+                vods: 'VODs',
+                clips: 'Clips',
+                cutter: 'Video Cutter',
+                merge: 'Videos Zusammenfugen',
+                settings: 'Einstellungen'
+            };
             document.getElementById('pageTitle').textContent = currentStreamer || titles[tab];
         }
 
@@ -910,7 +1292,7 @@
                 item.className = 'streamer-item' + (currentStreamer === streamer ? ' active' : '');
                 item.innerHTML = `
                     <span>${streamer}</span>
-                    <span class="remove" onclick="event.stopPropagation(); removeStreamer('${streamer}')">✕</span>
+                    <span class="remove" onclick="event.stopPropagation(); removeStreamer('${streamer}')">x</span>
                 `;
                 item.onclick = () => selectStreamer(streamer);
                 list.appendChild(item);
@@ -939,7 +1321,7 @@
                     <div class="empty-state">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-4 5-4v8zm2-8l5 4-5 4V9z"/></svg>
                         <h3>Keine VODs</h3>
-                        <p>Wähle einen Streamer aus der Liste.</p>
+                        <p>Wahle einen Streamer aus der Liste.</p>
                     </div>
                 `;
             }
@@ -1032,7 +1414,7 @@
                 <div class="queue-item">
                     <div class="status ${item.status}"></div>
                     <div class="title" title="${item.title}">${item.title}</div>
-                    <span class="remove" onclick="removeFromQueue('${item.id}')">✕</span>
+                    <span class="remove" onclick="removeFromQueue('${item.id}')">x</span>
                 </div>
             `).join('');
         }
@@ -1095,13 +1477,13 @@
 
             btn.disabled = true;
             btn.textContent = 'Lade...';
-            status.textContent = 'Download läuft...';
+            status.textContent = 'Download lauft...';
             status.className = 'clip-status loading';
 
             const result = await window.api.downloadClip(url);
 
             btn.disabled = false;
-            btn.textContent = '⬇ Clip herunterladen';
+            btn.textContent = 'Clip herunterladen';
 
             if (result.success) {
                 status.textContent = 'Download erfolgreich!';
@@ -1112,19 +1494,225 @@
             }
         }
 
+        // Video Cutter
+        async function selectCutterVideo() {
+            const filePath = await window.api.selectVideoFile();
+            if (!filePath) return;
+
+            cutterFile = filePath;
+            document.getElementById('cutterFilePath').value = filePath;
+
+            const info = await window.api.getVideoInfo(filePath);
+            if (!info) {
+                alert('Konnte Video-Informationen nicht lesen. FFprobe installiert?');
+                return;
+            }
+
+            cutterVideoInfo = info;
+            cutterStartTime = 0;
+            cutterEndTime = info.duration;
+
+            document.getElementById('cutterInfo').style.display = 'flex';
+            document.getElementById('timelineContainer').style.display = 'block';
+            document.getElementById('btnCut').disabled = false;
+
+            document.getElementById('infoDuration').textContent = formatTime(info.duration);
+            document.getElementById('infoResolution').textContent = `${info.width}x${info.height}`;
+            document.getElementById('infoFps').textContent = Math.round(info.fps);
+            document.getElementById('infoSelection').textContent = formatTime(info.duration);
+
+            document.getElementById('startTime').value = '00:00:00';
+            document.getElementById('endTime').value = formatTime(info.duration);
+
+            updateTimeline();
+            await updatePreview(0);
+        }
+
+        function formatTime(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function parseTime(timeStr) {
+            const parts = timeStr.split(':').map(p => parseInt(p) || 0);
+            if (parts.length === 3) {
+                return parts[0] * 3600 + parts[1] * 60 + parts[2];
+            }
+            return 0;
+        }
+
+        function updateTimeline() {
+            if (!cutterVideoInfo) return;
+
+            const selection = document.getElementById('timelineSelection');
+            const startPercent = (cutterStartTime / cutterVideoInfo.duration) * 100;
+            const endPercent = (cutterEndTime / cutterVideoInfo.duration) * 100;
+
+            selection.style.left = startPercent + '%';
+            selection.style.width = (endPercent - startPercent) + '%';
+
+            const duration = cutterEndTime - cutterStartTime;
+            document.getElementById('infoSelection').textContent = formatTime(duration);
+        }
+
+        function updateTimeFromInput() {
+            const startStr = document.getElementById('startTime').value;
+            const endStr = document.getElementById('endTime').value;
+
+            cutterStartTime = Math.max(0, parseTime(startStr));
+            cutterEndTime = Math.min(cutterVideoInfo?.duration || 0, parseTime(endStr));
+
+            if (cutterEndTime <= cutterStartTime) {
+                cutterEndTime = cutterStartTime + 1;
+            }
+
+            updateTimeline();
+        }
+
+        async function seekTimeline(event) {
+            if (!cutterVideoInfo) return;
+
+            const timeline = document.getElementById('timeline');
+            const rect = timeline.getBoundingClientRect();
+            const percent = (event.clientX - rect.left) / rect.width;
+            const time = percent * cutterVideoInfo.duration;
+
+            document.getElementById('timelineCurrent').style.left = (percent * 100) + '%';
+            await updatePreview(time);
+        }
+
+        async function updatePreview(time) {
+            if (!cutterFile) return;
+
+            const preview = document.getElementById('cutterPreview');
+            preview.innerHTML = '<div class="placeholder"><p>Lade Vorschau...</p></div>';
+
+            const frame = await window.api.extractFrame(cutterFile, time);
+            if (frame) {
+                preview.innerHTML = `<img src="${frame}" alt="Preview">`;
+            } else {
+                preview.innerHTML = '<div class="placeholder"><p>Vorschau nicht verfugbar</p></div>';
+            }
+        }
+
+        async function startCutting() {
+            if (!cutterFile || isCutting) return;
+
+            isCutting = true;
+            document.getElementById('btnCut').disabled = true;
+            document.getElementById('btnCut').textContent = 'Schneidet...';
+            document.getElementById('cutProgress').classList.add('show');
+
+            const result = await window.api.cutVideo(cutterFile, cutterStartTime, cutterEndTime);
+
+            isCutting = false;
+            document.getElementById('btnCut').disabled = false;
+            document.getElementById('btnCut').textContent = 'Schneiden';
+            document.getElementById('cutProgress').classList.remove('show');
+
+            if (result.success) {
+                alert('Video erfolgreich geschnitten!\n\n' + result.outputFile);
+            } else {
+                alert('Fehler beim Schneiden des Videos.');
+            }
+        }
+
+        // Merge Videos
+        async function addMergeFiles() {
+            const files = await window.api.selectMultipleVideos();
+            if (files && files.length > 0) {
+                mergeFiles = [...mergeFiles, ...files];
+                renderMergeFiles();
+            }
+        }
+
+        function renderMergeFiles() {
+            const list = document.getElementById('mergeFileList');
+            document.getElementById('btnMerge').disabled = mergeFiles.length < 2;
+
+            if (mergeFiles.length === 0) {
+                list.innerHTML = `
+                    <div class="empty-state" style="padding: 40px 20px;">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" style="opacity:0.3"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                        <p style="margin-top:10px">Keine Videos ausgewahlt</p>
+                    </div>
+                `;
+                return;
+            }
+
+            list.innerHTML = mergeFiles.map((file, index) => {
+                const name = file.split(/[/\\]/).pop();
+                return `
+                    <div class="file-item" draggable="true" data-index="${index}">
+                        <div class="file-order">${index + 1}</div>
+                        <div class="file-name" title="${file}">${name}</div>
+                        <div class="file-actions">
+                            <button class="file-btn" onclick="moveMergeFile(${index}, -1)" ${index === 0 ? 'disabled' : ''}>&#9650;</button>
+                            <button class="file-btn" onclick="moveMergeFile(${index}, 1)" ${index === mergeFiles.length - 1 ? 'disabled' : ''}>&#9660;</button>
+                            <button class="file-btn remove" onclick="removeMergeFile(${index})">x</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function moveMergeFile(index, direction) {
+            const newIndex = index + direction;
+            if (newIndex < 0 || newIndex >= mergeFiles.length) return;
+
+            const temp = mergeFiles[index];
+            mergeFiles[index] = mergeFiles[newIndex];
+            mergeFiles[newIndex] = temp;
+            renderMergeFiles();
+        }
+
+        function removeMergeFile(index) {
+            mergeFiles.splice(index, 1);
+            renderMergeFiles();
+        }
+
+        async function startMerging() {
+            if (mergeFiles.length < 2 || isMerging) return;
+
+            const outputFile = await window.api.saveVideoDialog('merged_video.mp4');
+            if (!outputFile) return;
+
+            isMerging = true;
+            document.getElementById('btnMerge').disabled = true;
+            document.getElementById('btnMerge').textContent = 'Zusammenfugen...';
+            document.getElementById('mergeProgress').classList.add('show');
+
+            const result = await window.api.mergeVideos(mergeFiles, outputFile);
+
+            isMerging = false;
+            document.getElementById('btnMerge').disabled = false;
+            document.getElementById('btnMerge').textContent = 'Zusammenfugen';
+            document.getElementById('mergeProgress').classList.remove('show');
+
+            if (result.success) {
+                alert('Videos erfolgreich zusammengefugt!\n\n' + result.outputFile);
+                mergeFiles = [];
+                renderMergeFiles();
+            } else {
+                alert('Fehler beim Zusammenfugen der Videos.');
+            }
+        }
+
         // Updates
         async function checkUpdateSilent() {
             const result = await window.api.checkUpdate();
             if (result.hasUpdate) {
                 document.getElementById('updateBanner').classList.add('show');
-                document.getElementById('updateText').textContent = `Version ${result.version} verfügbar: ${result.changelog}`;
+                document.getElementById('updateText').textContent = `Version ${result.version} verfugbar: ${result.changelog}`;
             }
         }
 
         async function checkUpdate() {
             const result = await window.api.checkUpdate();
             if (result.hasUpdate) {
-                alert(`Neue Version ${result.version} verfügbar!\n\n${result.changelog}`);
+                alert(`Neue Version ${result.version} verfugbar!\n\n${result.changelog}`);
             } else {
                 alert('Du hast die neueste Version!');
             }
