@@ -19,6 +19,11 @@ download_queue.json
 .vscode/
 .idea/
 
+# Docs workspace
+docs/node_modules/
+docs/dist/
+docs/.astro/
+
 # Executables
 Twitch_VOD_Manager.exe
 server_files/*.exe
