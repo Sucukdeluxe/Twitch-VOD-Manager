@@ -1,14 +1,14 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { spawn, ChildProcess, execSync, exec } from 'child_process';
+import { spawn, ChildProcess, execSync, exec, execFileSync, spawnSync } from 'child_process';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
 
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.7.9';
+const APP_VERSION = '3.8.0';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -16,6 +16,9 @@ const APPDATA_DIR = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'Twi
 const CONFIG_FILE = path.join(APPDATA_DIR, 'config.json');
 const QUEUE_FILE = path.join(APPDATA_DIR, 'download_queue.json');
 const DEBUG_LOG_FILE = path.join(APPDATA_DIR, 'debug.log');
+const TOOLS_DIR = path.join(APPDATA_DIR, 'tools');
+const TOOLS_STREAMLINK_DIR = path.join(TOOLS_DIR, 'streamlink');
+const TOOLS_FFMPEG_DIR = path.join(TOOLS_DIR, 'ffmpeg');
 const DEFAULT_DOWNLOAD_PATH = path.join(app.getPath('desktop'), 'Twitch_VODs');
 
 // Timeouts
@@ -173,11 +176,18 @@ let downloadStartTime = 0;
 let downloadedBytes = 0;
 const userIdLoginCache = new Map<string, string>();
 let streamlinkCommandCache: { command: string; prefixArgs: string[] } | null = null;
+let bundledStreamlinkPath: string | null = null;
+let bundledFFmpegPath: string | null = null;
+let bundledFFprobePath: string | null = null;
 
 // ==========================================
 // TOOL PATHS
 // ==========================================
 function getStreamlinkPath(): string {
+    if (bundledStreamlinkPath && fs.existsSync(bundledStreamlinkPath)) {
+        return bundledStreamlinkPath;
+    }
+
     try {
         if (process.platform === 'win32') {
             const result = execSync('where streamlink', { encoding: 'utf-8' });
@@ -207,6 +217,170 @@ function canExecute(cmd: string): boolean {
         execSync(cmd, { stdio: 'ignore', windowsHide: true });
         return true;
     } catch {
+        return false;
+    }
+}
+
+function canExecuteCommand(command: string, args: string[]): boolean {
+    try {
+        const result = spawnSync(command, args, { stdio: 'ignore', windowsHide: true });
+        return result.status === 0;
+    } catch {
+        return false;
+    }
+}
+
+function findFileRecursive(rootDir: string, fileName: string): string | null {
+    if (!fs.existsSync(rootDir)) return null;
+
+    const entries = fs.readdirSync(rootDir, { withFileTypes: true });
+    for (const entry of entries) {
+        const fullPath = path.join(rootDir, entry.name);
+        if (entry.isFile() && entry.name.toLowerCase() === fileName.toLowerCase()) {
+            return fullPath;
+        }
+
+        if (entry.isDirectory()) {
+            const nested = findFileRecursive(fullPath, fileName);
+            if (nested) return nested;
+        }
+    }
+
+    return null;
+}
+
+function refreshBundledToolPaths(): void {
+    bundledStreamlinkPath = findFileRecursive(TOOLS_STREAMLINK_DIR, process.platform === 'win32' ? 'streamlink.exe' : 'streamlink');
+    bundledFFmpegPath = findFileRecursive(TOOLS_FFMPEG_DIR, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+    bundledFFprobePath = findFileRecursive(TOOLS_FFMPEG_DIR, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+}
+
+async function downloadFile(url: string, destinationPath: string): Promise<boolean> {
+    try {
+        const response = await axios.get(url, { responseType: 'stream', timeout: 120000 });
+
+        await new Promise<void>((resolve, reject) => {
+            const writer = fs.createWriteStream(destinationPath);
+            response.data.pipe(writer);
+            writer.on('finish', () => resolve());
+            writer.on('error', (err) => reject(err));
+        });
+
+        return true;
+    } catch (e) {
+        appendDebugLog('download-file-failed', { url, destinationPath, error: String(e) });
+        return false;
+    }
+}
+
+function extractZip(zipPath: string, destinationDir: string): boolean {
+    try {
+        fs.mkdirSync(destinationDir, { recursive: true });
+        execFileSync('powershell', [
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-Command',
+            `Expand-Archive -Path '${zipPath.replace(/'/g, "''")}' -DestinationPath '${destinationDir.replace(/'/g, "''")}' -Force`
+        ], { windowsHide: true, stdio: 'ignore' });
+        return true;
+    } catch (e) {
+        appendDebugLog('extract-zip-failed', { zipPath, destinationDir, error: String(e) });
+        return false;
+    }
+}
+
+async function ensureStreamlinkInstalled(): Promise<boolean> {
+    refreshBundledToolPaths();
+
+    const current = getStreamlinkCommand();
+    if (canExecuteCommand(current.command, [...current.prefixArgs, '--version'])) {
+        return true;
+    }
+
+    if (process.platform !== 'win32') {
+        return false;
+    }
+
+    appendDebugLog('streamlink-install-start');
+    try {
+        fs.mkdirSync(TOOLS_STREAMLINK_DIR, { recursive: true });
+
+        const release = await axios.get('https://api.github.com/repos/streamlink/windows-builds/releases/latest', {
+            timeout: 120000,
+            headers: {
+                'Accept': 'application/vnd.github+json',
+                'User-Agent': 'Twitch-VOD-Manager'
+            }
+        });
+
+        const assets = release.data?.assets || [];
+        const zipAsset = assets.find((a: any) => typeof a?.name === 'string' && /x86_64\.zip$/i.test(a.name));
+        if (!zipAsset?.browser_download_url) {
+            appendDebugLog('streamlink-install-no-asset-found');
+            return false;
+        }
+
+        const zipPath = path.join(app.getPath('temp'), `streamlink_portable_${Date.now()}.zip`);
+        const downloadOk = await downloadFile(zipAsset.browser_download_url, zipPath);
+        if (!downloadOk) return false;
+
+        fs.rmSync(TOOLS_STREAMLINK_DIR, { recursive: true, force: true });
+        fs.mkdirSync(TOOLS_STREAMLINK_DIR, { recursive: true });
+
+        const extractOk = extractZip(zipPath, TOOLS_STREAMLINK_DIR);
+        try { fs.unlinkSync(zipPath); } catch { }
+        if (!extractOk) return false;
+
+        refreshBundledToolPaths();
+        streamlinkCommandCache = null;
+
+        const cmd = getStreamlinkCommand();
+        const works = canExecuteCommand(cmd.command, [...cmd.prefixArgs, '--version']);
+        appendDebugLog('streamlink-install-finished', { works, command: cmd.command, prefixArgs: cmd.prefixArgs });
+        return works;
+    } catch (e) {
+        appendDebugLog('streamlink-install-failed', String(e));
+        return false;
+    }
+}
+
+async function ensureFfmpegInstalled(): Promise<boolean> {
+    refreshBundledToolPaths();
+
+    const ffmpegPath = getFFmpegPath();
+    const ffprobePath = getFFprobePath();
+    if (canExecuteCommand(ffmpegPath, ['-version']) && canExecuteCommand(ffprobePath, ['-version'])) {
+        return true;
+    }
+
+    if (process.platform !== 'win32') {
+        return false;
+    }
+
+    appendDebugLog('ffmpeg-install-start');
+    try {
+        fs.mkdirSync(TOOLS_FFMPEG_DIR, { recursive: true });
+
+        const zipPath = path.join(app.getPath('temp'), `ffmpeg_essentials_${Date.now()}.zip`);
+        const downloadOk = await downloadFile('https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip', zipPath);
+        if (!downloadOk) return false;
+
+        fs.rmSync(TOOLS_FFMPEG_DIR, { recursive: true, force: true });
+        fs.mkdirSync(TOOLS_FFMPEG_DIR, { recursive: true });
+
+        const extractOk = extractZip(zipPath, TOOLS_FFMPEG_DIR);
+        try { fs.unlinkSync(zipPath); } catch { }
+        if (!extractOk) return false;
+
+        refreshBundledToolPaths();
+
+        const newFfmpegPath = getFFmpegPath();
+        const newFfprobePath = getFFprobePath();
+        const works = canExecuteCommand(newFfmpegPath, ['-version']) && canExecuteCommand(newFfprobePath, ['-version']);
+        appendDebugLog('ffmpeg-install-finished', { works, ffmpeg: newFfmpegPath, ffprobe: newFfprobePath });
+        return works;
+    } catch (e) {
+        appendDebugLog('ffmpeg-install-failed', String(e));
         return false;
     }
 }
@@ -249,6 +423,10 @@ function getStreamlinkCommand(): { command: string; prefixArgs: string[] } {
 }
 
 function getFFmpegPath(): string {
+    if (bundledFFmpegPath && fs.existsSync(bundledFFmpegPath)) {
+        return bundledFFmpegPath;
+    }
+
     try {
         if (process.platform === 'win32') {
             const result = execSync('where ffmpeg', { encoding: 'utf-8' });
@@ -274,6 +452,10 @@ function getFFmpegPath(): string {
 }
 
 function getFFprobePath(): string {
+    if (bundledFFprobePath && fs.existsSync(bundledFFprobePath)) {
+        return bundledFFprobePath;
+    }
+
     const ffmpegPath = getFFmpegPath();
     const ffprobeExe = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
     return path.join(path.dirname(ffmpegPath), ffprobeExe);
@@ -619,6 +801,12 @@ async function getClipInfo(clipId: string): Promise<any | null> {
 // VIDEO INFO (for cutter)
 // ==========================================
 async function getVideoInfo(filePath: string): Promise<VideoInfo | null> {
+    const ffmpegReady = await ensureFfmpegInstalled();
+    if (!ffmpegReady) {
+        appendDebugLog('get-video-info-missing-ffmpeg');
+        return null;
+    }
+
     return new Promise((resolve) => {
         const ffprobe = getFFprobePath();
         const args = [
@@ -665,6 +853,12 @@ async function getVideoInfo(filePath: string): Promise<VideoInfo | null> {
 // VIDEO CUTTER
 // ==========================================
 async function extractFrame(filePath: string, timeSeconds: number): Promise<string | null> {
+    const ffmpegReady = await ensureFfmpegInstalled();
+    if (!ffmpegReady) {
+        appendDebugLog('extract-frame-missing-ffmpeg');
+        return null;
+    }
+
     return new Promise((resolve) => {
         const ffmpeg = getFFmpegPath();
         const tempFile = path.join(app.getPath('temp'), `frame_${Date.now()}.jpg`);
@@ -702,6 +896,12 @@ async function cutVideo(
     endTime: number,
     onProgress: (percent: number) => void
 ): Promise<boolean> {
+    const ffmpegReady = await ensureFfmpegInstalled();
+    if (!ffmpegReady) {
+        appendDebugLog('cut-video-missing-ffmpeg');
+        return false;
+    }
+
     return new Promise((resolve) => {
         const ffmpeg = getFFmpegPath();
         const duration = endTime - startTime;
@@ -749,6 +949,12 @@ async function mergeVideos(
     outputFile: string,
     onProgress: (percent: number) => void
 ): Promise<boolean> {
+    const ffmpegReady = await ensureFfmpegInstalled();
+    if (!ffmpegReady) {
+        appendDebugLog('merge-videos-missing-ffmpeg');
+        return false;
+    }
+
     return new Promise((resolve) => {
         const ffmpeg = getFFmpegPath();
 
@@ -951,6 +1157,14 @@ async function downloadVOD(
     item: QueueItem,
     onProgress: (progress: DownloadProgress) => void
 ): Promise<DownloadResult> {
+    const streamlinkReady = await ensureStreamlinkInstalled();
+    if (!streamlinkReady) {
+        return {
+            success: false,
+            error: 'Streamlink fehlt und konnte nicht automatisch installiert werden. Siehe debug.log.'
+        };
+    }
+
     const streamer = item.streamer.replace(/[^a-zA-Z0-9_-]/g, '');
     const date = new Date(item.date);
     const dateStr = `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getFullYear()}`;
@@ -1437,7 +1651,14 @@ ipcMain.handle('save-video-dialog', async (_, defaultName: string) => {
 // APP LIFECYCLE
 // ==========================================
 app.whenReady().then(() => {
+    refreshBundledToolPaths();
     createWindow();
+
+    void (async () => {
+        const streamlinkOk = await ensureStreamlinkInstalled();
+        const ffmpegOk = await ensureFfmpegInstalled();
+        appendDebugLog('startup-tools-check', { streamlinkOk, ffmpegOk });
+    })();
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
