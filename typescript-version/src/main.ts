@@ -1,14 +1,14 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { spawn, ChildProcess, execSync, exec, execFileSync, spawnSync } from 'child_process';
+import { spawn, ChildProcess, execSync, exec, spawnSync } from 'child_process';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
 
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.8.0';
+const APP_VERSION = '3.8.1';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -273,15 +273,36 @@ async function downloadFile(url: string, destinationPath: string): Promise<boole
     }
 }
 
-function extractZip(zipPath: string, destinationDir: string): boolean {
+async function extractZip(zipPath: string, destinationDir: string): Promise<boolean> {
     try {
         fs.mkdirSync(destinationDir, { recursive: true });
-        execFileSync('powershell', [
-            '-NoProfile',
-            '-ExecutionPolicy', 'Bypass',
-            '-Command',
-            `Expand-Archive -Path '${zipPath.replace(/'/g, "''")}' -DestinationPath '${destinationDir.replace(/'/g, "''")}' -Force`
-        ], { windowsHide: true, stdio: 'ignore' });
+
+        const command = `Expand-Archive -Path '${zipPath.replace(/'/g, "''")}' -DestinationPath '${destinationDir.replace(/'/g, "''")}' -Force`;
+
+        await new Promise<void>((resolve, reject) => {
+            const proc = spawn('powershell', [
+                '-NoProfile',
+                '-ExecutionPolicy', 'Bypass',
+                '-Command',
+                command
+            ], { windowsHide: true });
+
+            let stderr = '';
+            proc.stderr?.on('data', (data) => {
+                stderr += data.toString();
+            });
+
+            proc.on('close', (code) => {
+                if (code === 0) {
+                    resolve();
+                } else {
+                    reject(new Error(`Expand-Archive exit code ${code}: ${stderr.trim()}`));
+                }
+            });
+
+            proc.on('error', (err) => reject(err));
+        });
+
         return true;
     } catch (e) {
         appendDebugLog('extract-zip-failed', { zipPath, destinationDir, error: String(e) });
@@ -327,7 +348,7 @@ async function ensureStreamlinkInstalled(): Promise<boolean> {
         fs.rmSync(TOOLS_STREAMLINK_DIR, { recursive: true, force: true });
         fs.mkdirSync(TOOLS_STREAMLINK_DIR, { recursive: true });
 
-        const extractOk = extractZip(zipPath, TOOLS_STREAMLINK_DIR);
+        const extractOk = await extractZip(zipPath, TOOLS_STREAMLINK_DIR);
         try { fs.unlinkSync(zipPath); } catch { }
         if (!extractOk) return false;
 
@@ -368,7 +389,7 @@ async function ensureFfmpegInstalled(): Promise<boolean> {
         fs.rmSync(TOOLS_FFMPEG_DIR, { recursive: true, force: true });
         fs.mkdirSync(TOOLS_FFMPEG_DIR, { recursive: true });
 
-        const extractOk = extractZip(zipPath, TOOLS_FFMPEG_DIR);
+        const extractOk = await extractZip(zipPath, TOOLS_FFMPEG_DIR);
         try { fs.unlinkSync(zipPath); } catch { }
         if (!extractOk) return false;
 
@@ -1653,12 +1674,7 @@ ipcMain.handle('save-video-dialog', async (_, defaultName: string) => {
 app.whenReady().then(() => {
     refreshBundledToolPaths();
     createWindow();
-
-    void (async () => {
-        const streamlinkOk = await ensureStreamlinkInstalled();
-        const ffmpegOk = await ensureFfmpegInstalled();
-        appendDebugLog('startup-tools-check', { streamlinkOk, ffmpegOk });
-    })();
+    appendDebugLog('startup-tools-check-skipped', 'Deferred to first use');
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {

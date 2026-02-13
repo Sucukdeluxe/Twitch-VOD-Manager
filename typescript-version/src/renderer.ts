@@ -21,7 +21,7 @@ async function init(): Promise<void> {
     updateDownloadButtonState();
 
     window.api.onQueueUpdated((q: QueueItem[]) => {
-        queue = Array.isArray(q) ? q : [];
+        queue = mergeQueueState(Array.isArray(q) ? q : []);
         renderQueue();
     });
 
@@ -82,6 +82,33 @@ async function init(): Promise<void> {
     }, 2000);
 }
 
+function mergeQueueState(nextQueue: QueueItem[]): QueueItem[] {
+    const prevById = new Map(queue.map((item) => [item.id, item]));
+
+    return nextQueue.map((item) => {
+        const prev = prevById.get(item.id);
+        if (!prev) {
+            return item;
+        }
+
+        if (item.status !== 'downloading') {
+            return item;
+        }
+
+        return {
+            ...item,
+            progress: item.progress > 0 ? item.progress : prev.progress,
+            speed: item.speed || prev.speed,
+            eta: item.eta || prev.eta,
+            currentPart: item.currentPart || prev.currentPart,
+            totalParts: item.totalParts || prev.totalParts,
+            downloadedBytes: item.downloadedBytes || prev.downloadedBytes,
+            totalBytes: item.totalBytes || prev.totalBytes,
+            progressStatus: item.progressStatus || prev.progressStatus
+        };
+    });
+}
+
 function updateDownloadButtonState(): void {
     const btn = byId('btnStart');
     btn.textContent = downloading ? 'Stoppen' : 'Start';
@@ -90,7 +117,7 @@ function updateDownloadButtonState(): void {
 
 async function syncQueueAndDownloadState(): Promise<void> {
     const latestQueue = await window.api.getQueue();
-    queue = Array.isArray(latestQueue) ? latestQueue : [];
+    queue = mergeQueueState(Array.isArray(latestQueue) ? latestQueue : []);
     renderQueue();
 
     const backendDownloading = await window.api.isDownloading();

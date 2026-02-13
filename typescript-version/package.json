@@ -1,6 +1,6 @@
 {
   "name": "twitch-vod-manager",
-  "version": "3.8.0",
+  "version": "3.8.1",
   "description": "Twitch VOD Manager - Download Twitch VODs easily",
   "main": "dist/main.js",
   "author": "xRangerDE",
