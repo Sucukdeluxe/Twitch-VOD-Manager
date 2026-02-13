@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.8.4';
+const APP_VERSION = '3.8.5';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths

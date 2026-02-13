@@ -86,7 +86,7 @@ function renderVODs(vods: VOD[] | null | undefined, streamer: string): void {
         const thumb = vod.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180');
         const date = new Date(vod.created_at).toLocaleDateString('de-DE');
         const escapedTitle = vod.title.replace(/'/g, "\\'").replace(/\"/g, '&quot;');
-        const safeDisplayTitle = escapeHtml(vod.title || 'Untitled VOD');
+        const safeDisplayTitle = escapeHtml(vod.title || 'Unbenanntes VOD');
 
         return `
             <div class="vod-card">
@@ -96,12 +96,12 @@ function renderVODs(vods: VOD[] | null | undefined, streamer: string): void {
                     <div class="vod-meta">
                         <span>${date}</span>
                         <span>${vod.duration}</span>
-                        <span>${vod.view_count.toLocaleString()} Views</span>
+                        <span>${vod.view_count.toLocaleString()} Aufrufe</span>
                     </div>
                 </div>
                 <div class="vod-actions">
                     <button class="vod-btn secondary" onclick="openClipDialog('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">Clip</button>
-                    <button class="vod-btn primary" onclick="addToQueue('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">+ Queue</button>
+                    <button class="vod-btn primary" onclick="addToQueue('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">+ Warteschlange</button>
                 </div>
             </div>
         `;

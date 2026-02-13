@@ -137,7 +137,7 @@ function showTab(tab: string): void {
     const titles: Record<string, string> = {
         vods: 'VODs',
         clips: 'Clips',
-        cutter: 'Video Cutter',
+        cutter: 'Video schneiden',
         merge: 'Videos Zusammenfugen',
         settings: 'Einstellungen'
     };
