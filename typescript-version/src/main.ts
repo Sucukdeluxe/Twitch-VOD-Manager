@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.7.5';
+const APP_VERSION = '3.7.6';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -219,7 +219,8 @@ function getFFmpegPath(): string {
 
 function getFFprobePath(): string {
     const ffmpegPath = getFFmpegPath();
-    return ffmpegPath.replace('ffmpeg.exe', 'ffprobe.exe').replace('ffmpeg', 'ffprobe');
+    const ffprobeExe = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+    return path.join(path.dirname(ffmpegPath), ffprobeExe);
 }
 
 // ==========================================
