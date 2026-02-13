@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.8.1';
+const APP_VERSION = '3.8.2';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -1178,6 +1178,16 @@ async function downloadVOD(
     item: QueueItem,
     onProgress: (progress: DownloadProgress) => void
 ): Promise<DownloadResult> {
+    onProgress({
+        id: item.id,
+        progress: -1,
+        speed: '',
+        eta: '',
+        status: 'Prufe Download-Tools...',
+        currentPart: 0,
+        totalParts: 0
+    });
+
     const streamlinkReady = await ensureStreamlinkInstalled();
     if (!streamlinkReady) {
         return {
@@ -1185,6 +1195,16 @@ async function downloadVOD(
             error: 'Streamlink fehlt und konnte nicht automatisch installiert werden. Siehe debug.log.'
         };
     }
+
+    onProgress({
+        id: item.id,
+        progress: -1,
+        speed: '',
+        eta: '',
+        status: 'Download gestartet',
+        currentPart: 0,
+        totalParts: 0
+    });
 
     const streamer = item.streamer.replace(/[^a-zA-Z0-9_-]/g, '');
     const date = new Date(item.date);
