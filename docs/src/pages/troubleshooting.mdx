@@ -1,0 +1,56 @@
+---
+layout: ../layouts/BaseLayout.astro
+title: Troubleshooting
+description: Fix common Twitch VOD Manager issues quickly.
+---
+
+# Troubleshooting
+
+## "Keine VODs" after adding streamer
+
+1. Ensure the streamer exists and has archive VODs.
+2. Press **Aktualisieren**.
+3. If you use credentials, re-save `Client ID` + `Client Secret` in **Einstellungen**.
+4. Check bottom status bar:
+   - `Verbunden` in authenticated mode
+   - `Ohne Login (Public Modus)` in credential-free mode
+
+The app retries auth automatically on expired tokens and can continue in public mode without credentials.
+
+## "Streamer nicht gefunden"
+
+- Use login name only (no URL, no `@`).
+- Names are normalized to lowercase.
+- Verify streamer spelling directly on Twitch.
+
+## Clip/Cutter/Merge duration shows 0 or preview fails
+
+Usually caused by broken `ffprobe` detection.
+
+Check:
+
+```bash
+ffprobe -version
+```
+
+If missing, install FFmpeg package that includes `ffprobe` and restart app.
+
+## "Streamlink not found"
+
+Install streamlink and verify:
+
+```bash
+streamlink --version
+```
+
+Then restart the app.
+
+## Auto-update does not trigger
+
+Release must include all of:
+
+- `latest.yml`
+- `Twitch-VOD-Manager-Setup-<version>.exe`
+- `Twitch-VOD-Manager-Setup-<version>.exe.blockmap`
+
+Tag version must match app version (example: `v3.7.6`).

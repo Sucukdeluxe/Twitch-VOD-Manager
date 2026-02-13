@@ -1,0 +1,44 @@
+---
+layout: ../layouts/BaseLayout.astro
+title: Features
+description: Complete feature overview for Twitch VOD Manager.
+---
+
+# Features
+
+## Twitch VOD Browser
+
+- Add streamers to a persistent sidebar list.
+- Fetches user + archive VODs through Twitch Helix API when credentials are configured.
+- Falls back to public Twitch GraphQL mode when no credentials are set.
+- Automatic reconnect/re-auth if the app is temporarily disconnected.
+
+## Download Queue
+
+- Add full VODs to queue with one click.
+- Queue supports start/stop and removal of completed entries.
+- Download process persists in local queue file.
+
+## Clip Creation from VODs
+
+- Open **Clip** dialog from any VOD card.
+- Set start/end time and optional part number.
+- Queue clip jobs with metadata for naming strategy.
+
+## Video Cutter (Local Files)
+
+- Select any local video and inspect duration/fps/resolution.
+- Extract preview frames via `ffprobe`/`ffmpeg`.
+- Export cut segment as new MP4 file.
+
+## Video Merge (Local Files)
+
+- Choose multiple local video files.
+- Reorder via up/down controls.
+- Merge into one output file.
+
+## In-App Auto-Update
+
+- Uses GitHub release artifacts through `electron-updater`.
+- Detects new versions, downloads update, then installs on restart.
+- Requires release assets: installer, blockmap, and `latest.yml`.

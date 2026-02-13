@@ -1,8 +1,15 @@
 async function connect(): Promise<void> {
+    const hasCredentials = Boolean((config.client_id ?? '').toString().trim() && (config.client_secret ?? '').toString().trim());
+    if (!hasCredentials) {
+        isConnected = false;
+        updateStatus('Ohne Login (Public Modus)', false);
+        return;
+    }
+
     updateStatus('Verbinde...', false);
     const success = await window.api.login();
     isConnected = success;
-    updateStatus(success ? 'Verbunden' : 'Verbindung fehlgeschlagen', success);
+    updateStatus(success ? 'Verbunden' : 'Verbindung fehlgeschlagen - Public Modus aktiv', success);
 }
 
 function updateStatus(text: string, connected: boolean): void {

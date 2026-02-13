@@ -1,0 +1,48 @@
+---
+layout: ../layouts/BaseLayout.astro
+title: Getting Started
+description: Install and configure Twitch VOD Manager quickly.
+---
+
+# Getting Started
+
+## Requirements
+
+- Windows 10/11 (installer and paths are currently Windows-first)
+- `streamlink` available in `PATH`
+- `ffmpeg` + `ffprobe` available in `PATH`
+
+Optional but recommended:
+
+- Twitch API app with `Client ID` and `Client Secret` (for authenticated Helix mode)
+
+## Install
+
+1. Download the latest setup from GitHub Releases.
+2. Run `Twitch-VOD-Manager-Setup-<version>.exe`.
+3. Launch the app.
+
+## First-Time Setup
+
+1. Open **Einstellungen**.
+2. Choose your download path.
+3. Optional: enter `Client ID` and `Client Secret` for authenticated mode.
+4. Click **Speichern & Verbinden**.
+5. Add a streamer in the header input and press `+`.
+
+If everything is correct, VOD cards appear.
+
+- With credentials: status is `Verbunden`.
+- Without credentials: status shows `Ohne Login (Public Modus)` and VOD downloads still work.
+
+## Verify Tools
+
+In PowerShell or CMD:
+
+```bash
+streamlink --version
+ffmpeg -version
+ffprobe -version
+```
+
+If one command fails, install the missing tool and restart the app.

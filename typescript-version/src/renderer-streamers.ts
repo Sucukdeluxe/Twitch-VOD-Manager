@@ -56,10 +56,10 @@ async function selectStreamer(name: string): Promise<void> {
 
     if (!isConnected) {
         await connect();
-        if (!isConnected) {
-            byId('vodGrid').innerHTML = '<div class="empty-state"><h3>Nicht verbunden</h3><p>Bitte Twitch API Daten in den Einstellungen prufen.</p></div>';
-            return;
-        }
+    }
+
+    if (!isConnected) {
+        updateStatus('Ohne Login (Public Modus)', false);
     }
 
     byId('vodGrid').innerHTML = '<div class="empty-state"><p>Lade VODs...</p></div>';
@@ -86,12 +86,13 @@ function renderVODs(vods: VOD[] | null | undefined, streamer: string): void {
         const thumb = vod.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180');
         const date = new Date(vod.created_at).toLocaleDateString('de-DE');
         const escapedTitle = vod.title.replace(/'/g, "\\'").replace(/\"/g, '&quot;');
+        const safeDisplayTitle = escapeHtml(vod.title || 'Untitled VOD');
 
         return `
             <div class="vod-card">
                 <img class="vod-thumbnail" src="${thumb}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 320 180%22><rect fill=%22%23333%22 width=%22320%22 height=%22180%22/></svg>'">
                 <div class="vod-info">
-                    <div class="vod-title">${vod.title}</div>
+                    <div class="vod-title">${safeDisplayTitle}</div>
                     <div class="vod-meta">
                         <span>${date}</span>
                         <span>${vod.duration}</span>

@@ -1,0 +1,56 @@
+---
+layout: ../layouts/BaseLayout.astro
+title: Release Process
+description: Standardized release checklist for auto-update compatible builds.
+---
+
+# Release Process
+
+This project uses GitHub Releases + `electron-updater`.
+
+## 1) Bump Version
+
+Update app version consistently:
+
+- `typescript-version/package.json`
+- `typescript-version/package-lock.json`
+- `typescript-version/src/main.ts` (`APP_VERSION`)
+- Optional visible fallback text in `src/index.html`
+
+## 2) Build Installer Artifacts
+
+```bash
+cd "typescript-version"
+npm run dist:win
+```
+
+Expected outputs in `typescript-version/release/`:
+
+- `latest.yml`
+- `Twitch-VOD-Manager-Setup-<version>.exe`
+- `Twitch-VOD-Manager-Setup-<version>.exe.blockmap`
+
+## 3) Commit + Push
+
+Commit code/version changes and push to `master`.
+
+## 4) Create GitHub Release
+
+Tag format: `v<version>` (example: `v3.7.6`).
+
+Attach exactly the 3 update artifacts from step 2.
+
+## 5) Verify Update Path
+
+- Open app on older version.
+- Trigger update check.
+- Confirm banner appears and update can be downloaded/installed.
+
+## Quick Checklist
+
+- [ ] Version bumped everywhere
+- [ ] `npm run build` passes
+- [ ] `npm run dist:win` passes
+- [ ] Release tag created
+- [ ] `latest.yml` + `.exe` + `.blockmap` uploaded
+- [ ] Manual update flow verified

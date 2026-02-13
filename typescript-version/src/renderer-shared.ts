@@ -10,6 +10,15 @@ function queryAll<T = any>(selector: string): T[] {
     return Array.from(document.querySelectorAll(selector)) as T[];
 }
 
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 let config: AppConfig = {};
 let currentStreamer: string | null = null;
 let isConnected = false;

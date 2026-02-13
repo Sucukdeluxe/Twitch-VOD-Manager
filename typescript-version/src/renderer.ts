@@ -1,6 +1,7 @@
 async function init(): Promise<void> {
     config = await window.api.getConfig();
-    queue = await window.api.getQueue();
+    const initialQueue = await window.api.getQueue();
+    queue = Array.isArray(initialQueue) ? initialQueue : [];
     const version = await window.api.getVersion();
 
     byId('versionText').textContent = `v${version}`;
@@ -17,16 +18,10 @@ async function init(): Promise<void> {
     changeTheme(config.theme ?? 'twitch');
     renderStreamers();
     renderQueue();
-
-    if (config.client_id && config.client_secret) {
-        await connect();
-        if (config.streamers && config.streamers.length > 0) {
-            await selectStreamer(config.streamers[0]);
-        }
-    }
+    updateDownloadButtonState();
 
     window.api.onQueueUpdated((q: QueueItem[]) => {
-        queue = q;
+        queue = Array.isArray(q) ? q : [];
         renderQueue();
     });
 
@@ -42,14 +37,12 @@ async function init(): Promise<void> {
 
     window.api.onDownloadStarted(() => {
         downloading = true;
-        byId('btnStart').textContent = 'Stoppen';
-        byId('btnStart').classList.add('downloading');
+        updateDownloadButtonState();
     });
 
     window.api.onDownloadFinished(() => {
         downloading = false;
-        byId('btnStart').textContent = 'Start';
-        byId('btnStart').classList.remove('downloading');
+        updateDownloadButtonState();
     });
 
     window.api.onCutProgress((percent: number) => {
@@ -62,9 +55,41 @@ async function init(): Promise<void> {
         byId('mergeProgressText').textContent = Math.round(percent) + '%';
     });
 
+    if (config.client_id && config.client_secret) {
+        await connect();
+    } else {
+        updateStatus('Ohne Login (Public Modus)', false);
+    }
+
+    if (config.streamers && config.streamers.length > 0) {
+        await selectStreamer(config.streamers[0]);
+    }
+
     setTimeout(() => {
         void checkUpdateSilent();
     }, 3000);
+
+    setInterval(() => {
+        void syncQueueAndDownloadState();
+    }, 2000);
+}
+
+function updateDownloadButtonState(): void {
+    const btn = byId('btnStart');
+    btn.textContent = downloading ? 'Stoppen' : 'Start';
+    btn.classList.toggle('downloading', downloading);
+}
+
+async function syncQueueAndDownloadState(): Promise<void> {
+    const latestQueue = await window.api.getQueue();
+    queue = Array.isArray(latestQueue) ? latestQueue : [];
+    renderQueue();
+
+    const backendDownloading = await window.api.isDownloading();
+    if (backendDownloading !== downloading) {
+        downloading = backendDownloading;
+        updateDownloadButtonState();
+    }
 }
 
 function showTab(tab: string): void {

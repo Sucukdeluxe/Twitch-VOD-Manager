@@ -2,10 +2,50 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 ---
 
-<BaseLayout title="Twitch VOD Manager Docs">
+<BaseLayout title="Twitch VOD Manager Docs" description="Official documentation for Twitch VOD Manager users and contributors.">
   <h1>Twitch VOD Manager Documentation</h1>
-  <p>Die Dokumentation wird jetzt mit Astro + MDX gepflegt.</p>
-  <ul>
-    <li><a href="/roadmap">Migration Roadmap</a></li>
-  </ul>
+  <p>
+    This documentation covers end-user setup, Twitch API configuration, troubleshooting,
+    and developer workflows for the TypeScript/Electron app.
+  </p>
+
+  <div class="chips">
+    <span class="chip">Electron</span>
+    <span class="chip">TypeScript</span>
+    <span class="chip">Streamlink</span>
+    <span class="chip">FFmpeg</span>
+    <span class="chip">Auto-Update</span>
+  </div>
+
+  <div class="card-grid">
+    <a class="card" href="/getting-started">
+      <h3>Getting Started</h3>
+      <p>Install the app, set Twitch API credentials, and run your first VOD download.</p>
+    </a>
+
+    <a class="card" href="/features">
+      <h3>Features</h3>
+      <p>Learn VOD browsing, queue processing, clip creation, cutter, merge, and updates.</p>
+    </a>
+
+    <a class="card" href="/configuration">
+      <h3>Configuration</h3>
+      <p>Understand config paths, available settings, and how local files are stored.</p>
+    </a>
+
+    <a class="card" href="/troubleshooting">
+      <h3>Troubleshooting</h3>
+      <p>Fix common issues like "Keine VODs", missing tools, and update problems.</p>
+    </a>
+
+    <a class="card" href="/development">
+      <h3>Development</h3>
+      <p>Set up local development, architecture overview, and code structure details.</p>
+    </a>
+
+    <a class="card" href="/release-process">
+      <h3>Release Process</h3>
+      <p>Ship new installer builds and GitHub releases compatible with auto-updater.</p>
+    </a>
+  </div>
 </BaseLayout>

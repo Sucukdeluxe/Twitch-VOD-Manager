@@ -1,0 +1,57 @@
+---
+layout: ../layouts/BaseLayout.astro
+title: Development
+description: Local development setup and architecture for contributors.
+---
+
+# Development
+
+## Local Setup
+
+```bash
+cd "typescript-version"
+npm install
+npm run build
+npm start
+```
+
+## Architecture
+
+| Layer | File(s) | Responsibility |
+| --- | --- | --- |
+| Main process | `src/main.ts` | IPC handlers, Twitch API, downloads, ffmpeg/streamlink execution, updater |
+| Preload bridge | `src/preload.ts` | Safe API surface exposed to renderer |
+| Renderer shell | `src/index.html` + `src/styles.css` | UI markup and styling |
+| Renderer modules | `src/renderer*.ts` | UI logic by feature (streamers, queue, settings, updates, shared state) |
+
+## Renderer Module Split
+
+- `renderer-shared.ts`: common state + DOM helper functions
+- `renderer-streamers.ts`: streamer list + VOD loading
+- `renderer-queue.ts`: queue rendering + start/stop behavior
+- `renderer-settings.ts`: credentials, folder, and theme handling
+- `renderer-updates.ts`: update banner and download/install flow
+- `renderer.ts`: app init + clip/cutter/merge orchestration
+
+## Useful Commands
+
+```bash
+# Build TypeScript only
+npm run build
+
+# Run app in dev mode
+npm start
+
+# Build Windows installer
+npm run dist:win
+```
+
+## Docs Workspace
+
+```bash
+cd "docs"
+npm install
+npm run dev
+```
+
+Docs site is Astro + MDX and can be updated independently from app runtime code.

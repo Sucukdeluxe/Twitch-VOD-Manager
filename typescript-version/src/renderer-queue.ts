@@ -20,8 +20,12 @@ async function clearCompleted(): Promise<void> {
 }
 
 function renderQueue(): void {
+    if (!Array.isArray(queue)) {
+        queue = [];
+    }
+
     const list = byId('queueList');
-    byId('queueCount').textContent = queue.length;
+    byId('queueCount').textContent = String(queue.length);
 
     if (queue.length === 0) {
         list.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; text-align: center; padding: 15px;">Keine Downloads in der Warteschlange</div>';
@@ -29,11 +33,12 @@ function renderQueue(): void {
     }
 
     list.innerHTML = queue.map((item: QueueItem) => {
+        const safeTitle = escapeHtml(item.title || 'Untitled');
         const isClip = item.customClip ? '* ' : '';
         return `
             <div class="queue-item">
                 <div class="status ${item.status}"></div>
-                <div class="title" title="${item.title}">${isClip}${item.title}</div>
+                <div class="title" title="${safeTitle}">${isClip}${safeTitle}</div>
                 <span class="remove" onclick="removeFromQueue('${item.id}')">x</span>
             </div>
         `;
@@ -46,5 +51,9 @@ async function toggleDownload(): Promise<void> {
         return;
     }
 
-    await window.api.startDownload();
+    const started = await window.api.startDownload();
+    if (!started) {
+        renderQueue();
+        alert('Die Warteschlange ist leer. Fuge zuerst ein VOD oder einen Clip hinzu.');
+    }
 }

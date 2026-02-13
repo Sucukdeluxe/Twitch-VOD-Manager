@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.7.6';
+const APP_VERSION = '3.7.7';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -21,6 +21,7 @@ const DEFAULT_DOWNLOAD_PATH = path.join(app.getPath('desktop'), 'Twitch_VODs');
 const API_TIMEOUT = 10000;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_SECONDS = 5;
+const TWITCH_WEB_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 
 // Ensure directories exist
 if (!fs.existsSync(APPDATA_DIR)) {
@@ -163,6 +164,7 @@ let currentProcess: ChildProcess | null = null;
 let currentDownloadCancelled = false;
 let downloadStartTime = 0;
 let downloadedBytes = 0;
+const userIdLoginCache = new Map<string, string>();
 
 // ==========================================
 // TOOL PATHS
@@ -293,6 +295,11 @@ async function twitchLogin(): Promise<boolean> {
 }
 
 async function ensureTwitchAuth(forceRefresh = false): Promise<boolean> {
+    if (!config.client_id || !config.client_secret) {
+        accessToken = null;
+        return false;
+    }
+
     if (!forceRefresh && accessToken) {
         return true;
     }
@@ -300,12 +307,124 @@ async function ensureTwitchAuth(forceRefresh = false): Promise<boolean> {
     return await twitchLogin();
 }
 
+function normalizeLogin(input: string): string {
+    return input.trim().replace(/^@+/, '').toLowerCase();
+}
+
+function formatTwitchDurationFromSeconds(totalSeconds: number): string {
+    const seconds = Math.max(0, Math.floor(totalSeconds));
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+
+    if (h > 0) return `${h}h${m}m${s}s`;
+    if (m > 0) return `${m}m${s}s`;
+    return `${s}s`;
+}
+
+async function fetchPublicTwitchGql<T>(query: string, variables: Record<string, unknown>): Promise<T | null> {
+    try {
+        const response = await axios.post<{ data?: T; errors?: Array<{ message: string }> }>(
+            'https://gql.twitch.tv/gql',
+            { query, variables },
+            {
+                headers: {
+                    'Client-ID': TWITCH_WEB_CLIENT_ID,
+                    'Content-Type': 'application/json'
+                },
+                timeout: API_TIMEOUT
+            }
+        );
+
+        if (response.data.errors?.length) {
+            console.error('Public Twitch GQL errors:', response.data.errors.map((err) => err.message).join('; '));
+            return null;
+        }
+
+        return response.data.data || null;
+    } catch (e) {
+        console.error('Public Twitch GQL request failed:', e);
+        return null;
+    }
+}
+
+async function getPublicUserId(username: string): Promise<string | null> {
+    const login = normalizeLogin(username);
+    if (!login) return null;
+
+    type UserQueryResult = { user: { id: string; login: string } | null };
+    const data = await fetchPublicTwitchGql<UserQueryResult>(
+        'query($login:String!){ user(login:$login){ id login } }',
+        { login }
+    );
+
+    const user = data?.user;
+    if (!user?.id) return null;
+
+    userIdLoginCache.set(user.id, user.login || login);
+    return user.id;
+}
+
+async function getPublicVODsByLogin(loginName: string): Promise<VOD[]> {
+    const login = normalizeLogin(loginName);
+    if (!login) return [];
+
+    type VideoNode = {
+        id: string;
+        title: string;
+        publishedAt: string;
+        lengthSeconds: number;
+        viewCount: number;
+        previewThumbnailURL: string;
+    };
+
+    type VodsQueryResult = {
+        user: {
+            videos: {
+                edges: Array<{ node: VideoNode }>;
+            };
+        } | null;
+    };
+
+    const data = await fetchPublicTwitchGql<VodsQueryResult>(
+        'query($login:String!,$first:Int!){ user(login:$login){ videos(first:$first, type:ARCHIVE, sort:TIME){ edges{ node{ id title publishedAt lengthSeconds viewCount previewThumbnailURL(width:320,height:180) } } } } }',
+        { login, first: 100 }
+    );
+
+    const edges = data?.user?.videos?.edges || [];
+
+    return edges
+        .map(({ node }) => {
+            const id = node?.id;
+            if (!id) return null;
+
+            return {
+                id,
+                title: node.title || 'Untitled VOD',
+                created_at: node.publishedAt || new Date(0).toISOString(),
+                duration: formatTwitchDurationFromSeconds(node.lengthSeconds || 0),
+                thumbnail_url: node.previewThumbnailURL || '',
+                url: `https://www.twitch.tv/videos/${id}`,
+                view_count: node.viewCount || 0,
+                stream_id: ''
+            } as VOD;
+        })
+        .filter((vod): vod is VOD => Boolean(vod));
+}
+
 async function getUserId(username: string): Promise<string | null> {
-    if (!(await ensureTwitchAuth())) return null;
+    const login = normalizeLogin(username);
+    if (!login) return null;
+
+    const getUserViaPublicApi = async () => {
+        return await getPublicUserId(login);
+    };
+
+    if (!(await ensureTwitchAuth())) return await getUserViaPublicApi();
 
     const fetchUser = async () => {
         return await axios.get('https://api.twitch.tv/helix/users', {
-            params: { login: username },
+            params: { login },
             headers: {
                 'Client-ID': config.client_id,
                 'Authorization': `Bearer ${accessToken}`
@@ -316,25 +435,40 @@ async function getUserId(username: string): Promise<string | null> {
 
     try {
         const response = await fetchUser();
-        return response.data.data[0]?.id || null;
+        const user = response.data.data[0];
+        if (!user?.id) return await getUserViaPublicApi();
+
+        userIdLoginCache.set(user.id, user.login || login);
+        return user.id;
     } catch (e) {
         if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
             try {
                 const retryResponse = await fetchUser();
-                return retryResponse.data.data[0]?.id || null;
+                const user = retryResponse.data.data[0];
+                if (!user?.id) return await getUserViaPublicApi();
+
+                userIdLoginCache.set(user.id, user.login || login);
+                return user.id;
             } catch (retryError) {
                 console.error('Error getting user after relogin:', retryError);
-                return null;
+                return await getUserViaPublicApi();
             }
         }
 
         console.error('Error getting user:', e);
-        return null;
+        return await getUserViaPublicApi();
     }
 }
 
 async function getVODs(userId: string): Promise<VOD[]> {
-    if (!(await ensureTwitchAuth())) return [];
+    const getVodsViaPublicApi = async () => {
+        const login = userIdLoginCache.get(userId);
+        if (!login) return [];
+
+        return await getPublicVODsByLogin(login);
+    };
+
+    if (!(await ensureTwitchAuth())) return await getVodsViaPublicApi();
 
     const fetchVods = async () => {
         return await axios.get('https://api.twitch.tv/helix/videos', {
@@ -353,20 +487,32 @@ async function getVODs(userId: string): Promise<VOD[]> {
 
     try {
         const response = await fetchVods();
-        return response.data.data;
+        const vods = response.data.data || [];
+        const login = vods[0]?.user_login;
+        if (login) {
+            userIdLoginCache.set(userId, normalizeLogin(login));
+        }
+
+        return vods;
     } catch (e) {
         if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
             try {
                 const retryResponse = await fetchVods();
-                return retryResponse.data.data;
+                const vods = retryResponse.data.data || [];
+                const login = vods[0]?.user_login;
+                if (login) {
+                    userIdLoginCache.set(userId, normalizeLogin(login));
+                }
+
+                return vods;
             } catch (retryError) {
                 console.error('Error getting VODs after relogin:', retryError);
-                return [];
+                return await getVodsViaPublicApi();
             }
         }
 
         console.error('Error getting VODs:', e);
-        return [];
+        return await getVodsViaPublicApi();
     }
 }
 
@@ -840,6 +986,7 @@ async function processQueue(): Promise<void> {
 
     isDownloading = true;
     mainWindow?.webContents.send('download-started');
+    mainWindow?.webContents.send('queue-updated', downloadQueue);
 
     for (const item of downloadQueue) {
         if (!isDownloading) break;
@@ -847,6 +994,7 @@ async function processQueue(): Promise<void> {
 
         currentDownloadCancelled = false;
         item.status = 'downloading';
+        saveQueue(downloadQueue);
         mainWindow?.webContents.send('queue-updated', downloadQueue);
 
         const success = await downloadVOD(item, (progress) => {
@@ -860,6 +1008,8 @@ async function processQueue(): Promise<void> {
     }
 
     isDownloading = false;
+    saveQueue(downloadQueue);
+    mainWindow?.webContents.send('queue-updated', downloadQueue);
     mainWindow?.webContents.send('download-finished');
 }
 
@@ -955,7 +1105,15 @@ function setupAutoUpdater() {
 ipcMain.handle('get-config', () => config);
 
 ipcMain.handle('save-config', (_, newConfig: Partial<Config>) => {
+    const previousClientId = config.client_id;
+    const previousClientSecret = config.client_secret;
+
     config = { ...config, ...newConfig };
+
+    if (config.client_id !== previousClientId || config.client_secret !== previousClientSecret) {
+        accessToken = null;
+    }
+
     saveConfig(config);
     return config;
 });
@@ -983,22 +1141,31 @@ ipcMain.handle('add-to-queue', (_, item: Omit<QueueItem, 'id' | 'status' | 'prog
     };
     downloadQueue.push(queueItem);
     saveQueue(downloadQueue);
+    mainWindow?.webContents.send('queue-updated', downloadQueue);
     return downloadQueue;
 });
 
 ipcMain.handle('remove-from-queue', (_, id: string) => {
     downloadQueue = downloadQueue.filter(item => item.id !== id);
     saveQueue(downloadQueue);
+    mainWindow?.webContents.send('queue-updated', downloadQueue);
     return downloadQueue;
 });
 
 ipcMain.handle('clear-completed', () => {
     downloadQueue = downloadQueue.filter(item => item.status !== 'completed');
     saveQueue(downloadQueue);
+    mainWindow?.webContents.send('queue-updated', downloadQueue);
     return downloadQueue;
 });
 
 ipcMain.handle('start-download', async () => {
+    const hasPendingItems = downloadQueue.some(item => item.status !== 'completed');
+    if (!hasPendingItems) {
+        mainWindow?.webContents.send('queue-updated', downloadQueue);
+        return false;
+    }
+
     processQueue();
     return true;
 });

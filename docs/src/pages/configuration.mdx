@@ -1,0 +1,41 @@
+---
+layout: ../layouts/BaseLayout.astro
+title: Configuration
+description: File locations and configuration keys used by the app.
+---
+
+# Configuration
+
+## File Locations
+
+The app stores runtime data in:
+
+`C:\ProgramData\Twitch_VOD_Manager`
+
+| File | Purpose |
+| --- | --- |
+| `config.json` | User settings and Twitch credentials |
+| `download_queue.json` | Persistent download queue state |
+
+Default download path:
+
+`%USERPROFILE%\Desktop\Twitch_VODs`
+
+## Main Config Keys
+
+| Key | Description |
+| --- | --- |
+| `client_id` | Twitch application client id |
+| `client_secret` | Twitch application client secret |
+| `download_path` | Base output folder |
+| `streamers` | Sidebar streamer list |
+| `theme` | UI theme (`twitch`, `discord`, `youtube`, `apple`) |
+| `download_mode` | Full VOD or parts mode |
+| `part_minutes` | Split length in minutes for parts mode |
+
+## Notes
+
+- Credentials are optional. If empty, the app uses public mode for streamer/VOD discovery.
+- Credentials are currently stored in plain text config file.
+- The app trims credential fields before saving to reduce whitespace issues.
+- Legacy keys can exist in config from older versions; unknown keys are ignored.

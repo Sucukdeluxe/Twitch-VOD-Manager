@@ -3,20 +3,60 @@ import '../styles/global.css';
 
 interface Props {
   title: string;
+  description?: string;
 }
 
-const { title } = Astro.props;
+const { title, description = 'Twitch VOD Manager documentation' } = Astro.props;
+
+const nav = [
+  { href: '/', label: 'Overview' },
+  { href: '/getting-started', label: 'Getting Started' },
+  { href: '/features', label: 'Features' },
+  { href: '/configuration', label: 'Configuration' },
+  { href: '/troubleshooting', label: 'Troubleshooting' },
+  { href: '/development', label: 'Development' },
+  { href: '/release-process', label: 'Release Process' }
+];
+
+const pathname = Astro.url.pathname.endsWith('/') ? Astro.url.pathname : `${Astro.url.pathname}/`;
+
+const isActive = (href: string): boolean => {
+  if (href === '/') {
+    return pathname === '/';
+  }
+
+  const normalizedHref = href.endsWith('/') ? href : `${href}/`;
+  return pathname.startsWith(normalizedHref);
+};
 ---
 
 <html lang="de">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
     <title>{title}</title>
   </head>
   <body>
-    <main class="container">
-      <slot />
-    </main>
+    <div class="layout">
+      <aside class="sidebar">
+        <h1 class="brand">Twitch VOD Manager</h1>
+        <p class="tagline">Product and developer documentation</p>
+        <nav>
+          <ul class="nav-list">
+            {nav.map((item) => (
+              <li>
+                <a href={item.href} class={isActive(item.href) ? 'active' : undefined}>{item.label}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </aside>
+      <main class="content">
+        <article class="doc">
+          <slot />
+        </article>
+      </main>
+    </div>
   </body>
 </html>
