@@ -54,3 +54,11 @@ Release must include all of:
 - `Twitch-VOD-Manager-Setup-<version>.exe.blockmap`
 
 Tag version must match app version (example: `v3.7.6`).
+
+## Debug log for failed downloads
+
+From `v3.7.8`, detailed downloader logs are written to:
+
+`C:\ProgramData\Twitch_VOD_Manager\debug.log`
+
+If a download instantly switches from `Stoppen` back to `Start`, check the latest lines in that file for streamlink exit reasons.

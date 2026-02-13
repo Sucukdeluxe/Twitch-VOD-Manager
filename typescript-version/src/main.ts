@@ -8,13 +8,14 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.7.7';
+const APP_VERSION = '3.7.8';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
 const APPDATA_DIR = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'Twitch_VOD_Manager');
 const CONFIG_FILE = path.join(APPDATA_DIR, 'config.json');
 const QUEUE_FILE = path.join(APPDATA_DIR, 'download_queue.json');
+const DEBUG_LOG_FILE = path.join(APPDATA_DIR, 'debug.log');
 const DEFAULT_DOWNLOAD_PATH = path.join(app.getPath('desktop'), 'Twitch_VODs');
 
 // Timeouts
@@ -74,7 +75,13 @@ interface QueueItem {
     eta?: string;
     downloadedBytes?: number;
     totalBytes?: number;
+    last_error?: string;
     customClip?: CustomClip;
+}
+
+interface DownloadResult {
+    success: boolean;
+    error?: string;
 }
 
 interface DownloadProgress {
@@ -223,6 +230,18 @@ function getFFprobePath(): string {
     const ffmpegPath = getFFmpegPath();
     const ffprobeExe = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
     return path.join(path.dirname(ffmpegPath), ffprobeExe);
+}
+
+function appendDebugLog(message: string, details?: unknown): void {
+    try {
+        const ts = new Date().toISOString();
+        const payload = details === undefined
+            ? ''
+            : ` | ${typeof details === 'string' ? details : JSON.stringify(details)}`;
+        fs.appendFileSync(DEBUG_LOG_FILE, `[${ts}] ${message}${payload}\n`);
+    } catch {
+        // ignore debug log errors
+    }
 }
 
 // ==========================================
@@ -756,10 +775,11 @@ function downloadVODPart(
     itemId: string,
     partNum: number,
     totalParts: number
-): Promise<boolean> {
+): Promise<DownloadResult> {
     return new Promise((resolve) => {
         const streamlinkPath = getStreamlinkPath();
         const args = [url, 'best', '-o', filename, '--force'];
+        let lastErrorLine = '';
 
         if (startTime) {
             args.push('--hls-start-offset', startTime);
@@ -769,6 +789,7 @@ function downloadVODPart(
         }
 
         console.log('Starting download:', streamlinkPath, args);
+        appendDebugLog('download-part-start', { itemId, streamlinkPath, filename, args });
 
         const proc = spawn(streamlinkPath, args, { windowsHide: true });
         currentProcess = proc;
@@ -828,7 +849,12 @@ function downloadVODPart(
         });
 
         proc.stderr?.on('data', (data: Buffer) => {
-            console.error('Streamlink error:', data.toString());
+            const message = data.toString().trim();
+            if (message) {
+                lastErrorLine = message.split('\n').pop() || message;
+                appendDebugLog('download-part-stderr', { itemId, message: lastErrorLine });
+                console.error('Streamlink error:', message);
+            }
         });
 
         proc.on('close', (code) => {
@@ -836,26 +862,36 @@ function downloadVODPart(
             currentProcess = null;
 
             if (currentDownloadCancelled) {
-                resolve(false);
+                appendDebugLog('download-part-cancelled', { itemId, filename });
+                resolve({ success: false, error: 'Download wurde abgebrochen.' });
                 return;
             }
 
             if (code === 0 && fs.existsSync(filename)) {
                 const stats = fs.statSync(filename);
                 if (stats.size > 1024 * 1024) {
-                    resolve(true);
+                    appendDebugLog('download-part-success', { itemId, filename, bytes: stats.size });
+                    resolve({ success: true });
                     return;
                 }
+
+                const tooSmall = `Datei zu klein (${stats.size} Bytes)`;
+                appendDebugLog('download-part-failed-small-file', { itemId, filename, bytes: stats.size });
+                resolve({ success: false, error: tooSmall });
+                return;
             }
 
-            resolve(false);
+            const genericError = lastErrorLine || `Streamlink Exit-Code ${code ?? -1}`;
+            appendDebugLog('download-part-failed', { itemId, filename, code, error: genericError });
+            resolve({ success: false, error: genericError });
         });
 
         proc.on('error', (err) => {
             clearInterval(progressInterval);
             console.error('Process error:', err);
             currentProcess = null;
-            resolve(false);
+            appendDebugLog('download-part-process-error', { itemId, error: String(err) });
+            resolve({ success: false, error: String(err) });
         });
     });
 }
@@ -863,7 +899,7 @@ function downloadVODPart(
 async function downloadVOD(
     item: QueueItem,
     onProgress: (progress: DownloadProgress) => void
-): Promise<boolean> {
+): Promise<DownloadResult> {
     const streamer = item.streamer.replace(/[^a-zA-Z0-9_-]/g, '');
     const date = new Date(item.date);
     const dateStr = `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getFullYear()}`;
@@ -907,7 +943,7 @@ async function downloadVOD(
 
                 const partFilename = makeClipFilename(partNum, startOffset);
 
-                const success = await downloadVODPart(
+                const result = await downloadVODPart(
                     item.url,
                     partFilename,
                     formatDuration(startOffset),
@@ -918,11 +954,14 @@ async function downloadVOD(
                     numParts
                 );
 
-                if (!success) return false;
+                if (!result.success) return result;
                 downloadedFiles.push(partFilename);
             }
 
-            return downloadedFiles.length === numParts;
+            return {
+                success: downloadedFiles.length === numParts,
+                error: downloadedFiles.length === numParts ? undefined : 'Nicht alle Clip-Teile konnten heruntergeladen werden.'
+            };
         } else {
             // Single clip file
             const filename = makeClipFilename(clip.startPart, clip.startSec);
@@ -959,7 +998,7 @@ async function downloadVOD(
 
             const partFilename = path.join(folder, `${dateStr}_Part${(i + 1).toString().padStart(2, '0')}.mp4`);
 
-            const success = await downloadVODPart(
+            const result = await downloadVODPart(
                 item.url,
                 partFilename,
                 formatDuration(startSec),
@@ -970,20 +1009,24 @@ async function downloadVOD(
                 numParts
             );
 
-            if (!success) {
-                return false;
+            if (!result.success) {
+                return result;
             }
 
             downloadedFiles.push(partFilename);
         }
 
-        return downloadedFiles.length === numParts;
+        return {
+            success: downloadedFiles.length === numParts,
+            error: downloadedFiles.length === numParts ? undefined : 'Nicht alle Teile konnten heruntergeladen werden.'
+        };
     }
 }
 
 async function processQueue(): Promise<void> {
     if (isDownloading || downloadQueue.length === 0) return;
 
+    appendDebugLog('queue-start', { items: downloadQueue.length });
     isDownloading = true;
     mainWindow?.webContents.send('download-started');
     mainWindow?.webContents.send('queue-updated', downloadQueue);
@@ -992,17 +1035,27 @@ async function processQueue(): Promise<void> {
         if (!isDownloading) break;
         if (item.status === 'completed') continue;
 
+        appendDebugLog('queue-item-start', { itemId: item.id, title: item.title, url: item.url });
+
         currentDownloadCancelled = false;
         item.status = 'downloading';
         saveQueue(downloadQueue);
         mainWindow?.webContents.send('queue-updated', downloadQueue);
 
-        const success = await downloadVOD(item, (progress) => {
+        item.last_error = '';
+
+        const result = await downloadVOD(item, (progress) => {
             mainWindow?.webContents.send('download-progress', progress);
         });
 
-        item.status = success ? 'completed' : 'error';
-        item.progress = success ? 100 : 0;
+        item.status = result.success ? 'completed' : 'error';
+        item.progress = result.success ? 100 : 0;
+        item.last_error = result.success ? '' : (result.error || 'Unbekannter Fehler beim Download');
+        appendDebugLog('queue-item-finished', {
+            itemId: item.id,
+            status: item.status,
+            error: item.last_error
+        });
         saveQueue(downloadQueue);
         mainWindow?.webContents.send('queue-updated', downloadQueue);
     }
@@ -1011,6 +1064,7 @@ async function processQueue(): Promise<void> {
     saveQueue(downloadQueue);
     mainWindow?.webContents.send('queue-updated', downloadQueue);
     mainWindow?.webContents.send('download-finished');
+    appendDebugLog('queue-finished', { items: downloadQueue.length });
 }
 
 // ==========================================

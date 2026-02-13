@@ -31,7 +31,15 @@ async function init(): Promise<void> {
             return;
         }
 
+        item.status = 'downloading';
         item.progress = progress.progress;
+        item.speed = progress.speed;
+        item.eta = progress.eta;
+        item.currentPart = progress.currentPart;
+        item.totalParts = progress.totalParts;
+        item.downloadedBytes = progress.downloadedBytes;
+        item.totalBytes = progress.totalBytes;
+        item.progressStatus = progress.status;
         renderQueue();
     });
 
