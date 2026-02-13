@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.7.8';
+const APP_VERSION = '3.7.9';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -172,6 +172,7 @@ let currentDownloadCancelled = false;
 let downloadStartTime = 0;
 let downloadedBytes = 0;
 const userIdLoginCache = new Map<string, string>();
+let streamlinkCommandCache: { command: string; prefixArgs: string[] } | null = null;
 
 // ==========================================
 // TOOL PATHS
@@ -199,6 +200,52 @@ function getStreamlinkPath(): string {
     }
 
     return 'streamlink';
+}
+
+function canExecute(cmd: string): boolean {
+    try {
+        execSync(cmd, { stdio: 'ignore', windowsHide: true });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function getStreamlinkCommand(): { command: string; prefixArgs: string[] } {
+    if (streamlinkCommandCache) {
+        return streamlinkCommandCache;
+    }
+
+    const directPath = getStreamlinkPath();
+    if (directPath !== 'streamlink' || canExecute('streamlink --version')) {
+        streamlinkCommandCache = { command: directPath, prefixArgs: [] };
+        return streamlinkCommandCache;
+    }
+
+    if (process.platform === 'win32') {
+        if (canExecute('py -3 -m streamlink --version')) {
+            streamlinkCommandCache = { command: 'py', prefixArgs: ['-3', '-m', 'streamlink'] };
+            return streamlinkCommandCache;
+        }
+
+        if (canExecute('python -m streamlink --version')) {
+            streamlinkCommandCache = { command: 'python', prefixArgs: ['-m', 'streamlink'] };
+            return streamlinkCommandCache;
+        }
+    } else {
+        if (canExecute('python3 -m streamlink --version')) {
+            streamlinkCommandCache = { command: 'python3', prefixArgs: ['-m', 'streamlink'] };
+            return streamlinkCommandCache;
+        }
+
+        if (canExecute('python -m streamlink --version')) {
+            streamlinkCommandCache = { command: 'python', prefixArgs: ['-m', 'streamlink'] };
+            return streamlinkCommandCache;
+        }
+    }
+
+    streamlinkCommandCache = { command: directPath, prefixArgs: [] };
+    return streamlinkCommandCache;
 }
 
 function getFFmpegPath(): string {
@@ -777,8 +824,8 @@ function downloadVODPart(
     totalParts: number
 ): Promise<DownloadResult> {
     return new Promise((resolve) => {
-        const streamlinkPath = getStreamlinkPath();
-        const args = [url, 'best', '-o', filename, '--force'];
+        const streamlinkCmd = getStreamlinkCommand();
+        const args = [...streamlinkCmd.prefixArgs, url, 'best', '-o', filename, '--force'];
         let lastErrorLine = '';
 
         if (startTime) {
@@ -788,10 +835,10 @@ function downloadVODPart(
             args.push('--hls-duration', endTime);
         }
 
-        console.log('Starting download:', streamlinkPath, args);
-        appendDebugLog('download-part-start', { itemId, streamlinkPath, filename, args });
+        console.log('Starting download:', streamlinkCmd.command, args);
+        appendDebugLog('download-part-start', { itemId, command: streamlinkCmd.command, filename, args });
 
-        const proc = spawn(streamlinkPath, args, { windowsHide: true });
+        const proc = spawn(streamlinkCmd.command, args, { windowsHide: true });
         currentProcess = proc;
 
         downloadStartTime = Date.now();
@@ -890,8 +937,12 @@ function downloadVODPart(
             clearInterval(progressInterval);
             console.error('Process error:', err);
             currentProcess = null;
-            appendDebugLog('download-part-process-error', { itemId, error: String(err) });
-            resolve({ success: false, error: String(err) });
+            const rawError = String(err);
+            const errorMessage = rawError.includes('ENOENT')
+                ? 'Streamlink nicht gefunden. Installiere Streamlink oder Python+streamlink (py -3 -m pip install streamlink).'
+                : rawError;
+            appendDebugLog('download-part-process-error', { itemId, error: errorMessage, rawError });
+            resolve({ success: false, error: errorMessage });
         });
     });
 }
