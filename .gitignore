@@ -4,6 +4,8 @@ dist/
 installer_output/
 __pycache__/
 *.pyc
+*.pyw
+*.spec
 
 # Config with credentials
 config.json
