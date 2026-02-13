@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.8.3';
+const APP_VERSION = '3.8.4';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -1155,7 +1155,7 @@ function downloadVODPart(
                 return;
             }
 
-            const genericError = lastErrorLine || `Streamlink Exit-Code ${code ?? -1}`;
+            const genericError = lastErrorLine || `Streamlink Fehlercode ${code ?? -1}`;
             appendDebugLog('download-part-failed', { itemId, filename, code, error: genericError });
             resolve({ success: false, error: genericError });
         });
@@ -1599,10 +1599,10 @@ ipcMain.handle('download-clip', async (_, clipUrl: string) => {
 
     if (match1) clipId = match1[1];
     else if (match2) clipId = match2[1];
-    else return { success: false, error: 'Invalid clip URL' };
+    else return { success: false, error: 'Ungueltige Clip-URL' };
 
     const clipInfo = await getClipInfo(clipId);
-    if (!clipInfo) return { success: false, error: 'Clip not found' };
+    if (!clipInfo) return { success: false, error: 'Clip nicht gefunden' };
 
     const folder = path.join(config.download_path, 'Clips', clipInfo.broadcaster_name);
     fs.mkdirSync(folder, { recursive: true });
@@ -1611,8 +1611,9 @@ ipcMain.handle('download-clip', async (_, clipUrl: string) => {
     const filename = path.join(folder, `${safeTitle}.mp4`);
 
     return new Promise((resolve) => {
-        const streamlinkPath = getStreamlinkPath();
-        const proc = spawn(streamlinkPath, [
+        const streamlinkCmd = getStreamlinkCommand();
+        const proc = spawn(streamlinkCmd.command, [
+            ...streamlinkCmd.prefixArgs,
             `https://clips.twitch.tv/${clipId}`,
             'best',
             '-o', filename,
@@ -1623,12 +1624,12 @@ ipcMain.handle('download-clip', async (_, clipUrl: string) => {
             if (code === 0 && fs.existsSync(filename)) {
                 resolve({ success: true, filename });
             } else {
-                resolve({ success: false, error: 'Download failed' });
+                resolve({ success: false, error: `Download fehlgeschlagen (Exit-Code ${code ?? -1})` });
             }
         });
 
         proc.on('error', () => {
-            resolve({ success: false, error: 'Streamlink not found' });
+            resolve({ success: false, error: 'Streamlink nicht gefunden' });
         });
     });
 });

@@ -22,7 +22,7 @@ async function clearCompleted(): Promise<void> {
 function getQueueStatusLabel(item: QueueItem): string {
     if (item.status === 'completed') return 'Abgeschlossen';
     if (item.status === 'error') return 'Fehlgeschlagen';
-    if (item.status === 'downloading') return 'Lauft';
+    if (item.status === 'downloading') return 'Laeuft';
     return 'Wartet';
 }
 
