@@ -291,11 +291,19 @@ async function twitchLogin(): Promise<boolean> {
     }
 }
 
-async function getUserId(username: string): Promise<string | null> {
-    if (!accessToken) return null;
+async function ensureTwitchAuth(forceRefresh = false): Promise<boolean> {
+    if (!forceRefresh && accessToken) {
+        return true;
+    }
 
-    try {
-        const response = await axios.get('https://api.twitch.tv/helix/users', {
+    return await twitchLogin();
+}
+
+async function getUserId(username: string): Promise<string | null> {
+    if (!(await ensureTwitchAuth())) return null;
+
+    const fetchUser = async () => {
+        return await axios.get('https://api.twitch.tv/helix/users', {
             params: { login: username },
             headers: {
                 'Client-ID': config.client_id,
@@ -303,18 +311,32 @@ async function getUserId(username: string): Promise<string | null> {
             },
             timeout: API_TIMEOUT
         });
+    };
+
+    try {
+        const response = await fetchUser();
         return response.data.data[0]?.id || null;
     } catch (e) {
+        if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
+            try {
+                const retryResponse = await fetchUser();
+                return retryResponse.data.data[0]?.id || null;
+            } catch (retryError) {
+                console.error('Error getting user after relogin:', retryError);
+                return null;
+            }
+        }
+
         console.error('Error getting user:', e);
         return null;
     }
 }
 
 async function getVODs(userId: string): Promise<VOD[]> {
-    if (!accessToken) return [];
+    if (!(await ensureTwitchAuth())) return [];
 
-    try {
-        const response = await axios.get('https://api.twitch.tv/helix/videos', {
+    const fetchVods = async () => {
+        return await axios.get('https://api.twitch.tv/helix/videos', {
             params: {
                 user_id: userId,
                 type: 'archive',
@@ -326,18 +348,32 @@ async function getVODs(userId: string): Promise<VOD[]> {
             },
             timeout: API_TIMEOUT
         });
+    };
+
+    try {
+        const response = await fetchVods();
         return response.data.data;
     } catch (e) {
+        if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
+            try {
+                const retryResponse = await fetchVods();
+                return retryResponse.data.data;
+            } catch (retryError) {
+                console.error('Error getting VODs after relogin:', retryError);
+                return [];
+            }
+        }
+
         console.error('Error getting VODs:', e);
         return [];
     }
 }
 
 async function getClipInfo(clipId: string): Promise<any | null> {
-    if (!accessToken) return null;
+    if (!(await ensureTwitchAuth())) return null;
 
-    try {
-        const response = await axios.get('https://api.twitch.tv/helix/clips', {
+    const fetchClip = async () => {
+        return await axios.get('https://api.twitch.tv/helix/clips', {
             params: { id: clipId },
             headers: {
                 'Client-ID': config.client_id,
@@ -345,8 +381,22 @@ async function getClipInfo(clipId: string): Promise<any | null> {
             },
             timeout: API_TIMEOUT
         });
+    };
+
+    try {
+        const response = await fetchClip();
         return response.data.data[0] || null;
     } catch (e) {
+        if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
+            try {
+                const retryResponse = await fetchClip();
+                return retryResponse.data.data[0] || null;
+            } catch (retryError) {
+                console.error('Error getting clip after relogin:', retryError);
+                return null;
+            }
+        }
+
         console.error('Error getting clip:', e);
         return null;
     }

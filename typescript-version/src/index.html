@@ -1628,8 +1628,11 @@
             document.getElementById('pageTitle').textContent = name;
 
             if (!isConnected) {
-                updateStatus('Nicht verbunden', false);
-                return;
+                await connect();
+                if (!isConnected) {
+                    document.getElementById('vodGrid').innerHTML = '<div class="empty-state"><h3>Nicht verbunden</h3><p>Bitte Twitch API Daten in den Einstellungen prufen.</p></div>';
+                    return;
+                }
             }
 
             document.getElementById('vodGrid').innerHTML = '<div class="empty-state"><p>Lade VODs...</p></div>';
@@ -1887,8 +1890,8 @@
 
         // Settings
         async function saveSettings() {
-            const clientId = document.getElementById('clientId').value;
-            const clientSecret = document.getElementById('clientSecret').value;
+            const clientId = document.getElementById('clientId').value.trim();
+            const clientSecret = document.getElementById('clientSecret').value.trim();
             const downloadPath = document.getElementById('downloadPath').value;
             const downloadMode = document.getElementById('downloadMode').value;
             const partMinutes = parseInt(document.getElementById('partMinutes').value);
