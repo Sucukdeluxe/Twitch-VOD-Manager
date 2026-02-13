@@ -46,11 +46,11 @@ function getQueueMetaText(item: QueueItem): string {
     }
 
     if (item.speed) {
-        parts.push(item.speed);
+        parts.push(`Geschwindigkeit: ${item.speed}`);
     }
 
     if (item.eta) {
-        parts.push(`ETA ${item.eta}`);
+        parts.push(`Restzeit: ${item.eta}`);
     }
 
     if (!parts.length && item.status === 'pending') {

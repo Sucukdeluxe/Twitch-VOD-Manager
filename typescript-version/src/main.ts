@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.8.2';
+const APP_VERSION = '3.8.3';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -1093,7 +1093,7 @@ function downloadVODPart(
                         progress: -1, // Unknown total
                         speed: formatSpeed(speed),
                         eta: '',
-                        status: `Part ${partNum}/${totalParts}: ${formatBytes(downloadedBytes)}`,
+                        status: `${formatBytes(downloadedBytes)} heruntergeladen`,
                         currentPart: partNum,
                         totalParts: totalParts,
                         downloadedBytes: downloadedBytes
@@ -1115,7 +1115,7 @@ function downloadVODPart(
                     progress: percent,
                     speed: '',
                     eta: '',
-                    status: `Part ${partNum}/${totalParts}: ${percent.toFixed(1)}%`,
+                    status: `${percent.toFixed(1)}%`,
                     currentPart: partNum,
                     totalParts: totalParts
                 });
