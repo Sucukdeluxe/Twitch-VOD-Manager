@@ -15,7 +15,7 @@ interface QueueItem {
     date: string;
     streamer: string;
     duration_str: string;
-    status: 'pending' | 'downloading' | 'completed' | 'error';
+    status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error';
     progress: number;
     currentPart?: number;
     totalParts?: number;
@@ -60,11 +60,13 @@ contextBridge.exposeInMainWorld('api', {
     getQueue: () => ipcRenderer.invoke('get-queue'),
     addToQueue: (item: Omit<QueueItem, 'id' | 'status' | 'progress'>) => ipcRenderer.invoke('add-to-queue', item),
     removeFromQueue: (id: string) => ipcRenderer.invoke('remove-from-queue', id),
+    reorderQueue: (orderIds: string[]) => ipcRenderer.invoke('reorder-queue', orderIds),
     clearCompleted: () => ipcRenderer.invoke('clear-completed'),
     retryFailedDownloads: () => ipcRenderer.invoke('retry-failed-downloads'),
 
     // Download
     startDownload: () => ipcRenderer.invoke('start-download'),
+    pauseDownload: () => ipcRenderer.invoke('pause-download'),
     cancelDownload: () => ipcRenderer.invoke('cancel-download'),
     isDownloading: () => ipcRenderer.invoke('is-downloading'),
     downloadClip: (url: string) => ipcRenderer.invoke('download-clip', url),

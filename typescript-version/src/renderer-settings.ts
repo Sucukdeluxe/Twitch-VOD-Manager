@@ -42,24 +42,42 @@ function changeLanguage(lang: string): void {
 
 function renderPreflightResult(result: PreflightResult): void {
     const entries = [
-        ['Internet', result.checks.internet],
-        ['Streamlink', result.checks.streamlink],
-        ['FFmpeg', result.checks.ffmpeg],
-        ['FFprobe', result.checks.ffprobe],
-        ['Download-Pfad', result.checks.downloadPathWritable]
+        [UI_TEXT.static.preflightInternet, result.checks.internet],
+        [UI_TEXT.static.preflightStreamlink, result.checks.streamlink],
+        [UI_TEXT.static.preflightFfmpeg, result.checks.ffmpeg],
+        [UI_TEXT.static.preflightFfprobe, result.checks.ffprobe],
+        [UI_TEXT.static.preflightPath, result.checks.downloadPathWritable]
     ];
 
     const lines = entries.map(([name, ok]) => `${ok ? 'OK' : 'FAIL'} ${name}`).join('\n');
-    const extra = result.messages.length ? `\n\n${result.messages.join('\n')}` : '\n\nAlles bereit.';
+    const extra = result.messages.length ? `\n\n${result.messages.join('\n')}` : `\n\n${UI_TEXT.static.preflightReady}`;
 
     byId('preflightResult').textContent = `${lines}${extra}`;
+
+    const badge = byId('healthBadge');
+    badge.classList.remove('good', 'warn', 'bad', 'unknown');
+
+    if (result.ok) {
+        badge.classList.add('good');
+        badge.textContent = UI_TEXT.static.healthGood;
+        return;
+    }
+
+    const failCount = Object.values(result.checks).filter((ok) => !ok).length;
+    if (failCount <= 2) {
+        badge.classList.add('warn');
+        badge.textContent = UI_TEXT.static.healthWarn;
+    } else {
+        badge.classList.add('bad');
+        badge.textContent = UI_TEXT.static.healthBad;
+    }
 }
 
 async function runPreflight(autoFix = false): Promise<void> {
     const btn = byId<HTMLButtonElement>(autoFix ? 'btnPreflightFix' : 'btnPreflightRun');
     const old = btn.textContent || '';
     btn.disabled = true;
-    btn.textContent = autoFix ? 'Fixe...' : 'Prufe...';
+    btn.textContent = autoFix ? UI_TEXT.static.preflightFixing : UI_TEXT.static.preflightChecking;
 
     try {
         const result = await window.api.runPreflight(autoFix);

@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.9.0';
+const APP_VERSION = '4.0.0';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -71,7 +71,7 @@ interface QueueItem {
     date: string;
     streamer: string;
     duration_str: string;
-    status: 'pending' | 'downloading' | 'completed' | 'error';
+    status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error';
     progress: number;
     currentPart?: number;
     totalParts?: number;
@@ -190,6 +190,7 @@ let downloadQueue: QueueItem[] = loadQueue();
 let isDownloading = false;
 let currentProcess: ChildProcess | null = null;
 let currentDownloadCancelled = false;
+let pauseRequested = false;
 let downloadStartTime = 0;
 let downloadedBytes = 0;
 const userIdLoginCache = new Map<string, string>();
@@ -1440,12 +1441,13 @@ async function processQueue(): Promise<void> {
 
     appendDebugLog('queue-start', { items: downloadQueue.length });
     isDownloading = true;
+    pauseRequested = false;
     mainWindow?.webContents.send('download-started');
     mainWindow?.webContents.send('queue-updated', downloadQueue);
 
     for (const item of downloadQueue) {
-        if (!isDownloading) break;
-        if (item.status === 'completed') continue;
+        if (!isDownloading || pauseRequested) break;
+        if (item.status === 'completed' || item.status === 'error' || item.status === 'paused') continue;
 
         appendDebugLog('queue-item-start', { itemId: item.id, title: item.title, url: item.url });
 
@@ -1472,8 +1474,8 @@ async function processQueue(): Promise<void> {
 
             finalResult = result;
 
-            if (!isDownloading || currentDownloadCancelled) {
-                finalResult = { success: false, error: 'Download wurde abgebrochen.' };
+            if (!isDownloading || currentDownloadCancelled || pauseRequested) {
+                finalResult = { success: false, error: pauseRequested ? 'Download wurde pausiert.' : 'Download wurde abgebrochen.' };
                 break;
             }
 
@@ -1494,9 +1496,10 @@ async function processQueue(): Promise<void> {
             }
         }
 
-        item.status = finalResult.success ? 'completed' : 'error';
-        item.progress = finalResult.success ? 100 : 0;
-        item.last_error = finalResult.success ? '' : (finalResult.error || 'Unbekannter Fehler beim Download');
+        const wasPaused = pauseRequested || (finalResult.error || '').includes('pausiert');
+        item.status = finalResult.success ? 'completed' : (wasPaused ? 'paused' : 'error');
+        item.progress = finalResult.success ? 100 : item.progress;
+        item.last_error = finalResult.success || wasPaused ? '' : (finalResult.error || 'Unbekannter Fehler beim Download');
         appendDebugLog('queue-item-finished', {
             itemId: item.id,
             status: item.status,
@@ -1507,6 +1510,7 @@ async function processQueue(): Promise<void> {
     }
 
     isDownloading = false;
+    pauseRequested = false;
     saveQueue(downloadQueue);
     mainWindow?.webContents.send('queue-updated', downloadQueue);
     mainWindow?.webContents.send('download-finished');
@@ -1659,6 +1663,20 @@ ipcMain.handle('clear-completed', () => {
     return downloadQueue;
 });
 
+ipcMain.handle('reorder-queue', (_, orderIds: string[]) => {
+    const order = new Map(orderIds.map((id, idx) => [id, idx]));
+    const withOrder = [...downloadQueue].sort((a, b) => {
+        const ai = order.has(a.id) ? (order.get(a.id) as number) : Number.MAX_SAFE_INTEGER;
+        const bi = order.has(b.id) ? (order.get(b.id) as number) : Number.MAX_SAFE_INTEGER;
+        return ai - bi;
+    });
+
+    downloadQueue = withOrder;
+    saveQueue(downloadQueue);
+    mainWindow?.webContents.send('queue-updated', downloadQueue);
+    return downloadQueue;
+});
+
 ipcMain.handle('retry-failed-downloads', () => {
     downloadQueue = downloadQueue.map((item) => {
         if (item.status !== 'error') return item;
@@ -1682,18 +1700,35 @@ ipcMain.handle('retry-failed-downloads', () => {
 });
 
 ipcMain.handle('start-download', async () => {
-    const hasPendingItems = downloadQueue.some(item => item.status !== 'completed');
+    downloadQueue = downloadQueue.map((item) => item.status === 'paused' ? { ...item, status: 'pending' } : item);
+
+    const hasPendingItems = downloadQueue.some(item => item.status === 'pending');
     if (!hasPendingItems) {
         mainWindow?.webContents.send('queue-updated', downloadQueue);
         return false;
     }
 
+    saveQueue(downloadQueue);
+    mainWindow?.webContents.send('queue-updated', downloadQueue);
+
     processQueue();
+    return true;
+});
+
+ipcMain.handle('pause-download', () => {
+    if (!isDownloading) return false;
+
+    pauseRequested = true;
+    currentDownloadCancelled = true;
+    if (currentProcess) {
+        currentProcess.kill();
+    }
     return true;
 });
 
 ipcMain.handle('cancel-download', () => {
     isDownloading = false;
+    pauseRequested = false;
     currentDownloadCancelled = true;
     if (currentProcess) {
         currentProcess.kill();

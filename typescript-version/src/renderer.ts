@@ -117,7 +117,8 @@ function mergeQueueState(nextQueue: QueueItem[]): QueueItem[] {
 
 function updateDownloadButtonState(): void {
     const btn = byId('btnStart');
-    btn.textContent = downloading ? UI_TEXT.queue.stop : UI_TEXT.queue.start;
+    const hasPaused = queue.some((item) => item.status === 'paused');
+    btn.textContent = downloading ? UI_TEXT.queue.stop : (hasPaused ? UI_TEXT.queue.resume : UI_TEXT.queue.start);
     btn.classList.toggle('downloading', downloading);
 }
 

@@ -31,6 +31,11 @@ function setPlaceholder(id: string, value: string): void {
     if (node) node.placeholder = value;
 }
 
+function setTitle(id: string, value: string): void {
+    const node = document.getElementById(id);
+    if (node) node.setAttribute('title', value);
+}
+
 function setLanguage(lang: string): LanguageCode {
     currentLanguage = lang === 'en' ? 'en' : 'de';
     UI_TEXT = UI_TEXTS[currentLanguage];
@@ -46,7 +51,9 @@ function applyLanguageToStaticUI(): void {
     setText('navMergeText', UI_TEXT.static.navMerge);
     setText('navSettingsText', UI_TEXT.static.navSettings);
     setText('queueTitleText', UI_TEXT.static.queueTitle);
+    setText('healthBadge', UI_TEXT.static.healthUnknown);
     setText('btnRetryFailed', UI_TEXT.static.retryFailed);
+    setTitle('btnRetryFailed', UI_TEXT.static.retryFailedHint);
     setText('btnClear', UI_TEXT.static.clearQueue);
     setText('refreshText', UI_TEXT.static.refresh);
     setText('clipsHeading', UI_TEXT.static.clipsHeading);

@@ -39,3 +39,4 @@ let clipTotalSeconds = 0;
 
 let updateReady = false;
 let debugLogAutoRefreshTimer: number | null = null;
+let draggedQueueItemId: string | null = null;

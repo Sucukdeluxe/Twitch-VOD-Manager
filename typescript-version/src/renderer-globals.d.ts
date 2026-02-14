@@ -35,7 +35,7 @@ interface QueueItem {
     date: string;
     streamer: string;
     duration_str: string;
-    status: 'pending' | 'downloading' | 'completed' | 'error';
+    status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error';
     progress: number;
     currentPart?: number;
     totalParts?: number;
@@ -112,9 +112,11 @@ interface ApiBridge {
     getQueue(): Promise<QueueItem[]>;
     addToQueue(item: Omit<QueueItem, 'id' | 'status' | 'progress'>): Promise<QueueItem[]>;
     removeFromQueue(id: string): Promise<QueueItem[]>;
+    reorderQueue(orderIds: string[]): Promise<QueueItem[]>;
     clearCompleted(): Promise<QueueItem[]>;
     retryFailedDownloads(): Promise<QueueItem[]>;
     startDownload(): Promise<boolean>;
+    pauseDownload(): Promise<boolean>;
     cancelDownload(): Promise<boolean>;
     isDownloading(): Promise<boolean>;
     downloadClip(url: string): Promise<{ success: boolean; error?: string }>;

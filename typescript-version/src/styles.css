@@ -179,6 +179,7 @@ body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 10px;
+    gap: 8px;
 }
 
 .queue-title {
@@ -197,6 +198,33 @@ body {
 .queue-list {
     max-height: 210px;
     overflow-y: auto;
+}
+
+.health-badge {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+
+.health-badge.good {
+    background: rgba(0, 200, 83, 0.2);
+    border-color: rgba(0, 200, 83, 0.45);
+    color: #93efb9;
+}
+
+.health-badge.warn {
+    background: rgba(255, 171, 0, 0.2);
+    border-color: rgba(255, 171, 0, 0.45);
+    color: #ffd98e;
+}
+
+.health-badge.bad,
+.health-badge.unknown {
+    background: rgba(255, 68, 68, 0.2);
+    border-color: rgba(255, 68, 68, 0.45);
+    color: #ffaaaa;
 }
 
 .queue-item {

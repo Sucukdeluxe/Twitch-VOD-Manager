@@ -125,12 +125,13 @@
             <div class="queue-section">
                 <div class="queue-header">
                     <span class="queue-title" id="queueTitleText">Warteschlange</span>
+                    <span class="health-badge unknown" id="healthBadge">System: Unbekannt</span>
                     <span class="queue-count" id="queueCount">0</span>
                 </div>
                 <div class="queue-list" id="queueList"></div>
                 <div class="queue-actions">
                     <button class="btn btn-start" id="btnStart" onclick="toggleDownload()">Start</button>
-                    <button class="btn btn-retry" id="btnRetryFailed" onclick="retryFailedDownloads()">Fehler neu</button>
+                    <button class="btn btn-retry" id="btnRetryFailed" onclick="retryFailedDownloads()" title="Nur fehlgeschlagene Downloads erneut starten">Wiederholen</button>
                     <button class="btn btn-clear" id="btnClear" onclick="clearCompleted()">Leeren</button>
                 </div>
             </div>
@@ -300,8 +301,8 @@
                         <div class="form-group">
                             <label id="languageLabel">Sprache</label>
                             <select id="languageSelect" onchange="changeLanguage(this.value)">
-                                <option value="de" id="languageDeText">Deutsch</option>
-                                <option value="en" id="languageEnText">Englisch</option>
+                                <option value="de" id="languageDeText">🇩🇪 Deutsch</option>
+                                <option value="en" id="languageEnText">🇺🇸 English</option>
                             </select>
                         </div>
                     </div>
@@ -344,7 +345,7 @@
 
                     <div class="settings-card">
                         <h3 id="updateTitle">Updates</h3>
-                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v3.9.0</p>
+                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v4.0.0</p>
                         <button class="btn-secondary" id="checkUpdateBtn" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
 
@@ -376,7 +377,7 @@
                     <div class="status-dot" id="statusDot"></div>
                     <span id="statusText">Nicht verbunden</span>
                 </div>
-                <span id="versionText">v3.9.0</span>
+                <span id="versionText">v4.0.0</span>
             </div>
         </main>
     </div>

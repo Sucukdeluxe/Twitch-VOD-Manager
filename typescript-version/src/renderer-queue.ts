@@ -27,6 +27,7 @@ async function retryFailedDownloads(): Promise<void> {
 function getQueueStatusLabel(item: QueueItem): string {
     if (item.status === 'completed') return UI_TEXT.queue.statusDone;
     if (item.status === 'error') return UI_TEXT.queue.statusFailed;
+    if (item.status === 'paused') return UI_TEXT.queue.statusPaused;
     if (item.status === 'downloading') return UI_TEXT.queue.statusRunning;
     return UI_TEXT.queue.statusWaiting;
 }
@@ -34,6 +35,7 @@ function getQueueStatusLabel(item: QueueItem): string {
 function getQueueProgressText(item: QueueItem): string {
     if (item.status === 'completed') return '100%';
     if (item.status === 'error') return UI_TEXT.queue.progressError;
+    if (item.status === 'paused') return UI_TEXT.queue.progressReady;
     if (item.status === 'pending') return UI_TEXT.queue.progressReady;
     if (item.progress > 0) return `${Math.max(0, Math.min(100, item.progress)).toFixed(1)}%`;
     return item.progressStatus || UI_TEXT.queue.progressLoading;
@@ -62,6 +64,10 @@ function getQueueMetaText(item: QueueItem): string {
         parts.push(UI_TEXT.queue.readyToDownload);
     }
 
+    if (!parts.length && item.status === 'paused') {
+        parts.push(UI_TEXT.queue.statusPaused);
+    }
+
     if (!parts.length && item.status === 'downloading') {
         parts.push(item.progressStatus || UI_TEXT.queue.started);
     }
@@ -84,6 +90,9 @@ function renderQueue(): void {
 
     const list = byId('queueList');
     byId('queueCount').textContent = String(queue.length);
+    const retryBtn = byId<HTMLButtonElement>('btnRetryFailed');
+    const hasFailed = queue.some((item) => item.status === 'error');
+    retryBtn.disabled = !hasFailed;
 
     if (queue.length === 0) {
         list.innerHTML = `<div style="color: var(--text-secondary); font-size: 12px; text-align: center; padding: 15px;">${UI_TEXT.queue.empty}</div>`;
@@ -124,7 +133,7 @@ function renderQueue(): void {
 
 async function toggleDownload(): Promise<void> {
     if (downloading) {
-        await window.api.cancelDownload();
+        await window.api.pauseDownload();
         return;
     }
 
