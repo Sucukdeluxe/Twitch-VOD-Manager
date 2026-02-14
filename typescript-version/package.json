@@ -9,6 +9,7 @@
     "build": "tsc",
     "start": "npm run build && electron .",
     "test:e2e": "npm exec --yes --package=playwright -- node scripts/smoke-test.js",
+    "test:e2e:full": "npm exec --yes --package=playwright -- node scripts/smoke-test-full.js",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win"
