@@ -332,7 +332,20 @@ async function downloadClip(): Promise<void> {
         return;
     }
 
-    status.textContent = UI_TEXT.clips.errorPrefix + (result.error || UI_TEXT.clips.unknownError);
+    const backendError = (result.error || '').trim();
+    let localizedError = backendError;
+
+    if (backendError === 'Ungueltige Clip-URL') {
+        localizedError = currentLanguage === 'en' ? 'Invalid clip URL' : backendError;
+    } else if (backendError === 'Clip nicht gefunden') {
+        localizedError = currentLanguage === 'en' ? 'Clip not found' : backendError;
+    } else if (backendError === 'Streamlink nicht gefunden') {
+        localizedError = currentLanguage === 'en' ? 'Streamlink not found' : backendError;
+    } else if (backendError.startsWith('Download fehlgeschlagen')) {
+        localizedError = currentLanguage === 'en' ? backendError.replace('Download fehlgeschlagen', 'Download failed') : backendError;
+    }
+
+    status.textContent = UI_TEXT.clips.errorPrefix + (localizedError || UI_TEXT.clips.unknownError);
     status.className = 'clip-status error';
 }
 
