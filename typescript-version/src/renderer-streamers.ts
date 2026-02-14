@@ -84,7 +84,7 @@ function renderVODs(vods: VOD[] | null | undefined, streamer: string): void {
 
     grid.innerHTML = vods.map((vod: VOD) => {
         const thumb = vod.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180');
-        const date = new Date(vod.created_at).toLocaleDateString('de-DE');
+        const date = formatUiDate(vod.created_at);
         const escapedTitle = vod.title.replace(/'/g, "\\'").replace(/\"/g, '&quot;');
         const safeDisplayTitle = escapeHtml(vod.title || UI_TEXT.vods.untitled);
 
@@ -96,7 +96,7 @@ function renderVODs(vods: VOD[] | null | undefined, streamer: string): void {
                     <div class="vod-meta">
                         <span>${date}</span>
                         <span>${vod.duration}</span>
-                        <span>${vod.view_count.toLocaleString()} ${UI_TEXT.vods.views}</span>
+                        <span>${formatUiNumber(vod.view_count)} ${UI_TEXT.vods.views}</span>
                     </div>
                 </div>
                 <div class="vod-actions">

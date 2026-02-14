@@ -114,6 +114,7 @@ const UI_TEXT_DE = {
         failed: 'Fehler beim Zusammenfugen der Videos.'
     },
     updates: {
+        bannerDefault: 'Neue Version verfugbar!',
         latest: 'Du hast die neueste Version!',
         downloading: 'Wird heruntergeladen...',
         available: 'verfugbar!',

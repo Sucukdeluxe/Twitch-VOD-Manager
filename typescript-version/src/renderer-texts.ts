@@ -74,6 +74,8 @@ function applyLanguageToStaticUI(): void {
     setText('partMinutesLabel', UI_TEXT.static.partMinutesLabel);
     setText('updateTitle', UI_TEXT.static.updateTitle);
     setText('checkUpdateBtn', UI_TEXT.static.checkUpdates);
+    setText('updateText', UI_TEXT.updates.bannerDefault);
+    setText('updateButton', UI_TEXT.updates.downloadNow);
     setPlaceholder('newStreamer', UI_TEXT.static.streamerPlaceholder);
 
     const status = document.getElementById('statusText')?.textContent?.trim() || '';

@@ -30,8 +30,13 @@ function changeLanguage(lang: string): void {
 
     renderQueue();
     renderStreamers();
-    if (!currentStreamer) {
-        byId('pageTitle').textContent = UI_TEXT.tabs.vods;
+
+    const activeTabId = document.querySelector('.tab-content.active')?.id || 'vodsTab';
+    const activeTab = activeTabId.replace('Tab', '');
+    if (activeTab === 'vods' && currentStreamer) {
+        byId('pageTitle').textContent = currentStreamer;
+    } else {
+        byId('pageTitle').textContent = (UI_TEXT.tabs as Record<string, string>)[activeTab] || UI_TEXT.appName;
     }
 }
 

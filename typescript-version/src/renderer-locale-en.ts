@@ -114,6 +114,7 @@ const UI_TEXT_EN = {
         failed: 'Failed to merge videos.'
     },
     updates: {
+        bannerDefault: 'New version available!',
         latest: 'You are on the latest version!',
         downloading: 'Downloading...',
         available: 'available!',
