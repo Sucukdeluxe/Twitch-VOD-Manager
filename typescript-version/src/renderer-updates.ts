@@ -7,7 +7,7 @@ async function checkUpdate(): Promise<void> {
 
     setTimeout(() => {
         if (byId('updateBanner').style.display !== 'flex') {
-            alert('Du hast die neueste Version!');
+            alert(UI_TEXT.updates.latest);
         }
     }, 2000);
 }
@@ -18,7 +18,7 @@ function downloadUpdate(): void {
         return;
     }
 
-    byId('updateButton').textContent = 'Wird heruntergeladen...';
+    byId('updateButton').textContent = UI_TEXT.updates.downloading;
     byId('updateButton').disabled = true;
     byId('updateProgress').style.display = 'block';
     byId('updateProgressBar').classList.add('downloading');
@@ -27,8 +27,8 @@ function downloadUpdate(): void {
 
 window.api.onUpdateAvailable((info: UpdateInfo) => {
     byId('updateBanner').style.display = 'flex';
-    byId('updateText').textContent = `Version ${info.version} verfügbar!`;
-    byId('updateButton').textContent = 'Jetzt herunterladen';
+    byId('updateText').textContent = `Version ${info.version} ${UI_TEXT.updates.available}`;
+    byId('updateButton').textContent = UI_TEXT.updates.downloadNow;
 });
 
 window.api.onUpdateDownloadProgress((progress: UpdateDownloadProgress) => {
@@ -38,7 +38,7 @@ window.api.onUpdateDownloadProgress((progress: UpdateDownloadProgress) => {
 
     const mb = (progress.transferred / 1024 / 1024).toFixed(1);
     const totalMb = (progress.total / 1024 / 1024).toFixed(1);
-    byId('updateText').textContent = `Download: ${mb} / ${totalMb} MB (${progress.percent.toFixed(0)}%)`;
+    byId('updateText').textContent = `${UI_TEXT.updates.downloadLabel}: ${mb} / ${totalMb} MB (${progress.percent.toFixed(0)}%)`;
 });
 
 window.api.onUpdateDownloaded((info: UpdateInfo) => {
@@ -48,7 +48,7 @@ window.api.onUpdateDownloaded((info: UpdateInfo) => {
     bar.classList.remove('downloading');
     bar.style.width = '100%';
 
-    byId('updateText').textContent = `Version ${info.version} bereit zur Installation!`;
-    byId('updateButton').textContent = 'Jetzt installieren';
+    byId('updateText').textContent = `Version ${info.version} ${UI_TEXT.updates.ready}`;
+    byId('updateButton').textContent = UI_TEXT.updates.installNow;
     byId('updateButton').disabled = false;
 });

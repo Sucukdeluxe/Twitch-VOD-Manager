@@ -43,8 +43,8 @@ async function removeStreamer(name: string): Promise<void> {
     byId('vodGrid').innerHTML = `
         <div class="empty-state">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-4 5-4v8zm2-8l5 4-5 4V9z"/></svg>
-            <h3>Keine VODs</h3>
-            <p>Wahle einen Streamer aus der Liste.</p>
+            <h3>${UI_TEXT.vods.noneTitle}</h3>
+            <p>${UI_TEXT.vods.noneText}</p>
         </div>
     `;
 }
@@ -59,14 +59,14 @@ async function selectStreamer(name: string): Promise<void> {
     }
 
     if (!isConnected) {
-        updateStatus('Ohne Login (Public Modus)', false);
+        updateStatus(UI_TEXT.status.noLogin, false);
     }
 
-    byId('vodGrid').innerHTML = '<div class="empty-state"><p>Lade VODs...</p></div>';
+    byId('vodGrid').innerHTML = `<div class="empty-state"><p>${UI_TEXT.vods.loading}</p></div>`;
 
     const userId = await window.api.getUserId(name);
     if (!userId) {
-        byId('vodGrid').innerHTML = '<div class="empty-state"><h3>Streamer nicht gefunden</h3></div>';
+        byId('vodGrid').innerHTML = `<div class="empty-state"><h3>${UI_TEXT.vods.notFound}</h3></div>`;
         return;
     }
 
@@ -78,7 +78,7 @@ function renderVODs(vods: VOD[] | null | undefined, streamer: string): void {
     const grid = byId('vodGrid');
 
     if (!vods || vods.length === 0) {
-        grid.innerHTML = '<div class="empty-state"><h3>Keine VODs gefunden</h3><p>Dieser Streamer hat keine VODs.</p></div>';
+        grid.innerHTML = `<div class="empty-state"><h3>${UI_TEXT.vods.noResultsTitle}</h3><p>${UI_TEXT.vods.noResultsText}</p></div>`;
         return;
     }
 
@@ -86,7 +86,7 @@ function renderVODs(vods: VOD[] | null | undefined, streamer: string): void {
         const thumb = vod.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180');
         const date = new Date(vod.created_at).toLocaleDateString('de-DE');
         const escapedTitle = vod.title.replace(/'/g, "\\'").replace(/\"/g, '&quot;');
-        const safeDisplayTitle = escapeHtml(vod.title || 'Unbenanntes VOD');
+        const safeDisplayTitle = escapeHtml(vod.title || UI_TEXT.vods.untitled);
 
         return `
             <div class="vod-card">
@@ -96,12 +96,12 @@ function renderVODs(vods: VOD[] | null | undefined, streamer: string): void {
                     <div class="vod-meta">
                         <span>${date}</span>
                         <span>${vod.duration}</span>
-                        <span>${vod.view_count.toLocaleString()} Aufrufe</span>
+                        <span>${vod.view_count.toLocaleString()} ${UI_TEXT.vods.views}</span>
                     </div>
                 </div>
                 <div class="vod-actions">
                     <button class="vod-btn secondary" onclick="openClipDialog('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">Clip</button>
-                    <button class="vod-btn primary" onclick="addToQueue('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">+ Warteschlange</button>
+                    <button class="vod-btn primary" onclick="addToQueue('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">${UI_TEXT.vods.addQueue}</button>
                 </div>
             </div>
         `;

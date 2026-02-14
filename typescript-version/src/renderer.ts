@@ -1,17 +1,20 @@
 async function init(): Promise<void> {
     config = await window.api.getConfig();
+    const language = setLanguage((config.language as string) || 'de');
+    config.language = language;
     const initialQueue = await window.api.getQueue();
     queue = Array.isArray(initialQueue) ? initialQueue : [];
     const version = await window.api.getVersion();
 
     byId('versionText').textContent = `v${version}`;
     byId('versionInfo').textContent = `Version: v${version}`;
-    document.title = `Twitch VOD Manager v${version}`;
+    document.title = `${UI_TEXT.appName} v${version}`;
 
     byId<HTMLInputElement>('clientId').value = config.client_id ?? '';
     byId<HTMLInputElement>('clientSecret').value = config.client_secret ?? '';
     byId<HTMLInputElement>('downloadPath').value = config.download_path ?? '';
     byId<HTMLSelectElement>('themeSelect').value = config.theme ?? 'twitch';
+    byId<HTMLSelectElement>('languageSelect').value = config.language ?? 'de';
     byId<HTMLSelectElement>('downloadMode').value = config.download_mode ?? 'full';
     byId<HTMLInputElement>('partMinutes').value = String(config.part_minutes ?? 120);
 
@@ -66,7 +69,7 @@ async function init(): Promise<void> {
     if (config.client_id && config.client_secret) {
         await connect();
     } else {
-        updateStatus('Ohne Login (Public Modus)', false);
+        updateStatus(UI_TEXT.status.noLogin, false);
     }
 
     if (config.streamers && config.streamers.length > 0) {
@@ -111,7 +114,7 @@ function mergeQueueState(nextQueue: QueueItem[]): QueueItem[] {
 
 function updateDownloadButtonState(): void {
     const btn = byId('btnStart');
-    btn.textContent = downloading ? 'Stoppen' : 'Start';
+    btn.textContent = downloading ? UI_TEXT.queue.stop : UI_TEXT.queue.start;
     btn.classList.toggle('downloading', downloading);
 }
 
@@ -134,15 +137,9 @@ function showTab(tab: string): void {
     query(`.nav-item[data-tab="${tab}"]`).classList.add('active');
     byId(tab + 'Tab').classList.add('active');
 
-    const titles: Record<string, string> = {
-        vods: 'VODs',
-        clips: 'Clips',
-        cutter: 'Video schneiden',
-        merge: 'Videos Zusammenfugen',
-        settings: 'Einstellungen'
-    };
+    const titles: Record<string, string> = UI_TEXT.tabs;
 
-    byId('pageTitle').textContent = currentStreamer || titles[tab] || 'Twitch VOD Manager';
+    byId('pageTitle').textContent = currentStreamer || titles[tab] || UI_TEXT.appName;
 }
 
 function parseDurationToSeconds(durStr: string): number {
@@ -185,7 +182,7 @@ function openClipDialog(url: string, title: string, date: string, streamer: stri
     clipDialogData = { url, title, date, streamer, duration };
     clipTotalSeconds = parseDurationToSeconds(duration);
 
-    byId('clipDialogTitle').textContent = `Clip zuschneiden (${duration})`;
+    byId('clipDialogTitle').textContent = `${UI_TEXT.clips.dialogTitle} (${duration})`;
     byId<HTMLInputElement>('clipStartSlider').max = String(clipTotalSeconds);
     byId<HTMLInputElement>('clipEndSlider').max = String(clipTotalSeconds);
     byId<HTMLInputElement>('clipStartSlider').value = '0';
@@ -241,7 +238,7 @@ function updateClipDuration(): void {
         durationDisplay.textContent = formatSecondsToTime(duration);
         durationDisplay.style.color = '#00c853';
     } else {
-        durationDisplay.textContent = 'Ungultig!';
+        durationDisplay.textContent = UI_TEXT.clips.invalidDuration;
         durationDisplay.style.color = '#ff4444';
     }
 
@@ -259,8 +256,8 @@ function updateFilenameExamples(): void {
     const startSec = parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value);
     const timeStr = formatSecondsToTimeDashed(startSec);
 
-    byId('formatSimple').textContent = `${dateStr}_${partNum}.mp4 (Standard)`;
-    byId('formatTimestamp').textContent = `${dateStr}_CLIP_${timeStr}_${partNum}.mp4 (mit Zeitstempel)`;
+    byId('formatSimple').textContent = `${dateStr}_${partNum}.mp4 ${UI_TEXT.clips.formatSimple}`;
+    byId('formatTimestamp').textContent = `${dateStr}_CLIP_${timeStr}_${partNum}.mp4 ${UI_TEXT.clips.formatTimestamp}`;
 }
 
 async function confirmClipDialog(): Promise<void> {
@@ -275,12 +272,12 @@ async function confirmClipDialog(): Promise<void> {
     const filenameFormat = query<HTMLInputElement>('input[name="filenameFormat"]:checked').value as 'simple' | 'timestamp';
 
     if (endSec <= startSec) {
-        alert('Endzeit muss grosser als Startzeit sein!');
+        alert(UI_TEXT.clips.endBeforeStart);
         return;
     }
 
     if (startSec < 0 || endSec > clipTotalSeconds) {
-        alert('Zeit ausserhalb des VOD-Bereichs!');
+        alert(UI_TEXT.clips.outOfRange);
         return;
     }
 
@@ -310,28 +307,28 @@ async function downloadClip(): Promise<void> {
     const btn = byId('btnClip');
 
     if (!url) {
-        status.textContent = 'Bitte URL eingeben';
+        status.textContent = UI_TEXT.clips.enterUrl;
         status.className = 'clip-status error';
         return;
     }
 
     btn.disabled = true;
-    btn.textContent = 'Lade...';
-    status.textContent = 'Download lauft...';
+    btn.textContent = UI_TEXT.clips.loadingButton;
+    status.textContent = UI_TEXT.clips.loadingStatus;
     status.className = 'clip-status loading';
 
     const result = await window.api.downloadClip(url);
 
     btn.disabled = false;
-    btn.textContent = 'Clip herunterladen';
+    btn.textContent = UI_TEXT.clips.downloadButton;
 
     if (result.success) {
-        status.textContent = 'Download erfolgreich!';
+        status.textContent = UI_TEXT.clips.success;
         status.className = 'clip-status success';
         return;
     }
 
-    status.textContent = 'Fehler: ' + (result.error || 'Unbekannter Fehler');
+    status.textContent = UI_TEXT.clips.errorPrefix + (result.error || UI_TEXT.clips.unknownError);
     status.className = 'clip-status error';
 }
 
@@ -346,7 +343,7 @@ async function selectCutterVideo(): Promise<void> {
 
     const info = await window.api.getVideoInfo(filePath);
     if (!info) {
-        alert('Konnte Video-Informationen nicht lesen. FFprobe installiert?');
+        alert(UI_TEXT.cutter.videoInfoFailed);
         return;
     }
 
@@ -436,7 +433,7 @@ async function updatePreview(time: number): Promise<void> {
     }
 
     const preview = byId('cutterPreview');
-    preview.innerHTML = '<div class="placeholder"><p>Lade Vorschau...</p></div>';
+    preview.innerHTML = `<div class="placeholder"><p>${UI_TEXT.cutter.previewLoading}</p></div>`;
 
     const frame = await window.api.extractFrame(cutterFile, time);
     if (frame) {
@@ -444,7 +441,7 @@ async function updatePreview(time: number): Promise<void> {
         return;
     }
 
-    preview.innerHTML = '<div class="placeholder"><p>Vorschau nicht verfugbar</p></div>';
+    preview.innerHTML = `<div class="placeholder"><p>${UI_TEXT.cutter.previewUnavailable}</p></div>`;
 }
 
 async function startCutting(): Promise<void> {
@@ -454,22 +451,22 @@ async function startCutting(): Promise<void> {
 
     isCutting = true;
     byId('btnCut').disabled = true;
-    byId('btnCut').textContent = 'Schneidet...';
+    byId('btnCut').textContent = UI_TEXT.cutter.cutting;
     byId('cutProgress').classList.add('show');
 
     const result = await window.api.cutVideo(cutterFile, cutterStartTime, cutterEndTime);
 
     isCutting = false;
     byId('btnCut').disabled = false;
-    byId('btnCut').textContent = 'Schneiden';
+    byId('btnCut').textContent = UI_TEXT.cutter.cut;
     byId('cutProgress').classList.remove('show');
 
     if (result.success) {
-        alert('Video erfolgreich geschnitten!\n\n' + result.outputFile);
+        alert(`${UI_TEXT.cutter.cutSuccess}\n\n${result.outputFile}`);
         return;
     }
 
-    alert('Fehler beim Schneiden des Videos.');
+    alert(UI_TEXT.cutter.cutFailed);
 }
 
 async function addMergeFiles(): Promise<void> {
@@ -490,7 +487,7 @@ function renderMergeFiles(): void {
         list.innerHTML = `
             <div class="empty-state" style="padding: 40px 20px;">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" style="opacity:0.3"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                <p style="margin-top:10px">Keine Videos ausgewahlt</p>
+                <p style="margin-top:10px">${UI_TEXT.merge.empty}</p>
             </div>
         `;
         return;
@@ -541,24 +538,24 @@ async function startMerging(): Promise<void> {
 
     isMerging = true;
     byId('btnMerge').disabled = true;
-    byId('btnMerge').textContent = 'Zusammenfugen...';
+    byId('btnMerge').textContent = UI_TEXT.merge.merging;
     byId('mergeProgress').classList.add('show');
 
     const result = await window.api.mergeVideos(mergeFiles, outputFile);
 
     isMerging = false;
     byId('btnMerge').disabled = false;
-    byId('btnMerge').textContent = 'Zusammenfugen';
+    byId('btnMerge').textContent = UI_TEXT.merge.merge;
     byId('mergeProgress').classList.remove('show');
 
     if (result.success) {
-        alert('Videos erfolgreich zusammengefugt!\n\n' + result.outputFile);
+        alert(`${UI_TEXT.merge.success}\n\n${result.outputFile}`);
         mergeFiles = [];
         renderMergeFiles();
         return;
     }
 
-    alert('Fehler beim Zusammenfugen der Videos.');
+    alert(UI_TEXT.merge.failed);
 }
 
 void init();

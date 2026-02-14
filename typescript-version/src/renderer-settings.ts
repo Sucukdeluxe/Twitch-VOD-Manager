@@ -2,14 +2,14 @@ async function connect(): Promise<void> {
     const hasCredentials = Boolean((config.client_id ?? '').toString().trim() && (config.client_secret ?? '').toString().trim());
     if (!hasCredentials) {
         isConnected = false;
-        updateStatus('Ohne Login (Public Modus)', false);
+        updateStatus(UI_TEXT.status.noLogin, false);
         return;
     }
 
-    updateStatus('Verbinde...', false);
+    updateStatus(UI_TEXT.status.connecting, false);
     const success = await window.api.login();
     isConnected = success;
-    updateStatus(success ? 'Verbunden' : 'Verbindung fehlgeschlagen - Public Modus aktiv', success);
+    updateStatus(success ? UI_TEXT.status.connected : UI_TEXT.status.connectFailedPublic, success);
 }
 
 function updateStatus(text: string, connected: boolean): void {
@@ -17,6 +17,22 @@ function updateStatus(text: string, connected: boolean): void {
     const dot = byId('statusDot');
     dot.classList.remove('connected', 'error');
     dot.classList.add(connected ? 'connected' : 'error');
+}
+
+function changeLanguage(lang: string): void {
+    const normalized = setLanguage(lang);
+    byId<HTMLSelectElement>('languageSelect').value = normalized;
+    config.language = normalized;
+    void window.api.saveConfig({ language: normalized });
+
+    const currentStatus = byId('statusText').textContent?.trim() || '';
+    updateStatus(localizeCurrentStatusText(currentStatus), isConnected);
+
+    renderQueue();
+    renderStreamers();
+    if (!currentStreamer) {
+        byId('pageTitle').textContent = UI_TEXT.tabs.vods;
+    }
 }
 
 async function saveSettings(): Promise<void> {

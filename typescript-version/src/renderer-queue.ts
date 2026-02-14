@@ -20,18 +20,18 @@ async function clearCompleted(): Promise<void> {
 }
 
 function getQueueStatusLabel(item: QueueItem): string {
-    if (item.status === 'completed') return 'Abgeschlossen';
-    if (item.status === 'error') return 'Fehlgeschlagen';
-    if (item.status === 'downloading') return 'Laeuft';
-    return 'Wartet';
+    if (item.status === 'completed') return UI_TEXT.queue.statusDone;
+    if (item.status === 'error') return UI_TEXT.queue.statusFailed;
+    if (item.status === 'downloading') return UI_TEXT.queue.statusRunning;
+    return UI_TEXT.queue.statusWaiting;
 }
 
 function getQueueProgressText(item: QueueItem): string {
     if (item.status === 'completed') return '100%';
-    if (item.status === 'error') return 'Fehler';
-    if (item.status === 'pending') return 'Bereit';
+    if (item.status === 'error') return UI_TEXT.queue.progressError;
+    if (item.status === 'pending') return UI_TEXT.queue.progressReady;
     if (item.progress > 0) return `${Math.max(0, Math.min(100, item.progress)).toFixed(1)}%`;
-    return item.progressStatus || 'Lade...';
+    return item.progressStatus || UI_TEXT.queue.progressLoading;
 }
 
 function getQueueMetaText(item: QueueItem): string {
@@ -42,31 +42,31 @@ function getQueueMetaText(item: QueueItem): string {
     const parts: string[] = [];
 
     if (item.currentPart && item.totalParts) {
-        parts.push(`Teil ${item.currentPart}/${item.totalParts}`);
+        parts.push(`${UI_TEXT.queue.part} ${item.currentPart}/${item.totalParts}`);
     }
 
     if (item.speed) {
-        parts.push(`Geschwindigkeit: ${item.speed}`);
+        parts.push(`${UI_TEXT.queue.speed}: ${item.speed}`);
     }
 
     if (item.eta) {
-        parts.push(`Restzeit: ${item.eta}`);
+        parts.push(`${UI_TEXT.queue.eta}: ${item.eta}`);
     }
 
     if (!parts.length && item.status === 'pending') {
-        parts.push('Bereit zum Download');
+        parts.push(UI_TEXT.queue.readyToDownload);
     }
 
     if (!parts.length && item.status === 'downloading') {
-        parts.push(item.progressStatus || 'Download gestartet');
+        parts.push(item.progressStatus || UI_TEXT.queue.started);
     }
 
     if (!parts.length && item.status === 'completed') {
-        parts.push('Fertig');
+        parts.push(UI_TEXT.queue.done);
     }
 
     if (!parts.length && item.status === 'error') {
-        parts.push('Download fehlgeschlagen');
+        parts.push(UI_TEXT.queue.failed);
     }
 
     return parts.join(' | ');
@@ -81,12 +81,12 @@ function renderQueue(): void {
     byId('queueCount').textContent = String(queue.length);
 
     if (queue.length === 0) {
-        list.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; text-align: center; padding: 15px;">Keine Downloads in der Warteschlange</div>';
+        list.innerHTML = `<div style="color: var(--text-secondary); font-size: 12px; text-align: center; padding: 15px;">${UI_TEXT.queue.empty}</div>`;
         return;
     }
 
     list.innerHTML = queue.map((item: QueueItem) => {
-        const safeTitle = escapeHtml(item.title || 'Untitled');
+        const safeTitle = escapeHtml(item.title || UI_TEXT.vods.untitled);
         const safeStatusLabel = escapeHtml(getQueueStatusLabel(item));
         const safeProgressText = escapeHtml(getQueueProgressText(item));
         const safeMeta = escapeHtml(getQueueMetaText(item));
@@ -126,6 +126,6 @@ async function toggleDownload(): Promise<void> {
     const started = await window.api.startDownload();
     if (!started) {
         renderQueue();
-        alert('Die Warteschlange ist leer. Fuge zuerst ein VOD oder einen Clip hinzu.');
+        alert(UI_TEXT.queue.emptyAlert);
     }
 }

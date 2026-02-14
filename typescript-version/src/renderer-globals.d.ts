@@ -6,6 +6,7 @@ interface AppConfig {
     theme?: string;
     download_mode?: 'parts' | 'full';
     part_minutes?: number;
+    language?: 'de' | 'en';
     [key: string]: unknown;
 }
 

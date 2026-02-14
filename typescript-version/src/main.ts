@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.8.5';
+const APP_VERSION = '3.8.6';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -43,6 +43,7 @@ interface Config {
     theme: string;
     download_mode: 'parts' | 'full';
     part_minutes: number;
+    language: 'de' | 'en';
 }
 
 interface VOD {
@@ -116,7 +117,8 @@ const defaultConfig: Config = {
     streamers: [],
     theme: 'twitch',
     download_mode: 'full',
-    part_minutes: 120
+    part_minutes: 120,
+    language: 'de'
 };
 
 function loadConfig(): Config {
