@@ -1,6 +1,6 @@
 {
   "name": "twitch-vod-manager",
-  "version": "4.0.1",
+  "version": "4.0.2",
   "description": "Twitch VOD Manager - Download Twitch VODs easily",
   "main": "dist/main.js",
   "author": "xRangerDE",
@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc",
     "start": "npm run build && electron .",
+    "test:e2e": "npm exec --yes --package=playwright -- node scripts/smoke-test.js",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win"
