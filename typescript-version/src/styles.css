@@ -318,6 +318,15 @@ body {
     transition: all 0.2s;
 }
 
+.btn-retry {
+    background: #2a3344;
+    color: #d9e4f7;
+}
+
+.btn-retry:hover {
+    background: #33405a;
+}
+
 .btn-start {
     background: var(--success);
     color: white;
@@ -572,6 +581,19 @@ body {
 .form-row {
     display: flex;
     gap: 10px;
+}
+
+.log-panel {
+    background: #11151c;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    padding: 10px;
+    max-height: 220px;
+    overflow: auto;
+    white-space: pre-wrap;
+    color: #b8c7df;
+    font-size: 12px;
+    line-height: 1.35;
 }
 
 .form-row input {

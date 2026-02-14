@@ -7,6 +7,7 @@ const UI_TEXT_DE = {
         navMerge: 'Videos zusammenfugen',
         navSettings: 'Einstellungen',
         queueTitle: 'Warteschlange',
+        retryFailed: 'Fehler neu',
         clearQueue: 'Leeren',
         refresh: 'Aktualisieren',
         streamerPlaceholder: 'Streamer hinzufugen...',
@@ -36,6 +37,13 @@ const UI_TEXT_DE = {
         partMinutesLabel: 'Teil-Lange (Minuten)',
         updateTitle: 'Updates',
         checkUpdates: 'Nach Updates suchen',
+        preflightTitle: 'System-Check',
+        preflightRun: 'Check ausfuhren',
+        preflightFix: 'Auto-Fix Tools',
+        preflightEmpty: 'Noch kein Check ausgefuhrt.',
+        debugLogTitle: 'Live Debug-Log',
+        refreshLog: 'Aktualisieren',
+        autoRefresh: 'Auto-Refresh',
         notConnected: 'Nicht verbunden'
     },
     status: {

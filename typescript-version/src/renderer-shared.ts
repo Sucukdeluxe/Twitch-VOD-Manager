@@ -38,3 +38,4 @@ let clipDialogData: ClipDialogData | null = null;
 let clipTotalSeconds = 0;
 
 let updateReady = false;
+let debugLogAutoRefreshTimer: number | null = null;

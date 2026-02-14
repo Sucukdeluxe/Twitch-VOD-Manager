@@ -80,6 +80,9 @@ async function init(): Promise<void> {
         void checkUpdateSilent();
     }, 3000);
 
+    void runPreflight(false);
+    void refreshDebugLog();
+
     setInterval(() => {
         void syncQueueAndDownloadState();
     }, 2000);

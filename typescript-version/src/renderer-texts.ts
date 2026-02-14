@@ -46,6 +46,7 @@ function applyLanguageToStaticUI(): void {
     setText('navMergeText', UI_TEXT.static.navMerge);
     setText('navSettingsText', UI_TEXT.static.navSettings);
     setText('queueTitleText', UI_TEXT.static.queueTitle);
+    setText('btnRetryFailed', UI_TEXT.static.retryFailed);
     setText('btnClear', UI_TEXT.static.clearQueue);
     setText('refreshText', UI_TEXT.static.refresh);
     setText('clipsHeading', UI_TEXT.static.clipsHeading);
@@ -74,6 +75,13 @@ function applyLanguageToStaticUI(): void {
     setText('partMinutesLabel', UI_TEXT.static.partMinutesLabel);
     setText('updateTitle', UI_TEXT.static.updateTitle);
     setText('checkUpdateBtn', UI_TEXT.static.checkUpdates);
+    setText('preflightTitle', UI_TEXT.static.preflightTitle);
+    setText('btnPreflightRun', UI_TEXT.static.preflightRun);
+    setText('btnPreflightFix', UI_TEXT.static.preflightFix);
+    setText('preflightResult', UI_TEXT.static.preflightEmpty);
+    setText('debugLogTitle', UI_TEXT.static.debugLogTitle);
+    setText('btnRefreshLog', UI_TEXT.static.refreshLog);
+    setText('autoRefreshText', UI_TEXT.static.autoRefresh);
     setText('updateText', UI_TEXT.updates.bannerDefault);
     setText('updateButton', UI_TEXT.updates.downloadNow);
     setPlaceholder('newStreamer', UI_TEXT.static.streamerPlaceholder);

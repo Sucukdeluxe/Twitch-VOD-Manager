@@ -87,6 +87,22 @@ interface UpdateDownloadProgress {
     total: number;
 }
 
+interface PreflightChecks {
+    internet: boolean;
+    streamlink: boolean;
+    ffmpeg: boolean;
+    ffprobe: boolean;
+    downloadPathWritable: boolean;
+}
+
+interface PreflightResult {
+    ok: boolean;
+    autoFixApplied: boolean;
+    checks: PreflightChecks;
+    messages: string[];
+    timestamp: string;
+}
+
 interface ApiBridge {
     getConfig(): Promise<AppConfig>;
     saveConfig(config: Partial<AppConfig>): Promise<AppConfig>;
@@ -97,6 +113,7 @@ interface ApiBridge {
     addToQueue(item: Omit<QueueItem, 'id' | 'status' | 'progress'>): Promise<QueueItem[]>;
     removeFromQueue(id: string): Promise<QueueItem[]>;
     clearCompleted(): Promise<QueueItem[]>;
+    retryFailedDownloads(): Promise<QueueItem[]>;
     startDownload(): Promise<boolean>;
     cancelDownload(): Promise<boolean>;
     isDownloading(): Promise<boolean>;
@@ -115,6 +132,8 @@ interface ApiBridge {
     downloadUpdate(): Promise<{ downloading?: boolean; error?: boolean }>;
     installUpdate(): Promise<void>;
     openExternal(url: string): Promise<void>;
+    runPreflight(autoFix: boolean): Promise<PreflightResult>;
+    getDebugLog(lines: number): Promise<string>;
     onDownloadProgress(callback: (progress: DownloadProgress) => void): void;
     onQueueUpdated(callback: (queue: QueueItem[]) => void): void;
     onDownloadStarted(callback: () => void): void;

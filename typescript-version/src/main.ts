@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.8.8';
+const APP_VERSION = '3.9.0';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -86,6 +86,22 @@ interface QueueItem {
 interface DownloadResult {
     success: boolean;
     error?: string;
+}
+
+interface PreflightChecks {
+    internet: boolean;
+    streamlink: boolean;
+    ffmpeg: boolean;
+    ffprobe: boolean;
+    downloadPathWritable: boolean;
+}
+
+interface PreflightResult {
+    ok: boolean;
+    autoFixApplied: boolean;
+    checks: PreflightChecks;
+    messages: string[];
+    timestamp: string;
 }
 
 interface DownloadProgress {
@@ -212,6 +228,94 @@ function getStreamlinkPath(): string {
     }
 
     return 'streamlink';
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isDownloadPathWritable(targetPath: string): boolean {
+    try {
+        fs.mkdirSync(targetPath, { recursive: true });
+        const probeFile = path.join(targetPath, `.write_test_${Date.now()}.tmp`);
+        fs.writeFileSync(probeFile, 'ok');
+        fs.unlinkSync(probeFile);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+async function hasInternetConnection(): Promise<boolean> {
+    try {
+        const res = await axios.get('https://id.twitch.tv/oauth2/validate', {
+            timeout: 5000,
+            validateStatus: () => true
+        });
+        return res.status > 0;
+    } catch {
+        return false;
+    }
+}
+
+async function runPreflight(autoFix = false): Promise<PreflightResult> {
+    appendDebugLog('preflight-start', { autoFix });
+
+    refreshBundledToolPaths();
+
+    const checks: PreflightChecks = {
+        internet: await hasInternetConnection(),
+        streamlink: false,
+        ffmpeg: false,
+        ffprobe: false,
+        downloadPathWritable: isDownloadPathWritable(config.download_path)
+    };
+
+    if (autoFix) {
+        await ensureStreamlinkInstalled();
+        await ensureFfmpegInstalled();
+        refreshBundledToolPaths();
+    }
+
+    const streamlinkCmd = getStreamlinkCommand();
+    checks.streamlink = canExecuteCommand(streamlinkCmd.command, [...streamlinkCmd.prefixArgs, '--version']);
+
+    const ffmpegPath = getFFmpegPath();
+    const ffprobePath = getFFprobePath();
+    checks.ffmpeg = canExecuteCommand(ffmpegPath, ['-version']);
+    checks.ffprobe = canExecuteCommand(ffprobePath, ['-version']);
+
+    const messages: string[] = [];
+    if (!checks.internet) messages.push('Keine Internetverbindung erkannt.');
+    if (!checks.streamlink) messages.push('Streamlink fehlt oder ist nicht startbar.');
+    if (!checks.ffmpeg) messages.push('FFmpeg fehlt oder ist nicht startbar.');
+    if (!checks.ffprobe) messages.push('FFprobe fehlt oder ist nicht startbar.');
+    if (!checks.downloadPathWritable) messages.push('Download-Ordner ist nicht beschreibbar.');
+
+    const result: PreflightResult = {
+        ok: messages.length === 0,
+        autoFixApplied: autoFix,
+        checks,
+        messages,
+        timestamp: new Date().toISOString()
+    };
+
+    appendDebugLog('preflight-finished', result);
+    return result;
+}
+
+function readDebugLog(lines = 200): string {
+    try {
+        if (!fs.existsSync(DEBUG_LOG_FILE)) {
+            return 'Debug-Log ist leer.';
+        }
+
+        const text = fs.readFileSync(DEBUG_LOG_FILE, 'utf-8');
+        const rows = text.split(/\r?\n/).filter(Boolean);
+        return rows.slice(-lines).join('\n') || 'Debug-Log ist leer.';
+    } catch (e) {
+        return `Debug-Log konnte nicht gelesen werden: ${String(e)}`;
+    }
 }
 
 function canExecute(cmd: string): boolean {
@@ -1352,13 +1456,47 @@ async function processQueue(): Promise<void> {
 
         item.last_error = '';
 
-        const result = await downloadVOD(item, (progress) => {
-            mainWindow?.webContents.send('download-progress', progress);
-        });
+        let finalResult: DownloadResult = { success: false, error: 'Unbekannter Fehler beim Download' };
 
-        item.status = result.success ? 'completed' : 'error';
-        item.progress = result.success ? 100 : 0;
-        item.last_error = result.success ? '' : (result.error || 'Unbekannter Fehler beim Download');
+        for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+            appendDebugLog('queue-item-attempt', { itemId: item.id, attempt, max: MAX_RETRY_ATTEMPTS });
+
+            const result = await downloadVOD(item, (progress) => {
+                mainWindow?.webContents.send('download-progress', progress);
+            });
+
+            if (result.success) {
+                finalResult = result;
+                break;
+            }
+
+            finalResult = result;
+
+            if (!isDownloading || currentDownloadCancelled) {
+                finalResult = { success: false, error: 'Download wurde abgebrochen.' };
+                break;
+            }
+
+            if (attempt < MAX_RETRY_ATTEMPTS) {
+                item.last_error = `Versuch ${attempt}/${MAX_RETRY_ATTEMPTS} fehlgeschlagen: ${result.error || 'Unbekannter Fehler'}`;
+                mainWindow?.webContents.send('download-progress', {
+                    id: item.id,
+                    progress: -1,
+                    speed: '',
+                    eta: '',
+                    status: `Neuer Versuch in ${RETRY_DELAY_SECONDS}s...`,
+                    currentPart: item.currentPart,
+                    totalParts: item.totalParts
+                } as DownloadProgress);
+                saveQueue(downloadQueue);
+                mainWindow?.webContents.send('queue-updated', downloadQueue);
+                await sleep(RETRY_DELAY_SECONDS * 1000);
+            }
+        }
+
+        item.status = finalResult.success ? 'completed' : 'error';
+        item.progress = finalResult.success ? 100 : 0;
+        item.last_error = finalResult.success ? '' : (finalResult.error || 'Unbekannter Fehler beim Download');
         appendDebugLog('queue-item-finished', {
             itemId: item.id,
             status: item.status,
@@ -1521,6 +1659,28 @@ ipcMain.handle('clear-completed', () => {
     return downloadQueue;
 });
 
+ipcMain.handle('retry-failed-downloads', () => {
+    downloadQueue = downloadQueue.map((item) => {
+        if (item.status !== 'error') return item;
+
+        return {
+            ...item,
+            status: 'pending',
+            progress: 0,
+            last_error: ''
+        };
+    });
+
+    saveQueue(downloadQueue);
+    mainWindow?.webContents.send('queue-updated', downloadQueue);
+
+    if (!isDownloading) {
+        void processQueue();
+    }
+
+    return downloadQueue;
+});
+
 ipcMain.handle('start-download', async () => {
     const hasPendingItems = downloadQueue.some(item => item.status !== 'completed');
     if (!hasPendingItems) {
@@ -1634,6 +1794,14 @@ ipcMain.handle('download-clip', async (_, clipUrl: string) => {
             resolve({ success: false, error: 'Streamlink nicht gefunden' });
         });
     });
+});
+
+ipcMain.handle('run-preflight', async (_, autoFix: boolean = false) => {
+    return await runPreflight(autoFix);
+});
+
+ipcMain.handle('get-debug-log', async (_, lines: number = 200) => {
+    return readDebugLog(lines);
 });
 
 ipcMain.handle('is-downloading', () => isDownloading);

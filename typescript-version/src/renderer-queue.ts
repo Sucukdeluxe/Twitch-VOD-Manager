@@ -19,6 +19,11 @@ async function clearCompleted(): Promise<void> {
     renderQueue();
 }
 
+async function retryFailedDownloads(): Promise<void> {
+    queue = await window.api.retryFailedDownloads();
+    renderQueue();
+}
+
 function getQueueStatusLabel(item: QueueItem): string {
     if (item.status === 'completed') return UI_TEXT.queue.statusDone;
     if (item.status === 'error') return UI_TEXT.queue.statusFailed;

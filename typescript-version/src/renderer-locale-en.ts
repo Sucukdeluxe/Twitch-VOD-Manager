@@ -7,6 +7,7 @@ const UI_TEXT_EN = {
         navMerge: 'Merge Videos',
         navSettings: 'Settings',
         queueTitle: 'Queue',
+        retryFailed: 'Retry failed',
         clearQueue: 'Clear',
         refresh: 'Refresh',
         streamerPlaceholder: 'Add streamer...',
@@ -36,6 +37,13 @@ const UI_TEXT_EN = {
         partMinutesLabel: 'Part Length (Minutes)',
         updateTitle: 'Updates',
         checkUpdates: 'Check for updates',
+        preflightTitle: 'System Check',
+        preflightRun: 'Run check',
+        preflightFix: 'Auto-fix tools',
+        preflightEmpty: 'No checks run yet.',
+        debugLogTitle: 'Live Debug Log',
+        refreshLog: 'Refresh',
+        autoRefresh: 'Auto refresh',
         notConnected: 'Not connected'
     },
     status: {

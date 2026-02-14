@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld('api', {
     addToQueue: (item: Omit<QueueItem, 'id' | 'status' | 'progress'>) => ipcRenderer.invoke('add-to-queue', item),
     removeFromQueue: (id: string) => ipcRenderer.invoke('remove-from-queue', id),
     clearCompleted: () => ipcRenderer.invoke('clear-completed'),
+    retryFailedDownloads: () => ipcRenderer.invoke('retry-failed-downloads'),
 
     // Download
     startDownload: () => ipcRenderer.invoke('start-download'),
@@ -91,6 +92,8 @@ contextBridge.exposeInMainWorld('api', {
     downloadUpdate: () => ipcRenderer.invoke('download-update'),
     installUpdate: () => ipcRenderer.invoke('install-update'),
     openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+    runPreflight: (autoFix: boolean) => ipcRenderer.invoke('run-preflight', autoFix),
+    getDebugLog: (lines: number) => ipcRenderer.invoke('get-debug-log', lines),
 
     // Events
     onDownloadProgress: (callback: (progress: DownloadProgress) => void) => {

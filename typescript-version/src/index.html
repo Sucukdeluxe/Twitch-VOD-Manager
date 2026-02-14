@@ -130,6 +130,7 @@
                 <div class="queue-list" id="queueList"></div>
                 <div class="queue-actions">
                     <button class="btn btn-start" id="btnStart" onclick="toggleDownload()">Start</button>
+                    <button class="btn btn-retry" id="btnRetryFailed" onclick="retryFailedDownloads()">Fehler neu</button>
                     <button class="btn btn-clear" id="btnClear" onclick="clearCompleted()">Leeren</button>
                 </div>
             </div>
@@ -343,8 +344,29 @@
 
                     <div class="settings-card">
                         <h3 id="updateTitle">Updates</h3>
-                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v3.8.8</p>
+                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v3.9.0</p>
                         <button class="btn-secondary" id="checkUpdateBtn" onclick="checkUpdate()">Nach Updates suchen</button>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="preflightTitle">System-Check</h3>
+                        <div class="form-row" style="margin-bottom: 10px;">
+                            <button class="btn-secondary" id="btnPreflightRun" onclick="runPreflight(false)">Check ausfuhren</button>
+                            <button class="btn-secondary" id="btnPreflightFix" onclick="runPreflight(true)">Auto-Fix Tools</button>
+                        </div>
+                        <pre id="preflightResult" class="log-panel">Noch kein Check ausgefuhrt.</pre>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="debugLogTitle">Live Debug-Log</h3>
+                        <div class="form-row" style="margin-bottom: 10px; align-items: center;">
+                            <button class="btn-secondary" id="btnRefreshLog" onclick="refreshDebugLog()">Aktualisieren</button>
+                            <label style="display:flex; align-items:center; gap:6px; font-size:13px; color: var(--text-secondary);">
+                                <input type="checkbox" id="debugAutoRefresh" onchange="toggleDebugAutoRefresh(this.checked)">
+                                <span id="autoRefreshText">Auto-Refresh</span>
+                            </label>
+                        </div>
+                        <pre id="debugLogOutput" class="log-panel">Lade...</pre>
                     </div>
                 </div>
             </div>
@@ -354,7 +376,7 @@
                     <div class="status-dot" id="statusDot"></div>
                     <span id="statusText">Nicht verbunden</span>
                 </div>
-                <span id="versionText">v3.8.8</span>
+                <span id="versionText">v3.9.0</span>
             </div>
         </main>
     </div>

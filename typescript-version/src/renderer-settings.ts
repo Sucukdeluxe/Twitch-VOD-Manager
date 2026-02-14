@@ -40,6 +40,56 @@ function changeLanguage(lang: string): void {
     }
 }
 
+function renderPreflightResult(result: PreflightResult): void {
+    const entries = [
+        ['Internet', result.checks.internet],
+        ['Streamlink', result.checks.streamlink],
+        ['FFmpeg', result.checks.ffmpeg],
+        ['FFprobe', result.checks.ffprobe],
+        ['Download-Pfad', result.checks.downloadPathWritable]
+    ];
+
+    const lines = entries.map(([name, ok]) => `${ok ? 'OK' : 'FAIL'} ${name}`).join('\n');
+    const extra = result.messages.length ? `\n\n${result.messages.join('\n')}` : '\n\nAlles bereit.';
+
+    byId('preflightResult').textContent = `${lines}${extra}`;
+}
+
+async function runPreflight(autoFix = false): Promise<void> {
+    const btn = byId<HTMLButtonElement>(autoFix ? 'btnPreflightFix' : 'btnPreflightRun');
+    const old = btn.textContent || '';
+    btn.disabled = true;
+    btn.textContent = autoFix ? 'Fixe...' : 'Prufe...';
+
+    try {
+        const result = await window.api.runPreflight(autoFix);
+        renderPreflightResult(result);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = old;
+    }
+}
+
+async function refreshDebugLog(): Promise<void> {
+    const text = await window.api.getDebugLog(250);
+    const panel = byId('debugLogOutput');
+    panel.textContent = text;
+    panel.scrollTop = panel.scrollHeight;
+}
+
+function toggleDebugAutoRefresh(enabled: boolean): void {
+    if (debugLogAutoRefreshTimer) {
+        clearInterval(debugLogAutoRefreshTimer);
+        debugLogAutoRefreshTimer = null;
+    }
+
+    if (enabled) {
+        debugLogAutoRefreshTimer = window.setInterval(() => {
+            void refreshDebugLog();
+        }, 1500);
+    }
+}
+
 async function saveSettings(): Promise<void> {
     const clientId = byId<HTMLInputElement>('clientId').value.trim();
     const clientSecret = byId<HTMLInputElement>('clientSecret').value.trim();
