@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '3.8.6';
+const APP_VERSION = '3.8.7';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -118,7 +118,7 @@ const defaultConfig: Config = {
     theme: 'twitch',
     download_mode: 'full',
     part_minutes: 120,
-    language: 'de'
+    language: 'en'
 };
 
 function loadConfig(): Config {

@@ -1,6 +1,6 @@
 async function init(): Promise<void> {
     config = await window.api.getConfig();
-    const language = setLanguage((config.language as string) || 'de');
+    const language = setLanguage((config.language as string) || 'en');
     config.language = language;
     const initialQueue = await window.api.getQueue();
     queue = Array.isArray(initialQueue) ? initialQueue : [];
@@ -14,7 +14,7 @@ async function init(): Promise<void> {
     byId<HTMLInputElement>('clientSecret').value = config.client_secret ?? '';
     byId<HTMLInputElement>('downloadPath').value = config.download_path ?? '';
     byId<HTMLSelectElement>('themeSelect').value = config.theme ?? 'twitch';
-    byId<HTMLSelectElement>('languageSelect').value = config.language ?? 'de';
+    byId<HTMLSelectElement>('languageSelect').value = config.language ?? 'en';
     byId<HTMLSelectElement>('downloadMode').value = config.download_mode ?? 'full';
     byId<HTMLInputElement>('partMinutes').value = String(config.part_minutes ?? 120);
 
