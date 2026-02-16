@@ -118,7 +118,11 @@ const UI_TEXT_DE = {
         errorPrefix: 'Fehler: ',
         unknownError: 'Unbekannter Fehler',
         formatSimple: '(Standard)',
-        formatTimestamp: '(mit Zeitstempel)'
+        formatTimestamp: '(mit Zeitstempel)',
+        formatTemplate: '(benutzerdefiniert)',
+        templateEmpty: 'Das Template darf im benutzerdefinierten Modus nicht leer sein.',
+        templatePlaceholder: '{date}_{part}.mp4',
+        templateHelp: 'Platzhalter: {title} {id} {channel} {date} {part} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}'
     },
     cutter: {
         videoInfoFailed: 'Konnte Video-Informationen nicht lesen. FFprobe installiert?',

@@ -59,6 +59,8 @@ function applyLanguageToStaticUI(): void {
     setText('clipsHeading', UI_TEXT.static.clipsHeading);
     setText('clipsInfoTitle', UI_TEXT.static.clipsInfoTitle);
     setText('clipsInfoText', UI_TEXT.static.clipsInfoText);
+    setText('clipTemplateHelp', UI_TEXT.clips.templateHelp);
+    setPlaceholder('clipFilenameTemplate', UI_TEXT.clips.templatePlaceholder);
     setText('cutterSelectTitle', UI_TEXT.static.cutterSelectTitle);
     setText('cutterBrowseBtn', UI_TEXT.static.cutterBrowse);
     setText('mergeTitle', UI_TEXT.static.mergeTitle);

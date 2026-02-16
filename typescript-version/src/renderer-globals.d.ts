@@ -25,7 +25,8 @@ interface CustomClip {
     startSec: number;
     durationSec: number;
     startPart: number;
-    filenameFormat: 'simple' | 'timestamp';
+    filenameFormat: 'simple' | 'timestamp' | 'template';
+    filenameTemplate?: string;
 }
 
 interface QueueItem {

@@ -118,7 +118,11 @@ const UI_TEXT_EN = {
         errorPrefix: 'Error: ',
         unknownError: 'Unknown error',
         formatSimple: '(default)',
-        formatTimestamp: '(with timestamp)'
+        formatTimestamp: '(with timestamp)',
+        formatTemplate: '(custom template)',
+        templateEmpty: 'Template cannot be empty in custom template mode.',
+        templatePlaceholder: '{date}_{part}.mp4',
+        templateHelp: 'Placeholders: {title} {id} {channel} {date} {part} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}'
     },
     cutter: {
         videoInfoFailed: 'Could not read video info. Is FFprobe installed?',

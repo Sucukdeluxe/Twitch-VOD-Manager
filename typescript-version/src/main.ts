@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.0.3';
+const APP_VERSION = '4.0.4';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -61,7 +61,8 @@ interface CustomClip {
     startSec: number;
     durationSec: number;
     startPart: number;
-    filenameFormat: 'simple' | 'timestamp';
+    filenameFormat: 'simple' | 'timestamp' | 'template';
+    filenameTemplate?: string;
 }
 
 interface QueueItem {
@@ -622,6 +623,133 @@ function formatDuration(seconds: number): string {
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatDurationDashed(seconds: number): string {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    return `${h.toString().padStart(2, '0')}-${m.toString().padStart(2, '0')}-${s.toString().padStart(2, '0')}`;
+}
+
+function sanitizeFilenamePart(input: string, fallback = 'unnamed'): string {
+    const cleaned = (input || '')
+        .replace(/[<>:"|?*\x00-\x1f]/g, '_')
+        .replace(/[\\/]/g, '_')
+        .trim();
+    return cleaned || fallback;
+}
+
+function formatDateWithPattern(date: Date, pattern: string): string {
+    const tokenMap: Record<string, string> = {
+        yyyy: date.getFullYear().toString(),
+        yy: date.getFullYear().toString().slice(-2),
+        MM: (date.getMonth() + 1).toString().padStart(2, '0'),
+        M: (date.getMonth() + 1).toString(),
+        dd: date.getDate().toString().padStart(2, '0'),
+        d: date.getDate().toString(),
+        HH: date.getHours().toString().padStart(2, '0'),
+        H: date.getHours().toString(),
+        hh: date.getHours().toString().padStart(2, '0'),
+        h: date.getHours().toString(),
+        mm: date.getMinutes().toString().padStart(2, '0'),
+        m: date.getMinutes().toString(),
+        ss: date.getSeconds().toString().padStart(2, '0'),
+        s: date.getSeconds().toString()
+    };
+
+    return pattern
+        .replace(/yyyy|yy|MM|M|dd|d|HH|H|hh|h|mm|m|ss|s/g, (token) => tokenMap[token] ?? token)
+        .replace(/\\(.)/g, '$1');
+}
+
+function formatSecondsWithPattern(totalSeconds: number, pattern: string): string {
+    const safe = Math.max(0, Math.floor(totalSeconds));
+    const hours = Math.floor(safe / 3600);
+    const minutes = Math.floor((safe % 3600) / 60);
+    const seconds = safe % 60;
+
+    const tokenMap: Record<string, string> = {
+        HH: hours.toString().padStart(2, '0'),
+        H: hours.toString(),
+        hh: hours.toString().padStart(2, '0'),
+        h: hours.toString(),
+        mm: minutes.toString().padStart(2, '0'),
+        m: minutes.toString(),
+        ss: seconds.toString().padStart(2, '0'),
+        s: seconds.toString()
+    };
+
+    return pattern
+        .replace(/HH|H|hh|h|mm|m|ss|s/g, (token) => tokenMap[token] ?? token)
+        .replace(/\\(.)/g, '$1');
+}
+
+function parseVodId(url: string): string {
+    const match = url.match(/videos\/(\d+)/i);
+    return match?.[1] || '';
+}
+
+interface ClipTemplateContext {
+    template: string;
+    title: string;
+    vodId: string;
+    channel: string;
+    date: Date;
+    part: number;
+    trimStartSec: number;
+    trimEndSec: number;
+    trimLengthSec: number;
+    fullLengthSec: number;
+}
+
+function renderClipFilenameTemplate(context: ClipTemplateContext): string {
+    const baseDate = `${context.date.getDate().toString().padStart(2, '0')}.${(context.date.getMonth() + 1).toString().padStart(2, '0')}.${context.date.getFullYear()}`;
+    let rendered = context.template
+        .replace(/\{title\}/g, sanitizeFilenamePart(context.title, 'untitled'))
+        .replace(/\{id\}/g, sanitizeFilenamePart(context.vodId, 'unknown'))
+        .replace(/\{channel\}/g, sanitizeFilenamePart(context.channel, 'unknown'))
+        .replace(/\{channel_id\}/g, '')
+        .replace(/\{date\}/g, baseDate)
+        .replace(/\{part\}/g, String(context.part))
+        .replace(/\{trim_start\}/g, formatDurationDashed(context.trimStartSec))
+        .replace(/\{trim_end\}/g, formatDurationDashed(context.trimEndSec))
+        .replace(/\{trim_length\}/g, formatDurationDashed(context.trimLengthSec))
+        .replace(/\{length\}/g, formatDurationDashed(context.fullLengthSec))
+        .replace(/\{ext\}/g, 'mp4')
+        .replace(/\{random_string\}/g, Math.random().toString(36).slice(2, 10));
+
+    rendered = rendered.replace(/\{date_custom="(.*?)"\}/g, (_, pattern: string) => {
+        return sanitizeFilenamePart(formatDateWithPattern(context.date, pattern), 'date');
+    });
+    rendered = rendered.replace(/\{trim_start_custom="(.*?)"\}/g, (_, pattern: string) => {
+        return sanitizeFilenamePart(formatSecondsWithPattern(context.trimStartSec, pattern), '00-00-00');
+    });
+    rendered = rendered.replace(/\{trim_end_custom="(.*?)"\}/g, (_, pattern: string) => {
+        return sanitizeFilenamePart(formatSecondsWithPattern(context.trimEndSec, pattern), '00-00-00');
+    });
+    rendered = rendered.replace(/\{trim_length_custom="(.*?)"\}/g, (_, pattern: string) => {
+        return sanitizeFilenamePart(formatSecondsWithPattern(context.trimLengthSec, pattern), '00-00-00');
+    });
+    rendered = rendered.replace(/\{length_custom="(.*?)"\}/g, (_, pattern: string) => {
+        return sanitizeFilenamePart(formatSecondsWithPattern(context.fullLengthSec, pattern), '00-00-00');
+    });
+
+    const parts = rendered
+        .split(/[\\/]+/)
+        .map((segment) => sanitizeFilenamePart(segment, 'unnamed'))
+        .filter((segment) => segment !== '.' && segment !== '..');
+
+    if (parts.length === 0) {
+        return 'clip.mp4';
+    }
+
+    const lastIdx = parts.length - 1;
+    if (!/\.[A-Za-z0-9]{1,8}$/.test(parts[lastIdx])) {
+        parts[lastIdx] = `${parts[lastIdx]}.mp4`;
+    }
+
+    return path.join(...parts);
 }
 
 function formatBytes(bytes: number): string {
@@ -1329,7 +1457,23 @@ async function downloadVOD(
         const partDuration = config.part_minutes * 60;
 
         // Helper to generate filename based on format
-        const makeClipFilename = (partNum: number, startOffset: number): string => {
+        const makeClipFilename = (partNum: number, startOffset: number, clipLengthSec: number): string => {
+            if (clip.filenameFormat === 'template' && (clip.filenameTemplate || '').trim()) {
+                const relativeName = renderClipFilenameTemplate({
+                    template: clip.filenameTemplate as string,
+                    title: item.title,
+                    vodId: parseVodId(item.url),
+                    channel: item.streamer,
+                    date,
+                    part: partNum,
+                    trimStartSec: startOffset,
+                    trimEndSec: startOffset + clipLengthSec,
+                    trimLengthSec: clipLengthSec,
+                    fullLengthSec: totalDuration
+                });
+                return path.join(folder, relativeName);
+            }
+
             if (clip.filenameFormat === 'timestamp') {
                 const h = Math.floor(startOffset / 3600);
                 const m = Math.floor((startOffset % 3600) / 60);
@@ -1354,7 +1498,7 @@ async function downloadVOD(
                 const remainingDuration = clip.durationSec - (i * partDuration);
                 const thisDuration = Math.min(partDuration, remainingDuration);
 
-                const partFilename = makeClipFilename(partNum, startOffset);
+                const partFilename = makeClipFilename(partNum, startOffset, thisDuration);
 
                 const result = await downloadVODPart(
                     item.url,
@@ -1377,7 +1521,7 @@ async function downloadVOD(
             };
         } else {
             // Single clip file
-            const filename = makeClipFilename(clip.startPart, clip.startSec);
+            const filename = makeClipFilename(clip.startPart, clip.startSec, clip.durationSec);
             return await downloadVODPart(
                 item.url,
                 filename,
