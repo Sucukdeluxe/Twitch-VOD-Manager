@@ -185,8 +185,10 @@ interface ApiBridge {
     runPreflight(autoFix: boolean): Promise<PreflightResult>;
     getDebugLog(lines: number): Promise<string>;
     getRuntimeMetrics(): Promise<RuntimeMetricsSnapshot>;
+    exportRuntimeMetrics(): Promise<{ success: boolean; cancelled?: boolean; error?: string; filePath?: string }>;
     onDownloadProgress(callback: (progress: DownloadProgress) => void): void;
     onQueueUpdated(callback: (queue: QueueItem[]) => void): void;
+    onQueueDuplicateSkipped(callback: (payload: { title: string; streamer: string; url: string }) => void): void;
     onDownloadStarted(callback: () => void): void;
     onDownloadFinished(callback: () => void): void;
     onCutProgress(callback: (percent: number) => void): void;

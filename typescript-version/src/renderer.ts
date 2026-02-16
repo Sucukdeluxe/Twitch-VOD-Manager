@@ -36,6 +36,11 @@ async function init(): Promise<void> {
         renderQueue();
     });
 
+    window.api.onQueueDuplicateSkipped((payload) => {
+        const title = payload?.title ? ` (${payload.title})` : '';
+        showAppToast(`${UI_TEXT.queue.duplicateSkipped}${title}`, 'warn');
+    });
+
     window.api.onDownloadProgress((progress: DownloadProgress) => {
         const item = queue.find((i: QueueItem) => i.id === progress.id);
         if (!item) {
@@ -96,6 +101,37 @@ async function init(): Promise<void> {
     setInterval(() => {
         void syncQueueAndDownloadState();
     }, 2000);
+}
+
+let toastHideTimer: number | null = null;
+
+function showAppToast(message: string, type: 'info' | 'warn' = 'info'): void {
+    let toast = document.getElementById('appToast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'appToast';
+        toast.className = 'app-toast';
+        document.body.appendChild(toast);
+    }
+
+    toast.textContent = message;
+    toast.classList.remove('warn', 'show');
+    if (type === 'warn') {
+        toast.classList.add('warn');
+    }
+
+    requestAnimationFrame(() => {
+        toast?.classList.add('show');
+    });
+
+    if (toastHideTimer) {
+        clearTimeout(toastHideTimer);
+        toastHideTimer = null;
+    }
+
+    toastHideTimer = window.setTimeout(() => {
+        toast?.classList.remove('show');
+    }, 3200);
 }
 
 function mergeQueueState(nextQueue: QueueItem[]): QueueItem[] {

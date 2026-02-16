@@ -98,6 +98,31 @@ async function refreshRuntimeMetrics(): Promise<void> {
     }
 }
 
+async function exportRuntimeMetrics(): Promise<void> {
+    const result = await window.api.exportRuntimeMetrics();
+
+    const toast = (window as unknown as { showAppToast?: (message: string, type?: 'info' | 'warn') => void }).showAppToast;
+    const notify = (message: string, type: 'info' | 'warn' = 'info') => {
+        if (typeof toast === 'function') {
+            toast(message, type);
+        } else if (type === 'warn') {
+            alert(message);
+        }
+    };
+
+    if (result.success) {
+        notify(UI_TEXT.static.runtimeMetricsExportDone, 'info');
+        return;
+    }
+
+    if (result.cancelled) {
+        notify(UI_TEXT.static.runtimeMetricsExportCancelled, 'info');
+        return;
+    }
+
+    notify(`${UI_TEXT.static.runtimeMetricsExportFailed}${result.error ? `\n${result.error}` : ''}`, 'warn');
+}
+
 function toggleRuntimeMetricsAutoRefresh(enabled: boolean): void {
     if (runtimeMetricsAutoRefreshTimer) {
         clearInterval(runtimeMetricsAutoRefreshTimer);

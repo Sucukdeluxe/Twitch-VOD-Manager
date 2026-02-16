@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.0';
+const APP_VERSION = '4.1.1';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -25,6 +25,8 @@ const DEFAULT_FILENAME_TEMPLATE_PARTS = '{date}_Part{part_padded}.mp4';
 const DEFAULT_FILENAME_TEMPLATE_CLIP = '{date}_{part}.mp4';
 const DEFAULT_METADATA_CACHE_MINUTES = 10;
 const DEFAULT_PERFORMANCE_MODE: PerformanceMode = 'balanced';
+const QUEUE_SAVE_DEBOUNCE_MS = 250;
+const MIN_FREE_DISK_BYTES = 128 * 1024 * 1024;
 
 // Timeouts
 const API_TIMEOUT = 10000;
@@ -33,7 +35,7 @@ const MIN_FILE_BYTES = 256 * 1024;
 const TWITCH_WEB_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 
 type PerformanceMode = 'stability' | 'balanced' | 'speed';
-type RetryErrorClass = 'network' | 'rate_limit' | 'auth' | 'tooling' | 'integrity' | 'io' | 'unknown';
+type RetryErrorClass = 'network' | 'rate_limit' | 'auth' | 'tooling' | 'integrity' | 'io' | 'validation' | 'unknown';
 
 // Ensure directories exist
 if (!fs.existsSync(APPDATA_DIR)) {
@@ -278,11 +280,49 @@ function loadQueue(): QueueItem[] {
     return [];
 }
 
-function saveQueue(queue: QueueItem[]): void {
+let queueSaveTimer: NodeJS.Timeout | null = null;
+let pendingQueueSnapshot: QueueItem[] | null = null;
+
+function writeQueueToDisk(queue: QueueItem[]): void {
     try {
         fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
     } catch (e) {
         console.error('Error saving queue:', e);
+    }
+}
+
+function saveQueue(queue: QueueItem[], force = false): void {
+    pendingQueueSnapshot = queue;
+
+    if (force) {
+        if (queueSaveTimer) {
+            clearTimeout(queueSaveTimer);
+            queueSaveTimer = null;
+        }
+
+        writeQueueToDisk(pendingQueueSnapshot);
+        pendingQueueSnapshot = null;
+        return;
+    }
+
+    if (queueSaveTimer) {
+        return;
+    }
+
+    queueSaveTimer = setTimeout(() => {
+        queueSaveTimer = null;
+        if (pendingQueueSnapshot) {
+            writeQueueToDisk(pendingQueueSnapshot);
+            pendingQueueSnapshot = null;
+        }
+    }, QUEUE_SAVE_DEBOUNCE_MS);
+}
+
+function flushQueueSave(): void {
+    if (pendingQueueSnapshot) {
+        saveQueue(pendingQueueSnapshot, true);
+    } else {
+        saveQueue(downloadQueue, true);
     }
 }
 
@@ -816,6 +856,33 @@ function parseVodId(url: string): string {
     return match?.[1] || '';
 }
 
+function isLikelyVodUrl(url: string): boolean {
+    return /twitch\.tv\/videos\/\d+/i.test(url || '');
+}
+
+function parseFrameRate(rawFrameRate: string | undefined): number {
+    const fallback = 30;
+    const value = (rawFrameRate || '').trim();
+    if (!value) return fallback;
+
+    if (/^\d+(\.\d+)?$/.test(value)) {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+    }
+
+    const ratio = value.match(/^(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/);
+    if (!ratio) return fallback;
+
+    const numerator = Number(ratio[1]);
+    const denominator = Number(ratio[2]);
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
+        return fallback;
+    }
+
+    const fps = numerator / denominator;
+    return Number.isFinite(fps) && fps > 0 ? fps : fallback;
+}
+
 interface ClipTemplateContext {
     template: string;
     title: string;
@@ -901,6 +968,63 @@ function formatETA(seconds: number): string {
     return `${h}h ${m}m`;
 }
 
+function getFreeDiskBytes(targetPath: string): number | null {
+    try {
+        const statfsSync = (fs as unknown as { statfsSync?: (path: string) => { bsize?: number; frsize?: number; bavail?: number } }).statfsSync;
+        if (!statfsSync) {
+            return null;
+        }
+
+        const info = statfsSync(targetPath);
+        const blockSize = Number(info?.bsize || info?.frsize || 0);
+        const availableBlocks = Number(info?.bavail || 0);
+        if (!Number.isFinite(blockSize) || !Number.isFinite(availableBlocks) || blockSize <= 0 || availableBlocks < 0) {
+            return null;
+        }
+
+        return Math.floor(blockSize * availableBlocks);
+    } catch {
+        return null;
+    }
+}
+
+function estimateRequiredDownloadBytes(item: QueueItem): number {
+    const durationSeconds = Math.max(1, item.customClip?.durationSec || parseDuration(item.duration_str || '0s'));
+
+    const bytesPerSecondByMode: Record<PerformanceMode, number> = {
+        stability: 900 * 1024,
+        balanced: 700 * 1024,
+        speed: 550 * 1024
+    };
+
+    const mode = normalizePerformanceMode(config.performance_mode);
+    const baseEstimate = durationSeconds * bytesPerSecondByMode[mode];
+    const withHeadroom = Math.ceil(baseEstimate * (item.customClip ? 1.2 : 1.35));
+
+    return Math.max(64 * 1024 * 1024, Math.min(withHeadroom, 40 * 1024 * 1024 * 1024));
+}
+
+function ensureDiskSpace(targetPath: string, requiredBytes: number, context: string): DownloadResult {
+    const freeBytes = getFreeDiskBytes(targetPath);
+    if (freeBytes === null) {
+        appendDebugLog('disk-space-check-skipped', { targetPath, requiredBytes, context });
+        return { success: true };
+    }
+
+    if (freeBytes < Math.max(requiredBytes, MIN_FREE_DISK_BYTES)) {
+        const message = `Zu wenig Speicherplatz fur ${context}: frei ${formatBytes(freeBytes)}, benoetigt ~${formatBytes(requiredBytes)}.`;
+        appendDebugLog('disk-space-check-failed', {
+            targetPath,
+            requiredBytes,
+            freeBytes,
+            context
+        });
+        return { success: false, error: message };
+    }
+
+    return { success: true };
+}
+
 function getMetadataCacheTtlMs(): number {
     return normalizeMetadataCacheMinutes(config.metadata_cache_minutes) * 60 * 1000;
 }
@@ -921,6 +1045,7 @@ function classifyDownloadError(errorMessage: string): RetryErrorClass {
     const text = (errorMessage || '').toLowerCase();
     if (!text) return 'unknown';
 
+    if (text.includes('ungueltige vod-url') || text.includes('invalid vod url')) return 'validation';
     if (text.includes('429') || text.includes('rate limit') || text.includes('too many requests')) return 'rate_limit';
     if (text.includes('401') || text.includes('403') || text.includes('unauthorized') || text.includes('forbidden')) return 'auth';
     if (text.includes('timed out') || text.includes('timeout') || text.includes('network') || text.includes('connection') || text.includes('dns')) return 'network';
@@ -947,6 +1072,8 @@ function getRetryDelaySeconds(errorClass: RetryErrorClass, attempt: number): num
             return Math.min(25, 5 + attempt * 3 + jitter);
         case 'tooling':
             return DEFAULT_RETRY_DELAY_SECONDS;
+        case 'validation':
+            return 0;
         case 'unknown':
         default:
             return Math.min(25, DEFAULT_RETRY_DELAY_SECONDS + attempt * 2 + jitter);
@@ -1528,7 +1655,7 @@ async function getVideoInfo(filePath: string): Promise<VideoInfo | null> {
                     duration: parseFloat(info.format?.duration || '0'),
                     width: videoStream?.width || 0,
                     height: videoStream?.height || 0,
-                    fps: eval(videoStream?.r_frame_rate || '30') || 30
+                    fps: parseFrameRate(videoStream?.r_frame_rate)
                 });
             } catch {
                 resolve(null);
@@ -1594,6 +1721,25 @@ async function cutVideo(
 
     const ffmpeg = getFFmpegPath();
     const duration = Math.max(0.1, endTime - startTime);
+
+    let inputBytes = 0;
+    try {
+        inputBytes = fs.statSync(inputFile).size;
+    } catch {
+        inputBytes = 0;
+    }
+
+    const cutRequiredBytes = Math.max(96 * 1024 * 1024, Math.ceil(inputBytes * 0.75));
+    const cutDiskCheck = ensureDiskSpace(path.dirname(outputFile), cutRequiredBytes, 'Video-Cut');
+    if (!cutDiskCheck.success) {
+        appendDebugLog('cut-video-no-disk-space', {
+            inputFile,
+            outputFile,
+            requiredBytes: cutRequiredBytes,
+            error: cutDiskCheck.error
+        });
+        return false;
+    }
 
     const runCutAttempt = async (copyMode: boolean): Promise<boolean> => {
         const args = [
@@ -1676,6 +1822,30 @@ async function mergeVideos(
     const concatFile = path.join(app.getPath('temp'), `concat_${Date.now()}.txt`);
     const concatContent = inputFiles.map((filePath) => `file '${filePath.replace(/'/g, "'\\''")}'`).join('\n');
     fs.writeFileSync(concatFile, concatContent);
+
+    let mergeInputBytes = 0;
+    for (const filePath of inputFiles) {
+        try {
+            mergeInputBytes += fs.statSync(filePath).size;
+        } catch {
+            // ignore missing file in estimation
+        }
+    }
+
+    const mergeRequiredBytes = Math.max(128 * 1024 * 1024, Math.ceil(mergeInputBytes * 1.1));
+    const mergeDiskCheck = ensureDiskSpace(path.dirname(outputFile), mergeRequiredBytes, 'Video-Merge');
+    if (!mergeDiskCheck.success) {
+        appendDebugLog('merge-video-no-disk-space', {
+            outputFile,
+            files: inputFiles.length,
+            requiredBytes: mergeRequiredBytes,
+            error: mergeDiskCheck.error
+        });
+        try {
+            fs.unlinkSync(concatFile);
+        } catch { }
+        return false;
+    }
 
     const runMergeAttempt = async (copyMode: boolean): Promise<boolean> => {
         const args = [
@@ -1911,6 +2081,14 @@ async function downloadVOD(
     item: QueueItem,
     onProgress: (progress: DownloadProgress) => void
 ): Promise<DownloadResult> {
+    const vodId = parseVodId(item.url);
+    if (!isLikelyVodUrl(item.url) || !vodId) {
+        return {
+            success: false,
+            error: 'Ungueltige VOD-URL'
+        };
+    }
+
     onProgress({
         id: item.id,
         progress: -1,
@@ -1947,7 +2125,12 @@ async function downloadVOD(
     fs.mkdirSync(folder, { recursive: true });
 
     const totalDuration = parseDuration(item.duration_str);
-    const vodId = parseVodId(item.url);
+
+    const requiredBytesEstimate = estimateRequiredDownloadBytes(item);
+    const diskSpaceCheck = ensureDiskSpace(folder, requiredBytesEstimate, 'Download');
+    if (!diskSpaceCheck.success) {
+        return diskSpaceCheck;
+    }
 
     const makeTemplateFilename = (
         template: string,
@@ -2171,8 +2354,12 @@ async function processQueue(): Promise<void> {
             const errorClass = classifyDownloadError(result.error || '');
             runtimeMetrics.lastErrorClass = errorClass;
 
-            if (errorClass === 'tooling') {
-                appendDebugLog('queue-item-no-retry-tooling', { itemId: item.id, error: result.error || 'unknown' });
+            if (errorClass === 'tooling' || errorClass === 'validation') {
+                appendDebugLog('queue-item-no-retry', {
+                    itemId: item.id,
+                    errorClass,
+                    error: result.error || 'unknown'
+                });
                 break;
             }
 
@@ -2370,6 +2557,11 @@ ipcMain.handle('get-queue', () => downloadQueue);
 ipcMain.handle('add-to-queue', (_, item: Omit<QueueItem, 'id' | 'status' | 'progress'>) => {
     if (config.prevent_duplicate_downloads && hasActiveDuplicate(item)) {
         runtimeMetrics.duplicateSkips += 1;
+        mainWindow?.webContents.send('queue-duplicate-skipped', {
+            title: item.title,
+            streamer: item.streamer,
+            url: item.url
+        });
         appendDebugLog('queue-item-duplicate-skipped', {
             title: item.title,
             url: item.url,
@@ -2545,6 +2737,11 @@ ipcMain.handle('download-clip', async (_, clipUrl: string) => {
     const folder = path.join(config.download_path, 'Clips', clipInfo.broadcaster_name);
     fs.mkdirSync(folder, { recursive: true });
 
+    const clipDiskCheck = ensureDiskSpace(folder, 128 * 1024 * 1024, 'Clip-Download');
+    if (!clipDiskCheck.success) {
+        return { success: false, error: clipDiskCheck.error || 'Zu wenig Speicherplatz.' };
+    }
+
     const safeTitle = clipInfo.title.replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50);
     const filename = path.join(folder, `${safeTitle}.mp4`);
 
@@ -2583,6 +2780,30 @@ ipcMain.handle('get-debug-log', async (_, lines: number = 200) => {
 ipcMain.handle('is-downloading', () => isDownloading);
 
 ipcMain.handle('get-runtime-metrics', () => getRuntimeMetricsSnapshot());
+
+ipcMain.handle('export-runtime-metrics', async () => {
+    try {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const defaultName = `runtime-metrics-${timestamp}.json`;
+        const preferredDir = fs.existsSync(config.download_path) ? config.download_path : app.getPath('desktop');
+
+        const dialogResult = await dialog.showSaveDialog(mainWindow!, {
+            defaultPath: path.join(preferredDir, defaultName),
+            filters: [{ name: 'JSON', extensions: ['json'] }]
+        });
+
+        if (dialogResult.canceled || !dialogResult.filePath) {
+            return { success: false, cancelled: true };
+        }
+
+        const snapshot = getRuntimeMetricsSnapshot();
+        fs.writeFileSync(dialogResult.filePath, JSON.stringify(snapshot, null, 2), 'utf-8');
+        return { success: true, filePath: dialogResult.filePath };
+    } catch (e) {
+        appendDebugLog('runtime-metrics-export-failed', String(e));
+        return { success: false, error: String(e) };
+    }
+});
 
 // Video Cutter IPC
 ipcMain.handle('get-video-info', async (_, filePath: string) => {
@@ -2656,9 +2877,13 @@ app.on('window-all-closed', () => {
     if (currentProcess) {
         currentProcess.kill();
     }
-    saveQueue(downloadQueue);
+    flushQueueSave();
 
     if (process.platform !== 'darwin') {
         app.quit();
     }
+});
+
+app.on('before-quit', () => {
+    flushQueueSave();
 });

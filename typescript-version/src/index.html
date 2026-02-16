@@ -457,7 +457,7 @@
 
                     <div class="settings-card">
                         <h3 id="updateTitle">Updates</h3>
-                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v4.1.0</p>
+                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v4.1.1</p>
                         <button class="btn-secondary" id="checkUpdateBtn" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
 
@@ -486,6 +486,7 @@
                         <h3 id="runtimeMetricsTitle">Runtime Metrics</h3>
                         <div class="form-row" style="margin-bottom: 10px; align-items: center;">
                             <button class="btn-secondary" id="btnRefreshMetrics" onclick="refreshRuntimeMetrics()">Aktualisieren</button>
+                            <button class="btn-secondary" id="btnExportMetrics" onclick="exportRuntimeMetrics()">Export JSON</button>
                             <label style="display:flex; align-items:center; gap:6px; font-size:13px; color: var(--text-secondary);">
                                 <input type="checkbox" id="runtimeMetricsAutoRefresh" onchange="toggleRuntimeMetricsAutoRefresh(this.checked)">
                                 <span id="runtimeMetricsAutoRefreshText">Auto-Refresh</span>
@@ -501,7 +502,7 @@
                     <div class="status-dot" id="statusDot"></div>
                     <span id="statusText">Nicht verbunden</span>
                 </div>
-                <span id="versionText">v4.1.0</span>
+                <span id="versionText">v4.1.1</span>
             </div>
         </main>
     </div>

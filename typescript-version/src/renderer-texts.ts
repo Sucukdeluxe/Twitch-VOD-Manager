@@ -125,6 +125,7 @@ function applyLanguageToStaticUI(): void {
     setText('autoRefreshText', UI_TEXT.static.autoRefresh);
     setText('runtimeMetricsTitle', UI_TEXT.static.runtimeMetricsTitle);
     setText('btnRefreshMetrics', UI_TEXT.static.runtimeMetricsRefresh);
+    setText('btnExportMetrics', UI_TEXT.static.runtimeMetricsExport);
     setText('runtimeMetricsAutoRefreshText', UI_TEXT.static.runtimeMetricsAutoRefresh);
     setText('runtimeMetricsOutput', UI_TEXT.static.runtimeMetricsLoading);
     setText('updateText', UI_TEXT.updates.bannerDefault);

@@ -138,6 +138,8 @@ contextBridge.exposeInMainWorld('api', {
     runPreflight: (autoFix: boolean) => ipcRenderer.invoke('run-preflight', autoFix),
     getDebugLog: (lines: number) => ipcRenderer.invoke('get-debug-log', lines),
     getRuntimeMetrics: (): Promise<RuntimeMetricsSnapshot> => ipcRenderer.invoke('get-runtime-metrics'),
+    exportRuntimeMetrics: (): Promise<{ success: boolean; cancelled?: boolean; error?: string; filePath?: string }> =>
+        ipcRenderer.invoke('export-runtime-metrics'),
 
     // Events
     onDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
@@ -145,6 +147,9 @@ contextBridge.exposeInMainWorld('api', {
     },
     onQueueUpdated: (callback: (queue: QueueItem[]) => void) => {
         ipcRenderer.on('queue-updated', (_, queue) => callback(queue));
+    },
+    onQueueDuplicateSkipped: (callback: (payload: { title: string; streamer: string; url: string }) => void) => {
+        ipcRenderer.on('queue-duplicate-skipped', (_, payload) => callback(payload));
     },
     onDownloadStarted: (callback: () => void) => {
         ipcRenderer.on('download-started', () => callback());

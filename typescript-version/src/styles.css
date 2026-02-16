@@ -1379,3 +1379,32 @@ body.theme-apple {
     display: flex;
     justify-content: flex-end;
 }
+
+.app-toast {
+    position: fixed;
+    right: 18px;
+    bottom: 16px;
+    z-index: 2200;
+    max-width: min(90vw, 520px);
+    background: rgba(20, 20, 24, 0.96);
+    color: #e6e6ea;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 1.45;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    transform: translateY(10px);
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.app-toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.app-toast.warn {
+    border-color: rgba(255, 167, 38, 0.7);
+}
