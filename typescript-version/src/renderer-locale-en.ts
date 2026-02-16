@@ -40,6 +40,14 @@ const UI_TEXT_EN = {
         modeFull: 'Full VOD',
         modeParts: 'Split into parts',
         partMinutesLabel: 'Part Length (Minutes)',
+        filenameTemplatesTitle: 'Filename Templates',
+        vodTemplateLabel: 'VOD Template',
+        partsTemplateLabel: 'VOD Part Template',
+        defaultClipTemplateLabel: 'Clip Template',
+        filenameTemplateHint: 'Placeholders: {title} {id} {channel} {date} {part} {part_padded} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}',
+        vodTemplatePlaceholder: '{title}.mp4',
+        partsTemplatePlaceholder: '{date}_Part{part_padded}.mp4',
+        defaultClipTemplatePlaceholder: '{date}_{part}.mp4',
         updateTitle: 'Updates',
         checkUpdates: 'Check for updates',
         preflightTitle: 'System Check',
@@ -122,7 +130,7 @@ const UI_TEXT_EN = {
         formatTemplate: '(custom template)',
         templateEmpty: 'Template cannot be empty in custom template mode.',
         templatePlaceholder: '{date}_{part}.mp4',
-        templateHelp: 'Placeholders: {title} {id} {channel} {date} {part} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}'
+        templateHelp: 'Placeholders: {title} {id} {channel} {date} {part} {part_padded} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}'
     },
     cutter: {
         videoInfoFailed: 'Could not read video info. Is FFprobe installed?',

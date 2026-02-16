@@ -82,6 +82,14 @@ function applyLanguageToStaticUI(): void {
     setText('modeFullText', UI_TEXT.static.modeFull);
     setText('modePartsText', UI_TEXT.static.modeParts);
     setText('partMinutesLabel', UI_TEXT.static.partMinutesLabel);
+    setText('filenameTemplatesTitle', UI_TEXT.static.filenameTemplatesTitle);
+    setText('vodTemplateLabel', UI_TEXT.static.vodTemplateLabel);
+    setText('partsTemplateLabel', UI_TEXT.static.partsTemplateLabel);
+    setText('defaultClipTemplateLabel', UI_TEXT.static.defaultClipTemplateLabel);
+    setText('filenameTemplateHint', UI_TEXT.static.filenameTemplateHint);
+    setPlaceholder('vodFilenameTemplate', UI_TEXT.static.vodTemplatePlaceholder);
+    setPlaceholder('partsFilenameTemplate', UI_TEXT.static.partsTemplatePlaceholder);
+    setPlaceholder('defaultClipFilenameTemplate', UI_TEXT.static.defaultClipTemplatePlaceholder);
     setText('updateTitle', UI_TEXT.static.updateTitle);
     setText('checkUpdateBtn', UI_TEXT.static.checkUpdates);
     setText('preflightTitle', UI_TEXT.static.preflightTitle);

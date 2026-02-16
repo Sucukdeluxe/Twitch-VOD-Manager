@@ -7,6 +7,9 @@ interface AppConfig {
     download_mode?: 'parts' | 'full';
     part_minutes?: number;
     language?: 'de' | 'en';
+    filename_template_vod?: string;
+    filename_template_parts?: string;
+    filename_template_clip?: string;
     [key: string]: unknown;
 }
 

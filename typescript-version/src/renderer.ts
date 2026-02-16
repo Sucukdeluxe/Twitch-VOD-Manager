@@ -18,6 +18,9 @@ async function init(): Promise<void> {
     updateLanguagePicker(config.language ?? 'en');
     byId<HTMLSelectElement>('downloadMode').value = config.download_mode ?? 'full';
     byId<HTMLInputElement>('partMinutes').value = String(config.part_minutes ?? 120);
+    byId<HTMLInputElement>('vodFilenameTemplate').value = (config.filename_template_vod as string) || DEFAULT_VOD_TEMPLATE;
+    byId<HTMLInputElement>('partsFilenameTemplate').value = (config.filename_template_parts as string) || DEFAULT_PARTS_TEMPLATE;
+    byId<HTMLInputElement>('defaultClipFilenameTemplate').value = (config.filename_template_clip as string) || DEFAULT_CLIP_TEMPLATE;
 
     changeTheme(config.theme ?? 'twitch');
     renderStreamers();
@@ -174,6 +177,10 @@ function formatSecondsToTimeDashed(seconds: number): string {
     return `${h.toString().padStart(2, '0')}-${m.toString().padStart(2, '0')}-${s.toString().padStart(2, '0')}`;
 }
 
+const DEFAULT_VOD_TEMPLATE = '{title}.mp4';
+const DEFAULT_PARTS_TEMPLATE = '{date}_Part{part_padded}.mp4';
+const DEFAULT_CLIP_TEMPLATE = '{date}_{part}.mp4';
+
 function formatDateWithPattern(date: Date, pattern: string): string {
     const tokenMap: Record<string, string> = {
         yyyy: date.getFullYear().toString(),
@@ -248,6 +255,7 @@ function buildTemplatePreview(template: string, context: {
         .replace(/\{channel_id\}/g, '0')
         .replace(/\{date\}/g, dateStr)
         .replace(/\{part\}/g, normalizedPart)
+        .replace(/\{part_padded\}/g, normalizedPart.padStart(2, '0'))
         .replace(/\{trim_start\}/g, formatSecondsToTimeDashed(context.startSec))
         .replace(/\{trim_end\}/g, formatSecondsToTimeDashed(context.startSec + context.durationSec))
         .replace(/\{trim_length\}/g, formatSecondsToTimeDashed(context.durationSec))
@@ -286,7 +294,7 @@ function openClipDialog(url: string, title: string, date: string, streamer: stri
     byId<HTMLInputElement>('clipStartTime').value = '00:00:00';
     byId<HTMLInputElement>('clipEndTime').value = formatSecondsToTime(Math.min(60, clipTotalSeconds));
     byId<HTMLInputElement>('clipStartPart').value = '';
-    byId<HTMLInputElement>('clipFilenameTemplate').value = '{date}_{part}.mp4';
+    byId<HTMLInputElement>('clipFilenameTemplate').value = (config.filename_template_clip as string) || DEFAULT_CLIP_TEMPLATE;
     query<HTMLInputElement>('input[name="filenameFormat"][value="simple"]').checked = true;
     updateFilenameTemplateVisibility();
 
@@ -355,7 +363,7 @@ function updateFilenameExamples(): void {
     const endSec = parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
     const durationSec = Math.max(1, endSec - startSec);
     const timeStr = formatSecondsToTimeDashed(startSec);
-    const template = byId<HTMLInputElement>('clipFilenameTemplate').value.trim() || '{date}_{part}.mp4';
+    const template = byId<HTMLInputElement>('clipFilenameTemplate').value.trim() || (config.filename_template_clip as string) || DEFAULT_CLIP_TEMPLATE;
 
     updateFilenameTemplateVisibility();
 

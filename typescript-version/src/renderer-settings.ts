@@ -130,14 +130,24 @@ async function saveSettings(): Promise<void> {
     const downloadPath = byId<HTMLInputElement>('downloadPath').value;
     const downloadMode = byId<HTMLSelectElement>('downloadMode').value as 'parts' | 'full';
     const partMinutes = parseInt(byId<HTMLInputElement>('partMinutes').value, 10) || 120;
+    const vodFilenameTemplate = byId<HTMLInputElement>('vodFilenameTemplate').value.trim() || '{title}.mp4';
+    const partsFilenameTemplate = byId<HTMLInputElement>('partsFilenameTemplate').value.trim() || '{date}_Part{part_padded}.mp4';
+    const defaultClipFilenameTemplate = byId<HTMLInputElement>('defaultClipFilenameTemplate').value.trim() || '{date}_{part}.mp4';
 
     config = await window.api.saveConfig({
         client_id: clientId,
         client_secret: clientSecret,
         download_path: downloadPath,
         download_mode: downloadMode,
-        part_minutes: partMinutes
+        part_minutes: partMinutes,
+        filename_template_vod: vodFilenameTemplate,
+        filename_template_parts: partsFilenameTemplate,
+        filename_template_clip: defaultClipFilenameTemplate
     });
+
+    byId<HTMLInputElement>('vodFilenameTemplate').value = (config.filename_template_vod as string) || '{title}.mp4';
+    byId<HTMLInputElement>('partsFilenameTemplate').value = (config.filename_template_parts as string) || '{date}_Part{part_padded}.mp4';
+    byId<HTMLInputElement>('defaultClipFilenameTemplate').value = (config.filename_template_clip as string) || '{date}_{part}.mp4';
 
     await connect();
 }

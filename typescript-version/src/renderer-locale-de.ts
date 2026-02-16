@@ -40,6 +40,14 @@ const UI_TEXT_DE = {
         modeFull: 'Ganzes VOD',
         modeParts: 'In Teile splitten',
         partMinutesLabel: 'Teil-Lange (Minuten)',
+        filenameTemplatesTitle: 'Dateinamen-Templates',
+        vodTemplateLabel: 'VOD-Template',
+        partsTemplateLabel: 'VOD-Teile-Template',
+        defaultClipTemplateLabel: 'Clip-Template',
+        filenameTemplateHint: 'Platzhalter: {title} {id} {channel} {date} {part} {part_padded} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}',
+        vodTemplatePlaceholder: '{title}.mp4',
+        partsTemplatePlaceholder: '{date}_Part{part_padded}.mp4',
+        defaultClipTemplatePlaceholder: '{date}_{part}.mp4',
         updateTitle: 'Updates',
         checkUpdates: 'Nach Updates suchen',
         preflightTitle: 'System-Check',
@@ -122,7 +130,7 @@ const UI_TEXT_DE = {
         formatTemplate: '(benutzerdefiniert)',
         templateEmpty: 'Das Template darf im benutzerdefinierten Modus nicht leer sein.',
         templatePlaceholder: '{date}_{part}.mp4',
-        templateHelp: 'Platzhalter: {title} {id} {channel} {date} {part} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}'
+        templateHelp: 'Platzhalter: {title} {id} {channel} {date} {part} {part_padded} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}'
     },
     cutter: {
         videoInfoFailed: 'Konnte Video-Informationen nicht lesen. FFprobe installiert?',

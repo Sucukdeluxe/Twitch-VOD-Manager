@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.0.4';
+const APP_VERSION = '4.0.5';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -20,6 +20,9 @@ const TOOLS_DIR = path.join(APPDATA_DIR, 'tools');
 const TOOLS_STREAMLINK_DIR = path.join(TOOLS_DIR, 'streamlink');
 const TOOLS_FFMPEG_DIR = path.join(TOOLS_DIR, 'ffmpeg');
 const DEFAULT_DOWNLOAD_PATH = path.join(app.getPath('desktop'), 'Twitch_VODs');
+const DEFAULT_FILENAME_TEMPLATE_VOD = '{title}.mp4';
+const DEFAULT_FILENAME_TEMPLATE_PARTS = '{date}_Part{part_padded}.mp4';
+const DEFAULT_FILENAME_TEMPLATE_CLIP = '{date}_{part}.mp4';
 
 // Timeouts
 const API_TIMEOUT = 10000;
@@ -44,6 +47,9 @@ interface Config {
     download_mode: 'parts' | 'full';
     part_minutes: number;
     language: 'de' | 'en';
+    filename_template_vod: string;
+    filename_template_parts: string;
+    filename_template_clip: string;
 }
 
 interface VOD {
@@ -135,19 +141,36 @@ const defaultConfig: Config = {
     theme: 'twitch',
     download_mode: 'full',
     part_minutes: 120,
-    language: 'en'
+    language: 'en',
+    filename_template_vod: DEFAULT_FILENAME_TEMPLATE_VOD,
+    filename_template_parts: DEFAULT_FILENAME_TEMPLATE_PARTS,
+    filename_template_clip: DEFAULT_FILENAME_TEMPLATE_CLIP
 };
+
+function normalizeFilenameTemplate(template: string | undefined, fallback: string): string {
+    const value = (template || '').trim();
+    return value || fallback;
+}
+
+function normalizeConfigTemplates(input: Config): Config {
+    return {
+        ...input,
+        filename_template_vod: normalizeFilenameTemplate(input.filename_template_vod, DEFAULT_FILENAME_TEMPLATE_VOD),
+        filename_template_parts: normalizeFilenameTemplate(input.filename_template_parts, DEFAULT_FILENAME_TEMPLATE_PARTS),
+        filename_template_clip: normalizeFilenameTemplate(input.filename_template_clip, DEFAULT_FILENAME_TEMPLATE_CLIP)
+    };
+}
 
 function loadConfig(): Config {
     try {
         if (fs.existsSync(CONFIG_FILE)) {
             const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
-            return { ...defaultConfig, ...JSON.parse(data) };
+            return normalizeConfigTemplates({ ...defaultConfig, ...JSON.parse(data) });
         }
     } catch (e) {
         console.error('Error loading config:', e);
     }
-    return defaultConfig;
+    return normalizeConfigTemplates(defaultConfig);
 }
 
 function saveConfig(config: Config): void {
@@ -697,6 +720,7 @@ interface ClipTemplateContext {
     channel: string;
     date: Date;
     part: number;
+    partPadded: string;
     trimStartSec: number;
     trimEndSec: number;
     trimLengthSec: number;
@@ -712,6 +736,7 @@ function renderClipFilenameTemplate(context: ClipTemplateContext): string {
         .replace(/\{channel_id\}/g, '')
         .replace(/\{date\}/g, baseDate)
         .replace(/\{part\}/g, String(context.part))
+        .replace(/\{part_padded\}/g, context.partPadded)
         .replace(/\{trim_start\}/g, formatDurationDashed(context.trimStartSec))
         .replace(/\{trim_end\}/g, formatDurationDashed(context.trimEndSec))
         .replace(/\{trim_length\}/g, formatDurationDashed(context.trimLengthSec))
@@ -1448,8 +1473,32 @@ async function downloadVOD(
     const folder = path.join(config.download_path, streamer, dateStr);
     fs.mkdirSync(folder, { recursive: true });
 
-    const safeTitle = item.title.replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50);
     const totalDuration = parseDuration(item.duration_str);
+    const vodId = parseVodId(item.url);
+
+    const makeTemplateFilename = (
+        template: string,
+        templateFallback: string,
+        partNum: number,
+        trimStartSec: number,
+        trimLengthSec: number
+    ): string => {
+        const relativeName = renderClipFilenameTemplate({
+            template: normalizeFilenameTemplate(template, templateFallback),
+            title: item.title,
+            vodId,
+            channel: item.streamer,
+            date,
+            part: partNum,
+            partPadded: partNum.toString().padStart(2, '0'),
+            trimStartSec,
+            trimEndSec: trimStartSec + trimLengthSec,
+            trimLengthSec,
+            fullLengthSec: totalDuration
+        });
+
+        return path.join(folder, relativeName);
+    };
 
     // Custom Clip - download specific time range
     if (item.customClip) {
@@ -1458,20 +1507,14 @@ async function downloadVOD(
 
         // Helper to generate filename based on format
         const makeClipFilename = (partNum: number, startOffset: number, clipLengthSec: number): string => {
-            if (clip.filenameFormat === 'template' && (clip.filenameTemplate || '').trim()) {
-                const relativeName = renderClipFilenameTemplate({
-                    template: clip.filenameTemplate as string,
-                    title: item.title,
-                    vodId: parseVodId(item.url),
-                    channel: item.streamer,
-                    date,
-                    part: partNum,
-                    trimStartSec: startOffset,
-                    trimEndSec: startOffset + clipLengthSec,
-                    trimLengthSec: clipLengthSec,
-                    fullLengthSec: totalDuration
-                });
-                return path.join(folder, relativeName);
+            if (clip.filenameFormat === 'template') {
+                return makeTemplateFilename(
+                    clip.filenameTemplate || config.filename_template_clip,
+                    DEFAULT_FILENAME_TEMPLATE_CLIP,
+                    partNum,
+                    startOffset,
+                    clipLengthSec
+                );
             }
 
             if (clip.filenameFormat === 'timestamp') {
@@ -1538,7 +1581,13 @@ async function downloadVOD(
     // Check download mode
     if (config.download_mode === 'full' || totalDuration <= config.part_minutes * 60) {
         // Full download
-        const filename = path.join(folder, `${safeTitle}.mp4`);
+        const filename = makeTemplateFilename(
+            config.filename_template_vod,
+            DEFAULT_FILENAME_TEMPLATE_VOD,
+            1,
+            0,
+            totalDuration
+        );
         return await downloadVODPart(item.url, filename, null, null, onProgress, item.id, 1, 1);
     } else {
         // Part-based download
@@ -1553,7 +1602,13 @@ async function downloadVOD(
             const endSec = Math.min((i + 1) * partDuration, totalDuration);
             const duration = endSec - startSec;
 
-            const partFilename = path.join(folder, `${dateStr}_Part${(i + 1).toString().padStart(2, '0')}.mp4`);
+            const partFilename = makeTemplateFilename(
+                config.filename_template_parts,
+                DEFAULT_FILENAME_TEMPLATE_PARTS,
+                i + 1,
+                startSec,
+                duration
+            );
 
             const result = await downloadVODPart(
                 item.url,
@@ -1756,7 +1811,7 @@ ipcMain.handle('save-config', (_, newConfig: Partial<Config>) => {
     const previousClientId = config.client_id;
     const previousClientSecret = config.client_secret;
 
-    config = { ...config, ...newConfig };
+    config = normalizeConfigTemplates({ ...config, ...newConfig });
 
     if (config.client_id !== previousClientId || config.client_secret !== previousClientSecret) {
         accessToken = null;
