@@ -60,7 +60,6 @@ Output artifacts are generated in `typescript-version/release/`.
 
 - `typescript-version/` - Electron app source and build config
 - `docs/` - Astro + MDX documentation site
-- `server_files/` - legacy release metadata files
 
 ## Auto-Update Notes
 

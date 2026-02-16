@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, ChildProcess, execSync, exec, spawnSync } from 'child_process';
@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.0.7';
+const APP_VERSION = '4.0.8';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -1720,6 +1720,8 @@ async function processQueue(): Promise<void> {
 // WINDOW CREATION
 // ==========================================
 function createWindow(): void {
+    nativeTheme.themeSource = 'dark';
+
     mainWindow = new BrowserWindow({
         width: 1400,
         height: 900,
@@ -1727,12 +1729,17 @@ function createWindow(): void {
         minHeight: 700,
         title: `Twitch VOD Manager [v${APP_VERSION}]`,
         backgroundColor: '#0e0e10',
+        autoHideMenuBar: true,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js')
         }
     });
+
+    if (process.platform !== 'darwin') {
+        mainWindow.removeMenu();
+    }
 
     mainWindow.loadFile(path.join(__dirname, '../src/index.html'));
 

@@ -26,4 +26,7 @@ docs/.astro/
 
 # Executables
 Twitch_VOD_Manager.exe
-server_files/*.exe
+
+# Legacy artifacts (not used by TypeScript app)
+server_files/
+installer.iss
