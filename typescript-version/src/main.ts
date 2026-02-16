@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.0.8';
+const APP_VERSION = '4.1.0';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -23,12 +23,17 @@ const DEFAULT_DOWNLOAD_PATH = path.join(app.getPath('desktop'), 'Twitch_VODs');
 const DEFAULT_FILENAME_TEMPLATE_VOD = '{title}.mp4';
 const DEFAULT_FILENAME_TEMPLATE_PARTS = '{date}_Part{part_padded}.mp4';
 const DEFAULT_FILENAME_TEMPLATE_CLIP = '{date}_{part}.mp4';
+const DEFAULT_METADATA_CACHE_MINUTES = 10;
+const DEFAULT_PERFORMANCE_MODE: PerformanceMode = 'balanced';
 
 // Timeouts
 const API_TIMEOUT = 10000;
-const MAX_RETRY_ATTEMPTS = 3;
-const RETRY_DELAY_SECONDS = 5;
+const DEFAULT_RETRY_DELAY_SECONDS = 5;
+const MIN_FILE_BYTES = 256 * 1024;
 const TWITCH_WEB_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+
+type PerformanceMode = 'stability' | 'balanced' | 'speed';
+type RetryErrorClass = 'network' | 'rate_limit' | 'auth' | 'tooling' | 'integrity' | 'io' | 'unknown';
 
 // Ensure directories exist
 if (!fs.existsSync(APPDATA_DIR)) {
@@ -50,6 +55,57 @@ interface Config {
     filename_template_vod: string;
     filename_template_parts: string;
     filename_template_clip: string;
+    smart_queue_scheduler: boolean;
+    performance_mode: PerformanceMode;
+    prevent_duplicate_downloads: boolean;
+    metadata_cache_minutes: number;
+}
+
+interface RuntimeMetrics {
+    cacheHits: number;
+    cacheMisses: number;
+    duplicateSkips: number;
+    retriesScheduled: number;
+    retriesExhausted: number;
+    integrityFailures: number;
+    downloadsStarted: number;
+    downloadsCompleted: number;
+    downloadsFailed: number;
+    downloadedBytesTotal: number;
+    lastSpeedBytesPerSec: number;
+    avgSpeedBytesPerSec: number;
+    activeItemId: string | null;
+    activeItemTitle: string | null;
+    lastErrorClass: RetryErrorClass | null;
+    lastRetryDelaySeconds: number;
+}
+
+interface RuntimeMetricsSnapshot extends RuntimeMetrics {
+    timestamp: string;
+    queue: {
+        pending: number;
+        downloading: number;
+        paused: number;
+        completed: number;
+        error: number;
+        total: number;
+    };
+    caches: {
+        loginToUserId: number;
+        vodList: number;
+        clipInfo: number;
+    };
+    config: {
+        performanceMode: PerformanceMode;
+        smartScheduler: boolean;
+        metadataCacheMinutes: number;
+        duplicatePrevention: boolean;
+    };
+}
+
+interface CacheEntry<T> {
+    value: T;
+    expiresAt: number;
 }
 
 interface VOD {
@@ -115,6 +171,7 @@ interface DownloadProgress {
     id: string;
     progress: number;
     speed: string;
+    speedBytesPerSec?: number;
     eta: string;
     status: string;
     currentPart?: number;
@@ -144,7 +201,11 @@ const defaultConfig: Config = {
     language: 'en',
     filename_template_vod: DEFAULT_FILENAME_TEMPLATE_VOD,
     filename_template_parts: DEFAULT_FILENAME_TEMPLATE_PARTS,
-    filename_template_clip: DEFAULT_FILENAME_TEMPLATE_CLIP
+    filename_template_clip: DEFAULT_FILENAME_TEMPLATE_CLIP,
+    smart_queue_scheduler: true,
+    performance_mode: DEFAULT_PERFORMANCE_MODE,
+    prevent_duplicate_downloads: true,
+    metadata_cache_minutes: DEFAULT_METADATA_CACHE_MINUTES
 };
 
 function normalizeFilenameTemplate(template: string | undefined, fallback: string): string {
@@ -152,12 +213,33 @@ function normalizeFilenameTemplate(template: string | undefined, fallback: strin
     return value || fallback;
 }
 
+function normalizeMetadataCacheMinutes(value: unknown): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return DEFAULT_METADATA_CACHE_MINUTES;
+    }
+
+    return Math.max(1, Math.min(120, Math.floor(parsed)));
+}
+
+function normalizePerformanceMode(mode: unknown): PerformanceMode {
+    if (mode === 'stability' || mode === 'balanced' || mode === 'speed') {
+        return mode;
+    }
+
+    return DEFAULT_PERFORMANCE_MODE;
+}
+
 function normalizeConfigTemplates(input: Config): Config {
     return {
         ...input,
         filename_template_vod: normalizeFilenameTemplate(input.filename_template_vod, DEFAULT_FILENAME_TEMPLATE_VOD),
         filename_template_parts: normalizeFilenameTemplate(input.filename_template_parts, DEFAULT_FILENAME_TEMPLATE_PARTS),
-        filename_template_clip: normalizeFilenameTemplate(input.filename_template_clip, DEFAULT_FILENAME_TEMPLATE_CLIP)
+        filename_template_clip: normalizeFilenameTemplate(input.filename_template_clip, DEFAULT_FILENAME_TEMPLATE_CLIP),
+        smart_queue_scheduler: input.smart_queue_scheduler !== false,
+        performance_mode: normalizePerformanceMode(input.performance_mode),
+        prevent_duplicate_downloads: input.prevent_duplicate_downloads !== false,
+        metadata_cache_minutes: normalizeMetadataCacheMinutes(input.metadata_cache_minutes)
     };
 }
 
@@ -218,6 +300,27 @@ let pauseRequested = false;
 let downloadStartTime = 0;
 let downloadedBytes = 0;
 const userIdLoginCache = new Map<string, string>();
+const loginToUserIdCache = new Map<string, CacheEntry<string>>();
+const vodListCache = new Map<string, CacheEntry<VOD[]>>();
+const clipInfoCache = new Map<string, CacheEntry<any>>();
+const runtimeMetrics: RuntimeMetrics = {
+    cacheHits: 0,
+    cacheMisses: 0,
+    duplicateSkips: 0,
+    retriesScheduled: 0,
+    retriesExhausted: 0,
+    integrityFailures: 0,
+    downloadsStarted: 0,
+    downloadsCompleted: 0,
+    downloadsFailed: 0,
+    downloadedBytesTotal: 0,
+    lastSpeedBytesPerSec: 0,
+    avgSpeedBytesPerSec: 0,
+    activeItemId: null,
+    activeItemTitle: null,
+    lastErrorClass: null,
+    lastRetryDelaySeconds: 0
+};
 let streamlinkCommandCache: { command: string; prefixArgs: string[] } | null = null;
 let bundledStreamlinkPath: string | null = null;
 let bundledFFmpegPath: string | null = null;
@@ -798,6 +901,251 @@ function formatETA(seconds: number): string {
     return `${h}h ${m}m`;
 }
 
+function getMetadataCacheTtlMs(): number {
+    return normalizeMetadataCacheMinutes(config.metadata_cache_minutes) * 60 * 1000;
+}
+
+function getRetryAttemptLimit(): number {
+    switch (normalizePerformanceMode(config.performance_mode)) {
+        case 'stability':
+            return 5;
+        case 'speed':
+            return 2;
+        case 'balanced':
+        default:
+            return 3;
+    }
+}
+
+function classifyDownloadError(errorMessage: string): RetryErrorClass {
+    const text = (errorMessage || '').toLowerCase();
+    if (!text) return 'unknown';
+
+    if (text.includes('429') || text.includes('rate limit') || text.includes('too many requests')) return 'rate_limit';
+    if (text.includes('401') || text.includes('403') || text.includes('unauthorized') || text.includes('forbidden')) return 'auth';
+    if (text.includes('timed out') || text.includes('timeout') || text.includes('network') || text.includes('connection') || text.includes('dns')) return 'network';
+    if (text.includes('streamlink nicht gefunden') || text.includes('ffmpeg') || text.includes('ffprobe') || text.includes('enoent')) return 'tooling';
+    if (text.includes('integritaet') || text.includes('integrity') || text.includes('kein videostream')) return 'integrity';
+    if (text.includes('access denied') || text.includes('permission') || text.includes('disk') || text.includes('file') || text.includes('ordner')) return 'io';
+
+    return 'unknown';
+}
+
+function getRetryDelaySeconds(errorClass: RetryErrorClass, attempt: number): number {
+    const jitter = Math.floor(Math.random() * 3);
+
+    switch (errorClass) {
+        case 'rate_limit':
+            return Math.min(45, 10 + attempt * 6 + jitter);
+        case 'network':
+            return Math.min(30, 4 * attempt + jitter);
+        case 'auth':
+            return Math.min(40, 8 + attempt * 5 + jitter);
+        case 'integrity':
+            return Math.min(20, 3 + attempt * 2 + jitter);
+        case 'io':
+            return Math.min(25, 5 + attempt * 3 + jitter);
+        case 'tooling':
+            return DEFAULT_RETRY_DELAY_SECONDS;
+        case 'unknown':
+        default:
+            return Math.min(25, DEFAULT_RETRY_DELAY_SECONDS + attempt * 2 + jitter);
+    }
+}
+
+function getQueueCounts(queueData: QueueItem[] = downloadQueue): RuntimeMetricsSnapshot['queue'] {
+    const counts = {
+        pending: 0,
+        downloading: 0,
+        paused: 0,
+        completed: 0,
+        error: 0,
+        total: queueData.length
+    };
+
+    for (const item of queueData) {
+        if (item.status === 'pending') counts.pending += 1;
+        else if (item.status === 'downloading') counts.downloading += 1;
+        else if (item.status === 'paused') counts.paused += 1;
+        else if (item.status === 'completed') counts.completed += 1;
+        else if (item.status === 'error') counts.error += 1;
+    }
+
+    return counts;
+}
+
+function getRuntimeMetricsSnapshot(): RuntimeMetricsSnapshot {
+    return {
+        ...runtimeMetrics,
+        timestamp: new Date().toISOString(),
+        queue: getQueueCounts(downloadQueue),
+        caches: {
+            loginToUserId: loginToUserIdCache.size,
+            vodList: vodListCache.size,
+            clipInfo: clipInfoCache.size
+        },
+        config: {
+            performanceMode: normalizePerformanceMode(config.performance_mode),
+            smartScheduler: config.smart_queue_scheduler !== false,
+            metadataCacheMinutes: normalizeMetadataCacheMinutes(config.metadata_cache_minutes),
+            duplicatePrevention: config.prevent_duplicate_downloads !== false
+        }
+    };
+}
+
+function normalizeQueueUrlForFingerprint(url: string): string {
+    return (url || '').trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
+}
+
+function getQueueItemFingerprint(item: Pick<QueueItem, 'url' | 'streamer' | 'date' | 'customClip'>): string {
+    const clip = item.customClip;
+    const clipFingerprint = clip
+        ? [
+            'clip',
+            clip.startSec,
+            clip.durationSec,
+            clip.startPart,
+            clip.filenameFormat,
+            (clip.filenameTemplate || '').trim().toLowerCase()
+        ].join(':')
+        : 'vod';
+
+    return [
+        normalizeQueueUrlForFingerprint(item.url),
+        (item.streamer || '').trim().toLowerCase(),
+        (item.date || '').trim(),
+        clipFingerprint
+    ].join('|');
+}
+
+function isQueueItemActive(item: QueueItem): boolean {
+    return item.status === 'pending' || item.status === 'downloading' || item.status === 'paused';
+}
+
+function hasActiveDuplicate(candidate: Pick<QueueItem, 'url' | 'streamer' | 'date' | 'customClip'>): boolean {
+    const candidateFingerprint = getQueueItemFingerprint(candidate);
+
+    return downloadQueue.some((existing) => {
+        if (!isQueueItemActive(existing)) return false;
+        return getQueueItemFingerprint(existing) === candidateFingerprint;
+    });
+}
+
+function getQueuePriorityScore(item: QueueItem): number {
+    const now = Date.now();
+    const createdMs = Number(item.id) || now;
+    const waitSeconds = Math.max(0, Math.floor((now - createdMs) / 1000));
+    const durationSeconds = Math.max(0, parseDuration(item.duration_str || '0s'));
+    const clipBoost = item.customClip ? 1500 : 0;
+    const shortJobBoost = Math.max(0, 7200 - Math.min(7200, durationSeconds)) / 5;
+    const ageBoost = Math.min(waitSeconds, 1800) / 2;
+
+    return clipBoost + shortJobBoost + ageBoost;
+}
+
+function pickNextPendingQueueItem(): QueueItem | null {
+    const pendingItems = downloadQueue.filter((item) => item.status === 'pending');
+    if (!pendingItems.length) return null;
+
+    if (!config.smart_queue_scheduler) {
+        return pendingItems[0];
+    }
+
+    let best = pendingItems[0];
+    let bestScore = getQueuePriorityScore(best);
+
+    for (let i = 1; i < pendingItems.length; i += 1) {
+        const candidate = pendingItems[i];
+        const score = getQueuePriorityScore(candidate);
+        if (score > bestScore) {
+            best = candidate;
+            bestScore = score;
+        }
+    }
+
+    return best;
+}
+
+function parseClockDurationSeconds(duration: string | null): number | null {
+    if (!duration) return null;
+    const parts = duration.split(':').map((part) => Number(part));
+    if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) {
+        return null;
+    }
+
+    return Math.max(0, Math.floor(parts[0] * 3600 + parts[1] * 60 + parts[2]));
+}
+
+function probeMediaFile(filePath: string): { durationSeconds: number; hasVideo: boolean } | null {
+    try {
+        const ffprobePath = getFFprobePath();
+        if (!canExecuteCommand(ffprobePath, ['-version'])) {
+            return null;
+        }
+
+        const res = spawnSync(ffprobePath, [
+            '-v', 'error',
+            '-print_format', 'json',
+            '-show_format',
+            '-show_streams',
+            filePath
+        ], {
+            windowsHide: true,
+            encoding: 'utf-8'
+        });
+
+        if (res.status !== 0 || !res.stdout) {
+            return null;
+        }
+
+        const parsed = JSON.parse(res.stdout) as {
+            format?: { duration?: string };
+            streams?: Array<{ codec_type?: string }>;
+        };
+
+        const durationSeconds = Number(parsed?.format?.duration || 0);
+        const hasVideo = Boolean(parsed?.streams?.some((stream) => stream.codec_type === 'video'));
+
+        return {
+            durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 0,
+            hasVideo
+        };
+    } catch {
+        return null;
+    }
+}
+
+function validateDownloadedFileIntegrity(filePath: string, expectedDurationSeconds: number | null): DownloadResult {
+    const probed = probeMediaFile(filePath);
+    if (!probed) {
+        appendDebugLog('integrity-probe-skipped', { filePath });
+        return { success: true };
+    }
+
+    if (!probed.hasVideo) {
+        runtimeMetrics.integrityFailures += 1;
+        return { success: false, error: 'Integritaetspruefung fehlgeschlagen: Kein Videostream gefunden.' };
+    }
+
+    if (probed.durationSeconds <= 1) {
+        runtimeMetrics.integrityFailures += 1;
+        return { success: false, error: `Integritaetspruefung fehlgeschlagen: Dauer zu kurz (${probed.durationSeconds.toFixed(2)}s).` };
+    }
+
+    if (expectedDurationSeconds && expectedDurationSeconds > 4) {
+        const minExpected = Math.max(2, expectedDurationSeconds * 0.45);
+        if (probed.durationSeconds < minExpected) {
+            runtimeMetrics.integrityFailures += 1;
+            return {
+                success: false,
+                error: `Integritaetspruefung fehlgeschlagen: ${probed.durationSeconds.toFixed(1)}s statt erwarteter ~${expectedDurationSeconds}s.`
+            };
+        }
+    }
+
+    return { success: true };
+}
+
 // ==========================================
 // TWITCH API
 // ==========================================
@@ -881,6 +1229,14 @@ async function getPublicUserId(username: string): Promise<string | null> {
     const login = normalizeLogin(username);
     if (!login) return null;
 
+    const cached = loginToUserIdCache.get(login);
+    if (cached && cached.expiresAt > Date.now()) {
+        runtimeMetrics.cacheHits += 1;
+        return cached.value;
+    }
+
+    runtimeMetrics.cacheMisses += 1;
+
     type UserQueryResult = { user: { id: string; login: string } | null };
     const data = await fetchPublicTwitchGql<UserQueryResult>(
         'query($login:String!){ user(login:$login){ id login } }',
@@ -890,6 +1246,7 @@ async function getPublicUserId(username: string): Promise<string | null> {
     const user = data?.user;
     if (!user?.id) return null;
 
+    loginToUserIdCache.set(login, { value: user.id, expiresAt: Date.now() + getMetadataCacheTtlMs() });
     userIdLoginCache.set(user.id, user.login || login);
     return user.id;
 }
@@ -945,6 +1302,14 @@ async function getUserId(username: string): Promise<string | null> {
     const login = normalizeLogin(username);
     if (!login) return null;
 
+    const cached = loginToUserIdCache.get(login);
+    if (cached && cached.expiresAt > Date.now()) {
+        runtimeMetrics.cacheHits += 1;
+        return cached.value;
+    }
+
+    runtimeMetrics.cacheMisses += 1;
+
     const getUserViaPublicApi = async () => {
         return await getPublicUserId(login);
     };
@@ -967,6 +1332,7 @@ async function getUserId(username: string): Promise<string | null> {
         const user = response.data.data[0];
         if (!user?.id) return await getUserViaPublicApi();
 
+        loginToUserIdCache.set(login, { value: user.id, expiresAt: Date.now() + getMetadataCacheTtlMs() });
         userIdLoginCache.set(user.id, user.login || login);
         return user.id;
     } catch (e) {
@@ -976,6 +1342,7 @@ async function getUserId(username: string): Promise<string | null> {
                 const user = retryResponse.data.data[0];
                 if (!user?.id) return await getUserViaPublicApi();
 
+                loginToUserIdCache.set(login, { value: user.id, expiresAt: Date.now() + getMetadataCacheTtlMs() });
                 userIdLoginCache.set(user.id, user.login || login);
                 return user.id;
             } catch (retryError) {
@@ -989,12 +1356,28 @@ async function getUserId(username: string): Promise<string | null> {
     }
 }
 
-async function getVODs(userId: string): Promise<VOD[]> {
+async function getVODs(userId: string, forceRefresh = false): Promise<VOD[]> {
+    const cacheKey = `user:${userId}`;
+    if (!forceRefresh) {
+        const cached = vodListCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+            runtimeMetrics.cacheHits += 1;
+            return cached.value;
+        }
+    }
+
+    runtimeMetrics.cacheMisses += 1;
+
     const getVodsViaPublicApi = async () => {
         const login = userIdLoginCache.get(userId);
         if (!login) return [];
 
-        return await getPublicVODsByLogin(login);
+        const vods = await getPublicVODsByLogin(login);
+        vodListCache.set(cacheKey, {
+            value: vods,
+            expiresAt: Date.now() + getMetadataCacheTtlMs()
+        });
+        return vods;
     };
 
     if (!(await ensureTwitchAuth())) return await getVodsViaPublicApi();
@@ -1022,6 +1405,11 @@ async function getVODs(userId: string): Promise<VOD[]> {
             userIdLoginCache.set(userId, normalizeLogin(login));
         }
 
+        vodListCache.set(cacheKey, {
+            value: vods,
+            expiresAt: Date.now() + getMetadataCacheTtlMs()
+        });
+
         return vods;
     } catch (e) {
         if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
@@ -1032,6 +1420,11 @@ async function getVODs(userId: string): Promise<VOD[]> {
                 if (login) {
                     userIdLoginCache.set(userId, normalizeLogin(login));
                 }
+
+                vodListCache.set(cacheKey, {
+                    value: vods,
+                    expiresAt: Date.now() + getMetadataCacheTtlMs()
+                });
 
                 return vods;
             } catch (retryError) {
@@ -1046,6 +1439,14 @@ async function getVODs(userId: string): Promise<VOD[]> {
 }
 
 async function getClipInfo(clipId: string): Promise<any | null> {
+    const cached = clipInfoCache.get(clipId);
+    if (cached && cached.expiresAt > Date.now()) {
+        runtimeMetrics.cacheHits += 1;
+        return cached.value;
+    }
+
+    runtimeMetrics.cacheMisses += 1;
+
     if (!(await ensureTwitchAuth())) return null;
 
     const fetchClip = async () => {
@@ -1061,12 +1462,20 @@ async function getClipInfo(clipId: string): Promise<any | null> {
 
     try {
         const response = await fetchClip();
-        return response.data.data[0] || null;
+        const clip = response.data.data[0] || null;
+        if (clip) {
+            clipInfoCache.set(clipId, { value: clip, expiresAt: Date.now() + getMetadataCacheTtlMs() });
+        }
+        return clip;
     } catch (e) {
         if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
             try {
                 const retryResponse = await fetchClip();
-                return retryResponse.data.data[0] || null;
+                const clip = retryResponse.data.data[0] || null;
+                if (clip) {
+                    clipInfoCache.set(clipId, { value: clip, expiresAt: Date.now() + getMetadataCacheTtlMs() });
+                }
+                return clip;
             } catch (retryError) {
                 console.error('Error getting clip after relogin:', retryError);
                 return null;
@@ -1183,43 +1592,70 @@ async function cutVideo(
         return false;
     }
 
-    return new Promise((resolve) => {
-        const ffmpeg = getFFmpegPath();
-        const duration = endTime - startTime;
+    const ffmpeg = getFFmpegPath();
+    const duration = Math.max(0.1, endTime - startTime);
 
+    const runCutAttempt = async (copyMode: boolean): Promise<boolean> => {
         const args = [
             '-ss', formatDuration(startTime),
             '-i', inputFile,
-            '-t', formatDuration(duration),
-            '-c', 'copy',
-            '-progress', 'pipe:1',
-            '-y',
-            outputFile
+            '-t', formatDuration(duration)
         ];
 
-        const proc = spawn(ffmpeg, args, { windowsHide: true });
-        currentProcess = proc;
+        if (copyMode) {
+            args.push('-c', 'copy');
+        } else {
+            args.push(
+                '-c:v', 'libx264',
+                '-preset', 'veryfast',
+                '-crf', '20',
+                '-c:a', 'aac',
+                '-b:a', '160k',
+                '-movflags', '+faststart'
+            );
+        }
 
-        proc.stdout?.on('data', (data) => {
-            const line = data.toString();
-            const match = line.match(/out_time_us=(\d+)/);
-            if (match) {
-                const currentUs = parseInt(match[1]);
-                const percent = Math.min(100, (currentUs / 1000000) / duration * 100);
-                onProgress(percent);
-            }
-        });
+        args.push('-progress', 'pipe:1', '-y', outputFile);
 
-        proc.on('close', (code) => {
-            currentProcess = null;
-            resolve(code === 0 && fs.existsSync(outputFile));
-        });
+        appendDebugLog('cut-video-attempt', { copyMode, args });
 
-        proc.on('error', () => {
-            currentProcess = null;
-            resolve(false);
+        return await new Promise((resolve) => {
+            const proc = spawn(ffmpeg, args, { windowsHide: true });
+            currentProcess = proc;
+
+            proc.stdout?.on('data', (data) => {
+                const line = data.toString();
+                const match = line.match(/out_time_us=(\d+)/);
+                if (match) {
+                    const currentUs = parseInt(match[1], 10);
+                    const percent = Math.min(100, (currentUs / 1000000) / duration * 100);
+                    onProgress(percent);
+                }
+            });
+
+            proc.on('close', (code) => {
+                currentProcess = null;
+                resolve(code === 0 && fs.existsSync(outputFile));
+            });
+
+            proc.on('error', () => {
+                currentProcess = null;
+                resolve(false);
+            });
         });
-    });
+    };
+
+    const copySuccess = await runCutAttempt(true);
+    if (copySuccess) {
+        return true;
+    }
+
+    appendDebugLog('cut-video-copy-failed-fallback-reencode', { inputFile, outputFile });
+    try {
+        if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
+    } catch { }
+
+    return await runCutAttempt(false);
 }
 
 // ==========================================
@@ -1236,65 +1672,80 @@ async function mergeVideos(
         return false;
     }
 
-    return new Promise((resolve) => {
-        const ffmpeg = getFFmpegPath();
+    const ffmpeg = getFFmpegPath();
+    const concatFile = path.join(app.getPath('temp'), `concat_${Date.now()}.txt`);
+    const concatContent = inputFiles.map((filePath) => `file '${filePath.replace(/'/g, "'\\''")}'`).join('\n');
+    fs.writeFileSync(concatFile, concatContent);
 
-        // Create concat file
-        const concatFile = path.join(app.getPath('temp'), `concat_${Date.now()}.txt`);
-        const concatContent = inputFiles.map(f => `file '${f.replace(/'/g, "'\\''")}'`).join('\n');
-        fs.writeFileSync(concatFile, concatContent);
-
+    const runMergeAttempt = async (copyMode: boolean): Promise<boolean> => {
         const args = [
             '-f', 'concat',
             '-safe', '0',
-            '-i', concatFile,
-            '-c', 'copy',
-            '-progress', 'pipe:1',
-            '-y',
-            outputFile
+            '-i', concatFile
         ];
 
-        const proc = spawn(ffmpeg, args, { windowsHide: true });
-        currentProcess = proc;
-
-        // Get total duration for progress
-        let totalDuration = 0;
-        for (const file of inputFiles) {
-            try {
-                const stats = fs.statSync(file);
-                totalDuration += stats.size; // Approximate by file size
-            } catch { }
+        if (copyMode) {
+            args.push('-c', 'copy');
+        } else {
+            args.push(
+                '-c:v', 'libx264',
+                '-preset', 'veryfast',
+                '-crf', '20',
+                '-c:a', 'aac',
+                '-b:a', '160k',
+                '-movflags', '+faststart'
+            );
         }
 
-        proc.stdout?.on('data', (data) => {
-            const line = data.toString();
-            const match = line.match(/out_time_us=(\d+)/);
-            if (match) {
-                const currentUs = parseInt(match[1]);
-                // Approximate progress
-                onProgress(Math.min(99, currentUs / 10000000));
-            }
-        });
+        args.push('-progress', 'pipe:1', '-y', outputFile);
+        appendDebugLog('merge-video-attempt', { copyMode, argsCount: args.length });
 
-        proc.on('close', (code) => {
-            currentProcess = null;
-            try {
-                fs.unlinkSync(concatFile);
-            } catch { }
+        return await new Promise((resolve) => {
+            const proc = spawn(ffmpeg, args, { windowsHide: true });
+            currentProcess = proc;
 
-            if (code === 0 && fs.existsSync(outputFile)) {
-                onProgress(100);
-                resolve(true);
-            } else {
+            proc.stdout?.on('data', (data) => {
+                const line = data.toString();
+                const match = line.match(/out_time_us=(\d+)/);
+                if (match) {
+                    const currentUs = parseInt(match[1], 10);
+                    onProgress(Math.min(99, currentUs / 10000000));
+                }
+            });
+
+            proc.on('close', (code) => {
+                currentProcess = null;
+                const success = code === 0 && fs.existsSync(outputFile);
+                if (success) {
+                    onProgress(100);
+                }
+                resolve(success);
+            });
+
+            proc.on('error', () => {
+                currentProcess = null;
                 resolve(false);
-            }
+            });
         });
+    };
 
-        proc.on('error', () => {
-            currentProcess = null;
-            resolve(false);
-        });
-    });
+    try {
+        const copySuccess = await runMergeAttempt(true);
+        if (copySuccess) {
+            return true;
+        }
+
+        appendDebugLog('merge-video-copy-failed-fallback-reencode', { outputFile, files: inputFiles.length });
+        try {
+            if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
+        } catch { }
+
+        return await runMergeAttempt(false);
+    } finally {
+        try {
+            fs.unlinkSync(concatFile);
+        } catch { }
+    }
 }
 
 // ==========================================
@@ -1314,6 +1765,7 @@ function downloadVODPart(
         const streamlinkCmd = getStreamlinkCommand();
         const args = [...streamlinkCmd.prefixArgs, url, 'best', '-o', filename, '--force'];
         let lastErrorLine = '';
+        const expectedDurationSeconds = parseClockDurationSeconds(endTime);
 
         if (startTime) {
             args.push('--hls-start-offset', startTime);
@@ -1345,6 +1797,13 @@ function downloadVODPart(
                     const bytesDiff = downloadedBytes - lastBytes;
                     const speed = timeDiff > 0 ? bytesDiff / timeDiff : 0;
 
+                    runtimeMetrics.lastSpeedBytesPerSec = speed;
+                    if (speed > 0) {
+                        runtimeMetrics.avgSpeedBytesPerSec = runtimeMetrics.avgSpeedBytesPerSec <= 0
+                            ? speed
+                            : (runtimeMetrics.avgSpeedBytesPerSec * 0.8) + (speed * 0.2);
+                    }
+
                     lastBytes = downloadedBytes;
                     lastTime = now;
 
@@ -1356,7 +1815,8 @@ function downloadVODPart(
                         status: `${formatBytes(downloadedBytes)} heruntergeladen`,
                         currentPart: partNum,
                         totalParts: totalParts,
-                        downloadedBytes: downloadedBytes
+                        downloadedBytes: downloadedBytes,
+                        speedBytesPerSec: speed
                     });
                 } catch { }
             }
@@ -1391,7 +1851,7 @@ function downloadVODPart(
             }
         });
 
-        proc.on('close', (code) => {
+        proc.on('close', async (code) => {
             clearInterval(progressInterval);
             currentProcess = null;
 
@@ -1403,15 +1863,28 @@ function downloadVODPart(
 
             if (code === 0 && fs.existsSync(filename)) {
                 const stats = fs.statSync(filename);
-                if (stats.size > 1024 * 1024) {
-                    appendDebugLog('download-part-success', { itemId, filename, bytes: stats.size });
-                    resolve({ success: true });
+                if (stats.size <= MIN_FILE_BYTES) {
+                    const tooSmall = `Datei zu klein (${stats.size} Bytes)`;
+                    appendDebugLog('download-part-failed-small-file', { itemId, filename, bytes: stats.size });
+                    resolve({ success: false, error: tooSmall });
                     return;
                 }
 
-                const tooSmall = `Datei zu klein (${stats.size} Bytes)`;
-                appendDebugLog('download-part-failed-small-file', { itemId, filename, bytes: stats.size });
-                resolve({ success: false, error: tooSmall });
+                const integrityResult = validateDownloadedFileIntegrity(filename, expectedDurationSeconds);
+                if (!integrityResult.success) {
+                    appendDebugLog('download-part-failed-integrity', {
+                        itemId,
+                        filename,
+                        bytes: stats.size,
+                        error: integrityResult.error
+                    });
+                    resolve(integrityResult);
+                    return;
+                }
+
+                runtimeMetrics.downloadedBytesTotal += stats.size;
+                appendDebugLog('download-part-success', { itemId, filename, bytes: stats.size });
+                resolve({ success: true });
                 return;
             }
 
@@ -1636,19 +2109,35 @@ async function downloadVOD(
 }
 
 async function processQueue(): Promise<void> {
-    if (isDownloading || downloadQueue.length === 0) return;
+    if (isDownloading || !downloadQueue.some((item) => item.status === 'pending')) return;
 
-    appendDebugLog('queue-start', { items: downloadQueue.length });
+    appendDebugLog('queue-start', {
+        items: downloadQueue.length,
+        smartScheduler: config.smart_queue_scheduler,
+        performanceMode: config.performance_mode
+    });
+
     isDownloading = true;
     pauseRequested = false;
     mainWindow?.webContents.send('download-started');
     mainWindow?.webContents.send('queue-updated', downloadQueue);
 
-    for (const item of downloadQueue) {
-        if (!isDownloading || pauseRequested) break;
-        if (item.status === 'completed' || item.status === 'error' || item.status === 'paused') continue;
+    while (isDownloading && !pauseRequested) {
+        const item = pickNextPendingQueueItem();
+        if (!item) {
+            break;
+        }
 
-        appendDebugLog('queue-item-start', { itemId: item.id, title: item.title, url: item.url });
+        appendDebugLog('queue-item-start', {
+            itemId: item.id,
+            title: item.title,
+            url: item.url,
+            smartScore: config.smart_queue_scheduler ? getQueuePriorityScore(item) : 0
+        });
+
+        runtimeMetrics.downloadsStarted += 1;
+        runtimeMetrics.activeItemId = item.id;
+        runtimeMetrics.activeItemTitle = item.title;
 
         currentDownloadCancelled = false;
         item.status = 'downloading';
@@ -1658,9 +2147,10 @@ async function processQueue(): Promise<void> {
         item.last_error = '';
 
         let finalResult: DownloadResult = { success: false, error: 'Unbekannter Fehler beim Download' };
+        const maxAttempts = getRetryAttemptLimit();
 
-        for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
-            appendDebugLog('queue-item-attempt', { itemId: item.id, attempt, max: MAX_RETRY_ATTEMPTS });
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            appendDebugLog('queue-item-attempt', { itemId: item.id, attempt, max: maxAttempts });
 
             const result = await downloadVOD(item, (progress) => {
                 mainWindow?.webContents.send('download-progress', progress);
@@ -1678,20 +2168,34 @@ async function processQueue(): Promise<void> {
                 break;
             }
 
-            if (attempt < MAX_RETRY_ATTEMPTS) {
-                item.last_error = `Versuch ${attempt}/${MAX_RETRY_ATTEMPTS} fehlgeschlagen: ${result.error || 'Unbekannter Fehler'}`;
+            const errorClass = classifyDownloadError(result.error || '');
+            runtimeMetrics.lastErrorClass = errorClass;
+
+            if (errorClass === 'tooling') {
+                appendDebugLog('queue-item-no-retry-tooling', { itemId: item.id, error: result.error || 'unknown' });
+                break;
+            }
+
+            if (attempt < maxAttempts) {
+                const retryDelaySeconds = getRetryDelaySeconds(errorClass, attempt);
+                runtimeMetrics.retriesScheduled += 1;
+                runtimeMetrics.lastRetryDelaySeconds = retryDelaySeconds;
+
+                item.last_error = `Versuch ${attempt}/${maxAttempts} fehlgeschlagen (${errorClass}): ${result.error || 'Unbekannter Fehler'}`;
                 mainWindow?.webContents.send('download-progress', {
                     id: item.id,
                     progress: -1,
                     speed: '',
                     eta: '',
-                    status: `Neuer Versuch in ${RETRY_DELAY_SECONDS}s...`,
+                    status: `Neuer Versuch in ${retryDelaySeconds}s (${errorClass})...`,
                     currentPart: item.currentPart,
                     totalParts: item.totalParts
                 } as DownloadProgress);
                 saveQueue(downloadQueue);
                 mainWindow?.webContents.send('queue-updated', downloadQueue);
-                await sleep(RETRY_DELAY_SECONDS * 1000);
+                await sleep(retryDelaySeconds * 1000);
+            } else {
+                runtimeMetrics.retriesExhausted += 1;
             }
         }
 
@@ -1699,17 +2203,31 @@ async function processQueue(): Promise<void> {
         item.status = finalResult.success ? 'completed' : (wasPaused ? 'paused' : 'error');
         item.progress = finalResult.success ? 100 : item.progress;
         item.last_error = finalResult.success || wasPaused ? '' : (finalResult.error || 'Unbekannter Fehler beim Download');
+
+        if (finalResult.success) {
+            runtimeMetrics.downloadsCompleted += 1;
+        } else if (!wasPaused) {
+            runtimeMetrics.downloadsFailed += 1;
+        }
+
+        runtimeMetrics.activeItemId = null;
+        runtimeMetrics.activeItemTitle = null;
+
         appendDebugLog('queue-item-finished', {
             itemId: item.id,
             status: item.status,
             error: item.last_error
         });
+
         saveQueue(downloadQueue);
         mainWindow?.webContents.send('queue-updated', downloadQueue);
     }
 
     isDownloading = false;
     pauseRequested = false;
+    runtimeMetrics.activeItemId = null;
+    runtimeMetrics.activeItemTitle = null;
+
     saveQueue(downloadQueue);
     mainWindow?.webContents.send('queue-updated', downloadQueue);
     mainWindow?.webContents.send('download-finished');
@@ -1817,11 +2335,18 @@ ipcMain.handle('get-config', () => config);
 ipcMain.handle('save-config', (_, newConfig: Partial<Config>) => {
     const previousClientId = config.client_id;
     const previousClientSecret = config.client_secret;
+    const previousCacheMinutes = config.metadata_cache_minutes;
 
     config = normalizeConfigTemplates({ ...config, ...newConfig });
 
     if (config.client_id !== previousClientId || config.client_secret !== previousClientSecret) {
         accessToken = null;
+    }
+
+    if (config.metadata_cache_minutes !== previousCacheMinutes) {
+        loginToUserIdCache.clear();
+        vodListCache.clear();
+        clipInfoCache.clear();
     }
 
     saveConfig(config);
@@ -1836,13 +2361,23 @@ ipcMain.handle('get-user-id', async (_, username: string) => {
     return await getUserId(username);
 });
 
-ipcMain.handle('get-vods', async (_, userId: string) => {
-    return await getVODs(userId);
+ipcMain.handle('get-vods', async (_, userId: string, forceRefresh: boolean = false) => {
+    return await getVODs(userId, forceRefresh);
 });
 
 ipcMain.handle('get-queue', () => downloadQueue);
 
 ipcMain.handle('add-to-queue', (_, item: Omit<QueueItem, 'id' | 'status' | 'progress'>) => {
+    if (config.prevent_duplicate_downloads && hasActiveDuplicate(item)) {
+        runtimeMetrics.duplicateSkips += 1;
+        appendDebugLog('queue-item-duplicate-skipped', {
+            title: item.title,
+            url: item.url,
+            streamer: item.streamer
+        });
+        return downloadQueue;
+    }
+
     const queueItem: QueueItem = {
         ...item,
         id: Date.now().toString(),
@@ -2046,6 +2581,8 @@ ipcMain.handle('get-debug-log', async (_, lines: number = 200) => {
 });
 
 ipcMain.handle('is-downloading', () => isDownloading);
+
+ipcMain.handle('get-runtime-metrics', () => getRuntimeMetricsSnapshot());
 
 // Video Cutter IPC
 ipcMain.handle('get-video-info', async (_, filePath: string) => {

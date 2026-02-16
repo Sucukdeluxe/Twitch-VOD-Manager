@@ -49,7 +49,7 @@ async function removeStreamer(name: string): Promise<void> {
     `;
 }
 
-async function selectStreamer(name: string): Promise<void> {
+async function selectStreamer(name: string, forceRefresh = false): Promise<void> {
     currentStreamer = name;
     renderStreamers();
     byId('pageTitle').textContent = name;
@@ -70,7 +70,7 @@ async function selectStreamer(name: string): Promise<void> {
         return;
     }
 
-    const vods = await window.api.getVODs(userId);
+    const vods = await window.api.getVODs(userId, forceRefresh);
     renderVODs(vods, name);
 }
 
@@ -113,5 +113,5 @@ async function refreshVODs(): Promise<void> {
         return;
     }
 
-    await selectStreamer(currentStreamer);
+    await selectStreamer(currentStreamer, true);
 }

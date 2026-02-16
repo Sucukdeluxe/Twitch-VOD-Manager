@@ -1,4 +1,40 @@
+function buildQueueFingerprint(url: string, streamer: string, date: string, customClip?: CustomClip): string {
+    const clipFingerprint = customClip
+        ? [
+            'clip',
+            customClip.startSec,
+            customClip.durationSec,
+            customClip.startPart,
+            customClip.filenameFormat,
+            (customClip.filenameTemplate || '').trim().toLowerCase()
+        ].join(':')
+        : 'vod';
+
+    return [
+        (url || '').trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, ''),
+        (streamer || '').trim().toLowerCase(),
+        (date || '').trim(),
+        clipFingerprint
+    ].join('|');
+}
+
+function hasActiveQueueDuplicate(url: string, streamer: string, date: string, customClip?: CustomClip): boolean {
+    const target = buildQueueFingerprint(url, streamer, date, customClip);
+    return queue.some((item) => {
+        if (item.status !== 'pending' && item.status !== 'downloading' && item.status !== 'paused') {
+            return false;
+        }
+
+        return buildQueueFingerprint(item.url, item.streamer, item.date, item.customClip) === target;
+    });
+}
+
 async function addToQueue(url: string, title: string, date: string, streamer: string, duration: string): Promise<void> {
+    if ((config.prevent_duplicate_downloads as boolean) !== false && hasActiveQueueDuplicate(url, streamer, date)) {
+        alert(UI_TEXT.queue.duplicateSkipped);
+        return;
+    }
+
     queue = await window.api.addToQueue({
         url,
         title,

@@ -24,6 +24,14 @@ cd "typescript-version"
 npm run dist:win
 ```
 
+`dist:win` already runs the full release validation gate (`test:e2e:release`) before packaging.
+
+For extra confidence before major releases, run:
+
+```bash
+npm run test:e2e:stress
+```
+
 Expected outputs in `typescript-version/release/`:
 
 - `latest.yml`

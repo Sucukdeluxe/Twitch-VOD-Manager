@@ -248,6 +248,36 @@ async function run() {
 
         await clearQueue();
 
+        await window.api.saveConfig({ prevent_duplicate_downloads: true });
+        await window.api.addToQueue({
+          url: 'https://www.twitch.tv/videos/2695851503',
+          title: '__E2E_FULL__dup',
+          date: '2026-02-01T00:00:00Z',
+          streamer: 'xrohat',
+          duration_str: '1h0m0s'
+        });
+        await window.api.addToQueue({
+          url: 'https://www.twitch.tv/videos/2695851503',
+          title: '__E2E_FULL__dup',
+          date: '2026-02-01T00:00:00Z',
+          streamer: 'xrohat',
+          duration_str: '1h0m0s'
+        });
+        let q = await window.api.getQueue();
+        const duplicateCount = q.filter((item) => item.title === '__E2E_FULL__dup').length;
+        checks.duplicatePrevention = { duplicateCount };
+        assert(duplicateCount === 1, 'Duplicate prevention did not block second queue add');
+        await clearQueue();
+
+        const runtimeMetrics = await window.api.getRuntimeMetrics();
+        checks.runtimeMetrics = {
+          hasQueue: !!runtimeMetrics?.queue,
+          hasCache: !!runtimeMetrics?.caches,
+          hasConfig: !!runtimeMetrics?.config,
+          mode: runtimeMetrics?.config?.performanceMode || 'unknown'
+        };
+        assert(Boolean(checks.runtimeMetrics.hasQueue && checks.runtimeMetrics.hasCache && checks.runtimeMetrics.hasConfig), 'Runtime metrics snapshot missing expected sections');
+
         window.showTab('clips');
         const clipUrl = document.getElementById('clipUrl');
         clipUrl.value = '';
@@ -266,7 +296,7 @@ async function run() {
         window.updateFromInput('start');
         window.updateFromInput('end');
         await window.confirmClipDialog();
-        let q = await window.api.getQueue();
+        q = await window.api.getQueue();
         const clipItem = q.find((item) => item.title === '__E2E_FULL__clip');
         checks.clipQueue = { queued: !!clipItem, duration: clipItem?.customClip?.durationSec || 0 };
         assert(Boolean(clipItem && clipItem.customClip && clipItem.customClip.durationSec === 12), 'Clip dialog queue entry invalid');

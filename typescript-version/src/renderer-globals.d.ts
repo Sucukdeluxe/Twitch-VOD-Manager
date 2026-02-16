@@ -10,6 +10,10 @@ interface AppConfig {
     filename_template_vod?: string;
     filename_template_parts?: string;
     filename_template_clip?: string;
+    smart_queue_scheduler?: boolean;
+    performance_mode?: 'stability' | 'balanced' | 'speed';
+    prevent_duplicate_downloads?: boolean;
+    metadata_cache_minutes?: number;
     [key: string]: unknown;
 }
 
@@ -56,12 +60,52 @@ interface DownloadProgress {
     id: string;
     progress: number;
     speed: string;
+    speedBytesPerSec?: number;
     eta: string;
     status: string;
     currentPart?: number;
     totalParts?: number;
     downloadedBytes?: number;
     totalBytes?: number;
+}
+
+interface RuntimeMetricsSnapshot {
+    cacheHits: number;
+    cacheMisses: number;
+    duplicateSkips: number;
+    retriesScheduled: number;
+    retriesExhausted: number;
+    integrityFailures: number;
+    downloadsStarted: number;
+    downloadsCompleted: number;
+    downloadsFailed: number;
+    downloadedBytesTotal: number;
+    lastSpeedBytesPerSec: number;
+    avgSpeedBytesPerSec: number;
+    activeItemId: string | null;
+    activeItemTitle: string | null;
+    lastErrorClass: string | null;
+    lastRetryDelaySeconds: number;
+    timestamp: string;
+    queue: {
+        pending: number;
+        downloading: number;
+        paused: number;
+        completed: number;
+        error: number;
+        total: number;
+    };
+    caches: {
+        loginToUserId: number;
+        vodList: number;
+        clipInfo: number;
+    };
+    config: {
+        performanceMode: 'stability' | 'balanced' | 'speed';
+        smartScheduler: boolean;
+        metadataCacheMinutes: number;
+        duplicatePrevention: boolean;
+    };
 }
 
 interface VideoInfo {
@@ -112,7 +156,7 @@ interface ApiBridge {
     saveConfig(config: Partial<AppConfig>): Promise<AppConfig>;
     login(): Promise<boolean>;
     getUserId(username: string): Promise<string | null>;
-    getVODs(userId: string): Promise<VOD[]>;
+    getVODs(userId: string, forceRefresh?: boolean): Promise<VOD[]>;
     getQueue(): Promise<QueueItem[]>;
     addToQueue(item: Omit<QueueItem, 'id' | 'status' | 'progress'>): Promise<QueueItem[]>;
     removeFromQueue(id: string): Promise<QueueItem[]>;
@@ -140,6 +184,7 @@ interface ApiBridge {
     openExternal(url: string): Promise<void>;
     runPreflight(autoFix: boolean): Promise<PreflightResult>;
     getDebugLog(lines: number): Promise<string>;
+    getRuntimeMetrics(): Promise<RuntimeMetricsSnapshot>;
     onDownloadProgress(callback: (progress: DownloadProgress) => void): void;
     onQueueUpdated(callback: (queue: QueueItem[]) => void): void;
     onDownloadStarted(callback: () => void): void;

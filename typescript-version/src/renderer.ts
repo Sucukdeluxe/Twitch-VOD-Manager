@@ -18,6 +18,10 @@ async function init(): Promise<void> {
     updateLanguagePicker(config.language ?? 'en');
     byId<HTMLSelectElement>('downloadMode').value = config.download_mode ?? 'full';
     byId<HTMLInputElement>('partMinutes').value = String(config.part_minutes ?? 120);
+    byId<HTMLSelectElement>('performanceMode').value = (config.performance_mode as string) || 'balanced';
+    byId<HTMLInputElement>('smartSchedulerToggle').checked = (config.smart_queue_scheduler as boolean) !== false;
+    byId<HTMLInputElement>('duplicatePreventionToggle').checked = (config.prevent_duplicate_downloads as boolean) !== false;
+    byId<HTMLInputElement>('metadataCacheMinutes').value = String((config.metadata_cache_minutes as number) || 10);
     byId<HTMLInputElement>('vodFilenameTemplate').value = (config.filename_template_vod as string) || DEFAULT_VOD_TEMPLATE;
     byId<HTMLInputElement>('partsFilenameTemplate').value = (config.filename_template_parts as string) || DEFAULT_PARTS_TEMPLATE;
     byId<HTMLInputElement>('defaultClipFilenameTemplate').value = (config.filename_template_clip as string) || DEFAULT_CLIP_TEMPLATE;
@@ -86,6 +90,8 @@ async function init(): Promise<void> {
 
     void runPreflight(false);
     void refreshDebugLog();
+    validateFilenameTemplates();
+    void refreshRuntimeMetrics();
 
     setInterval(() => {
         void syncQueueAndDownloadState();
@@ -575,8 +581,18 @@ function updateFilenameExamples(): void {
     const durationSec = Math.max(1, endSec - startSec);
     const timeStr = formatSecondsToTimeDashed(startSec);
     const template = byId<HTMLInputElement>('clipFilenameTemplate').value.trim() || (config.filename_template_clip as string) || DEFAULT_CLIP_TEMPLATE;
+    const unknownTokens = collectUnknownTemplatePlaceholders(template);
+    const clipLint = byId('clipTemplateLint');
 
     updateFilenameTemplateVisibility();
+
+    if (!unknownTokens.length) {
+        clipLint.style.color = '#8bc34a';
+        clipLint.textContent = UI_TEXT.static.templateLintOk;
+    } else {
+        clipLint.style.color = '#ff8a80';
+        clipLint.textContent = `${UI_TEXT.static.templateLintWarn}: ${unknownTokens.join(' ')}`;
+    }
 
     byId('formatSimple').textContent = `${dateStr}_${partNum}.mp4 ${UI_TEXT.clips.formatSimple}`;
     byId('formatTimestamp').textContent = `${dateStr}_CLIP_${timeStr}_${partNum}.mp4 ${UI_TEXT.clips.formatTimestamp}`;
@@ -623,7 +639,32 @@ async function confirmClipDialog(): Promise<void> {
         return;
     }
 
+    if (filenameFormat === 'template') {
+        const unknownTokens = collectUnknownTemplatePlaceholders(filenameTemplate);
+        if (unknownTokens.length > 0) {
+            alert(`${UI_TEXT.static.templateLintWarn}: ${unknownTokens.join(' ')}`);
+            return;
+        }
+    }
+
     const durationSec = endSec - startSec;
+    const customClip: CustomClip = {
+        startSec,
+        durationSec,
+        startPart,
+        filenameFormat,
+        filenameTemplate: filenameFormat === 'template' ? filenameTemplate : undefined
+    };
+
+    if ((config.prevent_duplicate_downloads as boolean) !== false && hasActiveQueueDuplicate(
+        clipDialogData.url,
+        clipDialogData.streamer,
+        clipDialogData.date,
+        customClip
+    )) {
+        alert(UI_TEXT.queue.duplicateSkipped);
+        return;
+    }
 
     queue = await window.api.addToQueue({
         url: clipDialogData.url,
@@ -631,13 +672,7 @@ async function confirmClipDialog(): Promise<void> {
         date: clipDialogData.date,
         streamer: clipDialogData.streamer,
         duration_str: clipDialogData.duration,
-        customClip: {
-            startSec,
-            durationSec,
-            startPart,
-            filenameFormat,
-            filenameTemplate: filenameFormat === 'template' ? filenameTemplate : undefined
-        }
+        customClip
     });
 
     renderQueue();

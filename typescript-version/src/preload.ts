@@ -29,12 +29,52 @@ interface DownloadProgress {
     id: string;
     progress: number;
     speed: string;
+    speedBytesPerSec?: number;
     eta: string;
     status: string;
     currentPart?: number;
     totalParts?: number;
     downloadedBytes?: number;
     totalBytes?: number;
+}
+
+interface RuntimeMetricsSnapshot {
+    cacheHits: number;
+    cacheMisses: number;
+    duplicateSkips: number;
+    retriesScheduled: number;
+    retriesExhausted: number;
+    integrityFailures: number;
+    downloadsStarted: number;
+    downloadsCompleted: number;
+    downloadsFailed: number;
+    downloadedBytesTotal: number;
+    lastSpeedBytesPerSec: number;
+    avgSpeedBytesPerSec: number;
+    activeItemId: string | null;
+    activeItemTitle: string | null;
+    lastErrorClass: string | null;
+    lastRetryDelaySeconds: number;
+    timestamp: string;
+    queue: {
+        pending: number;
+        downloading: number;
+        paused: number;
+        completed: number;
+        error: number;
+        total: number;
+    };
+    caches: {
+        loginToUserId: number;
+        vodList: number;
+        clipInfo: number;
+    };
+    config: {
+        performanceMode: 'stability' | 'balanced' | 'speed';
+        smartScheduler: boolean;
+        metadataCacheMinutes: number;
+        duplicatePrevention: boolean;
+    };
 }
 
 interface VideoInfo {
@@ -55,7 +95,7 @@ contextBridge.exposeInMainWorld('api', {
 
     // Twitch API
     getUserId: (username: string) => ipcRenderer.invoke('get-user-id', username),
-    getVODs: (userId: string) => ipcRenderer.invoke('get-vods', userId),
+    getVODs: (userId: string, forceRefresh: boolean = false) => ipcRenderer.invoke('get-vods', userId, forceRefresh),
 
     // Queue
     getQueue: () => ipcRenderer.invoke('get-queue'),
@@ -97,6 +137,7 @@ contextBridge.exposeInMainWorld('api', {
     openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
     runPreflight: (autoFix: boolean) => ipcRenderer.invoke('run-preflight', autoFix),
     getDebugLog: (lines: number) => ipcRenderer.invoke('get-debug-log', lines),
+    getRuntimeMetrics: (): Promise<RuntimeMetricsSnapshot> => ipcRenderer.invoke('get-runtime-metrics'),
 
     // Events
     onDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
