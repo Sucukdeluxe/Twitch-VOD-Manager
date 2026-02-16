@@ -181,6 +181,10 @@ const DEFAULT_VOD_TEMPLATE = '{title}.mp4';
 const DEFAULT_PARTS_TEMPLATE = '{date}_Part{part_padded}.mp4';
 const DEFAULT_CLIP_TEMPLATE = '{date}_{part}.mp4';
 
+type TemplateGuideSource = 'vod' | 'parts' | 'clip';
+
+let templateGuideSource: TemplateGuideSource = 'vod';
+
 function formatDateWithPattern(date: Date, pattern: string): string {
     const tokenMap: Record<string, string> = {
         yyyy: date.getFullYear().toString(),
@@ -237,7 +241,7 @@ function updateFilenameTemplateVisibility(): void {
     wrap.style.display = selected === 'template' ? 'block' : 'none';
 }
 
-function buildTemplatePreview(template: string, context: {
+interface TemplatePreviewContext {
     title: string;
     date: Date;
     streamer: string;
@@ -245,7 +249,9 @@ function buildTemplatePreview(template: string, context: {
     startSec: number;
     durationSec: number;
     totalSec: number;
-}): string {
+}
+
+function buildTemplatePreview(template: string, context: TemplatePreviewContext): string {
     const dateStr = `${context.date.getDate().toString().padStart(2, '0')}.${(context.date.getMonth() + 1).toString().padStart(2, '0')}.${context.date.getFullYear()}`;
     const normalizedPart = context.partNum || '1';
     let output = template
@@ -270,6 +276,211 @@ function buildTemplatePreview(template: string, context: {
     output = output.replace(/\{length_custom="(.*?)"\}/g, (_, pattern: string) => formatSecondsWithPattern(context.totalSec, pattern));
 
     return output;
+}
+
+function getTemplateForSource(source: TemplateGuideSource): string {
+    if (source === 'vod') {
+        return ((config.filename_template_vod as string) || DEFAULT_VOD_TEMPLATE).trim() || DEFAULT_VOD_TEMPLATE;
+    }
+
+    if (source === 'parts') {
+        return ((config.filename_template_parts as string) || DEFAULT_PARTS_TEMPLATE).trim() || DEFAULT_PARTS_TEMPLATE;
+    }
+
+    const clipField = document.getElementById('clipFilenameTemplate') as HTMLInputElement | null;
+    const clipFromDialog = clipField?.value.trim() || '';
+    if (clipFromDialog) {
+        return clipFromDialog;
+    }
+
+    return ((config.filename_template_clip as string) || DEFAULT_CLIP_TEMPLATE).trim() || DEFAULT_CLIP_TEMPLATE;
+}
+
+function getTemplateGuidePreviewContext(source: TemplateGuideSource): { context: TemplatePreviewContext; contextText: string } {
+    const now = new Date();
+    const sampleDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 15, 8);
+    const sampleStreamer = currentStreamer || 'sample_streamer';
+
+    if (source === 'clip' && clipDialogData) {
+        const startSec = parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value);
+        const endSec = parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
+        const clipDuration = Math.max(1, endSec - startSec);
+        const totalSec = Math.max(1, clipTotalSeconds || parseDurationToSeconds(clipDialogData.duration));
+
+        return {
+            context: {
+                title: clipDialogData.title || 'Clip Title',
+                date: new Date(clipDialogData.date),
+                streamer: clipDialogData.streamer || sampleStreamer,
+                partNum: byId<HTMLInputElement>('clipStartPart').value.trim() || '1',
+                startSec,
+                durationSec: clipDuration,
+                totalSec
+            },
+            contextText: UI_TEXT.static.templateGuideContextClipLive
+        };
+    }
+
+    if (source === 'parts') {
+        const partLen = Math.max(60, Number(config.part_minutes ?? 120) * 60);
+        return {
+            context: {
+                title: 'Epic Ranked Session',
+                date: sampleDate,
+                streamer: sampleStreamer,
+                partNum: '3',
+                startSec: partLen * 2,
+                durationSec: partLen,
+                totalSec: partLen * 5
+            },
+            contextText: UI_TEXT.static.templateGuideContextParts
+        };
+    }
+
+    if (source === 'clip') {
+        return {
+            context: {
+                title: 'Funny Clip Moment',
+                date: sampleDate,
+                streamer: sampleStreamer,
+                partNum: '1',
+                startSec: 95,
+                durationSec: 45,
+                totalSec: 5400
+            },
+            contextText: UI_TEXT.static.templateGuideContextClip
+        };
+    }
+
+    return {
+        context: {
+            title: 'Epic Ranked Session',
+            date: sampleDate,
+            streamer: sampleStreamer,
+            partNum: '1',
+            startSec: 0,
+            durationSec: 3 * 3600 + 12 * 60 + 5,
+            totalSec: 3 * 3600 + 12 * 60 + 5
+        },
+        contextText: UI_TEXT.static.templateGuideContextVod
+    };
+}
+
+interface TemplateVariableDoc {
+    placeholder: string;
+    description: string;
+    exampleTemplate: string;
+}
+
+function getTemplateVariableDocs(): TemplateVariableDoc[] {
+    const de = currentLanguage !== 'en';
+    const text = (deText: string, enText: string) => de ? deText : enText;
+
+    return [
+        { placeholder: '{title}', description: text('Titel des VODs/Clips', 'Title of the VOD/clip'), exampleTemplate: '{title}' },
+        { placeholder: '{id}', description: text('VOD-ID', 'VOD id'), exampleTemplate: '{id}' },
+        { placeholder: '{channel}', description: text('Kanalname', 'Channel name'), exampleTemplate: '{channel}' },
+        { placeholder: '{date}', description: text('Datum (DD.MM.YYYY)', 'Date (DD.MM.YYYY)'), exampleTemplate: '{date}' },
+        { placeholder: '{part}', description: text('Teilnummer', 'Part number'), exampleTemplate: '{part}' },
+        { placeholder: '{part_padded}', description: text('Teilnummer mit 2 Stellen', 'Part number padded to 2 digits'), exampleTemplate: '{part_padded}' },
+        { placeholder: '{trim_start}', description: text('Startzeit des Ausschnitts', 'Trim start time'), exampleTemplate: '{trim_start}' },
+        { placeholder: '{trim_end}', description: text('Endzeit des Ausschnitts', 'Trim end time'), exampleTemplate: '{trim_end}' },
+        { placeholder: '{trim_length}', description: text('Lange des Ausschnitts', 'Trimmed duration'), exampleTemplate: '{trim_length}' },
+        { placeholder: '{length}', description: text('Gesamtdauer', 'Total duration'), exampleTemplate: '{length}' },
+        { placeholder: '{ext}', description: text('Dateiendung', 'File extension'), exampleTemplate: '{ext}' },
+        { placeholder: '{random_string}', description: text('Zufallsstring (8 Zeichen)', 'Random string (8 chars)'), exampleTemplate: '{random_string}' },
+        { placeholder: '{date_custom="yyyy-MM-dd"}', description: text('Datum mit eigenem Format', 'Custom-formatted date'), exampleTemplate: '{date_custom="yyyy-MM-dd"}' },
+        { placeholder: '{trim_start_custom="HH-mm-ss"}', description: text('Startzeit mit eigenem Format', 'Custom-formatted trim start'), exampleTemplate: '{trim_start_custom="HH-mm-ss"}' },
+        { placeholder: '{trim_end_custom="HH-mm-ss"}', description: text('Endzeit mit eigenem Format', 'Custom-formatted trim end'), exampleTemplate: '{trim_end_custom="HH-mm-ss"}' },
+        { placeholder: '{trim_length_custom="HH-mm-ss"}', description: text('Trim-Dauer mit eigenem Format', 'Custom-formatted trim length'), exampleTemplate: '{trim_length_custom="HH-mm-ss"}' },
+        { placeholder: '{length_custom="HH-mm-ss"}', description: text('Gesamtdauer mit eigenem Format', 'Custom-formatted total duration'), exampleTemplate: '{length_custom="HH-mm-ss"}' }
+    ];
+}
+
+function renderTemplateGuideTable(context: TemplatePreviewContext): void {
+    const body = byId('templateGuideBody');
+    body.innerHTML = '';
+
+    for (const item of getTemplateVariableDocs()) {
+        const row = document.createElement('tr');
+        const varCell = document.createElement('td');
+        const descCell = document.createElement('td');
+        const exampleCell = document.createElement('td');
+
+        varCell.textContent = item.placeholder;
+        descCell.textContent = item.description;
+        exampleCell.textContent = buildTemplatePreview(item.exampleTemplate, context);
+
+        row.append(varCell, descCell, exampleCell);
+        body.appendChild(row);
+    }
+}
+
+function updateTemplateGuidePresetButtons(): void {
+    const activeId: Record<TemplateGuideSource, string> = {
+        vod: 'templateGuideUseVod',
+        parts: 'templateGuideUseParts',
+        clip: 'templateGuideUseClip'
+    };
+
+    (Object.keys(activeId) as TemplateGuideSource[]).forEach((key) => {
+        const btn = byId<HTMLButtonElement>(activeId[key]);
+        btn.classList.toggle('active', key === templateGuideSource);
+    });
+}
+
+function refreshTemplateGuideTexts(): void {
+    setText('settingsTemplateGuideBtn', UI_TEXT.static.templateGuideButton);
+    setText('clipTemplateGuideBtn', UI_TEXT.static.templateGuideButton);
+    setText('templateGuideTitle', UI_TEXT.static.templateGuideTitle);
+    setText('templateGuideIntro', UI_TEXT.static.templateGuideIntro);
+    setText('templateGuideTemplateLabel', UI_TEXT.static.templateGuideTemplateLabel);
+    setText('templateGuideOutputLabel', UI_TEXT.static.templateGuideOutputLabel);
+    setText('templateGuideVarsTitle', UI_TEXT.static.templateGuideVarsTitle);
+    setText('templateGuideVarCol', UI_TEXT.static.templateGuideVarCol);
+    setText('templateGuideDescCol', UI_TEXT.static.templateGuideDescCol);
+    setText('templateGuideExampleCol', UI_TEXT.static.templateGuideExampleCol);
+    setText('templateGuideUseVod', UI_TEXT.static.templateGuideUseVod);
+    setText('templateGuideUseParts', UI_TEXT.static.templateGuideUseParts);
+    setText('templateGuideUseClip', UI_TEXT.static.templateGuideUseClip);
+    setText('templateGuideCloseBtn', UI_TEXT.static.templateGuideClose);
+    setPlaceholder('templateGuideInput', getTemplateForSource(templateGuideSource));
+    updateTemplateGuidePresetButtons();
+
+    const modal = document.getElementById('templateGuideModal');
+    if (modal?.classList.contains('show')) {
+        updateTemplateGuidePreview();
+    }
+}
+
+function openTemplateGuide(source: TemplateGuideSource = 'vod'): void {
+    templateGuideSource = source;
+    byId('templateGuideModal').classList.add('show');
+    refreshTemplateGuideTexts();
+    setTemplateGuidePreset(source);
+}
+
+function closeTemplateGuide(): void {
+    byId('templateGuideModal').classList.remove('show');
+}
+
+function setTemplateGuidePreset(source: TemplateGuideSource): void {
+    templateGuideSource = source;
+    const template = getTemplateForSource(source);
+    byId<HTMLInputElement>('templateGuideInput').value = template;
+    setPlaceholder('templateGuideInput', template);
+    updateTemplateGuidePresetButtons();
+    updateTemplateGuidePreview();
+}
+
+function updateTemplateGuidePreview(): void {
+    const input = byId<HTMLInputElement>('templateGuideInput');
+    const template = input.value.trim() || getTemplateForSource(templateGuideSource);
+    const { context, contextText } = getTemplateGuidePreviewContext(templateGuideSource);
+
+    byId('templateGuideOutput').textContent = buildTemplatePreview(template, context);
+    byId('templateGuideContext').textContent = contextText;
+    renderTemplateGuideTable(context);
 }
 
 function parseTimeToSeconds(timeStr: string): number {
@@ -378,6 +589,11 @@ function updateFilenameExamples(): void {
         durationSec,
         totalSec: clipTotalSeconds
     })} ${UI_TEXT.clips.formatTemplate}`;
+
+    const guideModal = document.getElementById('templateGuideModal');
+    if (guideModal?.classList.contains('show') && templateGuideSource === 'clip') {
+        updateTemplateGuidePreview();
+    }
 }
 
 async function confirmClipDialog(): Promise<void> {

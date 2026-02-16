@@ -92,12 +92,55 @@
                         style="width: 100%; background: #333; border: 1px solid #444; border-radius: 4px; padding: 8px 12px; color: white; font-family: monospace;"
                         oninput="updateFilenameExamples()">
                     <div id="clipTemplateHelp" style="color: #888; font-size: 12px; margin-top: 6px;">Platzhalter: {title} {id} {channel} {date} {part} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}</div>
+                    <button class="btn-secondary" id="clipTemplateGuideBtn" style="margin-top: 8px;" onclick="openTemplateGuide('clip')">Template Guide</button>
                 </div>
             </div>
 
             <!-- Button -->
             <div style="text-align: center;">
                 <button class="btn-primary" style="background: #00c853; padding: 12px 30px; border: none; border-radius: 4px; color: white; font-weight: 600; cursor: pointer;" onclick="confirmClipDialog()">Zur Queue hinzufugen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Template Guide Modal -->
+    <div class="modal-overlay" id="templateGuideModal">
+        <div class="modal template-guide-modal">
+            <button class="modal-close" onclick="closeTemplateGuide()">x</button>
+            <h2 id="templateGuideTitle">Template Guide</h2>
+            <p id="templateGuideIntro" class="template-guide-intro">Nutze Variablen fur Dateinamen und prufe das Ergebnis als Live-Vorschau.</p>
+
+            <div class="template-guide-actions">
+                <button class="btn-secondary" id="templateGuideUseVod" onclick="setTemplateGuidePreset('vod')">VOD Template</button>
+                <button class="btn-secondary" id="templateGuideUseParts" onclick="setTemplateGuidePreset('parts')">VOD Part Template</button>
+                <button class="btn-secondary" id="templateGuideUseClip" onclick="setTemplateGuidePreset('clip')">Clip Template</button>
+            </div>
+
+            <label id="templateGuideTemplateLabel" class="template-guide-label">Template</label>
+            <input type="text" id="templateGuideInput" class="template-guide-input" oninput="updateTemplateGuidePreview()" placeholder="{title}.mp4">
+
+            <div class="template-guide-preview-box">
+                <div class="template-guide-preview-label" id="templateGuideOutputLabel">Live Vorschau</div>
+                <div id="templateGuideOutput" class="template-guide-output">-</div>
+                <div id="templateGuideContext" class="template-guide-context"></div>
+            </div>
+
+            <h3 id="templateGuideVarsTitle" class="template-guide-vars-title">Verfugbare Variablen</h3>
+            <div class="template-guide-table-wrap">
+                <table class="template-guide-table">
+                    <thead>
+                        <tr>
+                            <th id="templateGuideVarCol">Variable</th>
+                            <th id="templateGuideDescCol">Beschreibung</th>
+                            <th id="templateGuideExampleCol">Beispiel</th>
+                        </tr>
+                    </thead>
+                    <tbody id="templateGuideBody"></tbody>
+                </table>
+            </div>
+
+            <div class="template-guide-footer">
+                <button class="btn-secondary" id="templateGuideCloseBtn" onclick="closeTemplateGuide()">Schliessen</button>
             </div>
         </div>
     </div>
@@ -365,7 +408,10 @@
                             <input type="number" id="partMinutes" value="120" min="10" max="480">
                         </div>
                         <div class="form-group">
-                            <label id="filenameTemplatesTitle">Dateinamen-Templates</label>
+                            <div class="form-row" style="align-items:center; margin-bottom: 4px;">
+                                <label id="filenameTemplatesTitle" style="margin: 0;">Dateinamen-Templates</label>
+                                <button class="btn-secondary" id="settingsTemplateGuideBtn" type="button" onclick="openTemplateGuide('vod')">Template Guide</button>
+                            </div>
                             <div style="display: grid; gap: 8px; margin-top: 8px;">
                                 <label id="vodTemplateLabel" style="font-size: 13px; color: var(--text-secondary);">VOD Template</label>
                                 <input type="text" id="vodFilenameTemplate" placeholder="{title}.mp4" style="font-family: monospace;">
@@ -382,7 +428,7 @@
 
                     <div class="settings-card">
                         <h3 id="updateTitle">Updates</h3>
-                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v4.0.5</p>
+                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v4.0.6</p>
                         <button class="btn-secondary" id="checkUpdateBtn" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
 
@@ -414,7 +460,7 @@
                     <div class="status-dot" id="statusDot"></div>
                     <span id="statusText">Nicht verbunden</span>
                 </div>
-                <span id="versionText">v4.0.5</span>
+                <span id="versionText">v4.0.6</span>
             </div>
         </main>
     </div>

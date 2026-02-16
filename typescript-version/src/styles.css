@@ -1268,3 +1268,114 @@ body.theme-apple {
 .modal-actions button {
     flex: 1;
 }
+
+.template-guide-modal {
+    max-width: 860px;
+}
+
+.template-guide-intro {
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+    line-height: 1.5;
+}
+
+.template-guide-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.template-guide-actions .btn-secondary {
+    padding: 8px 12px;
+    min-width: 140px;
+}
+
+.template-guide-actions .btn-secondary.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: transparent;
+}
+
+.template-guide-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.template-guide-input {
+    width: 100%;
+    font-family: Consolas, "Courier New", monospace;
+    margin-bottom: 10px;
+}
+
+.template-guide-preview-box {
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 14px;
+}
+
+.template-guide-preview-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.template-guide-output {
+    font-family: Consolas, "Courier New", monospace;
+    color: var(--text);
+    word-break: break-word;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    padding: 8px;
+}
+
+.template-guide-context {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.template-guide-vars-title {
+    margin: 0 0 8px;
+    font-size: 14px;
+}
+
+.template-guide-table-wrap {
+    max-height: 280px;
+    overflow: auto;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+
+.template-guide-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.template-guide-table th,
+.template-guide-table td {
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 8px;
+    vertical-align: top;
+}
+
+.template-guide-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.template-guide-table td:first-child,
+.template-guide-table td:last-child {
+    font-family: Consolas, "Courier New", monospace;
+}
+
+.template-guide-footer {
+    display: flex;
+    justify-content: flex-end;
+}

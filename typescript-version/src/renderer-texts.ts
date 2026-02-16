@@ -87,6 +87,21 @@ function applyLanguageToStaticUI(): void {
     setText('partsTemplateLabel', UI_TEXT.static.partsTemplateLabel);
     setText('defaultClipTemplateLabel', UI_TEXT.static.defaultClipTemplateLabel);
     setText('filenameTemplateHint', UI_TEXT.static.filenameTemplateHint);
+    setText('settingsTemplateGuideBtn', UI_TEXT.static.templateGuideButton);
+    setText('clipTemplateGuideBtn', UI_TEXT.static.templateGuideButton);
+    setText('templateGuideTitle', UI_TEXT.static.templateGuideTitle);
+    setText('templateGuideIntro', UI_TEXT.static.templateGuideIntro);
+    setText('templateGuideTemplateLabel', UI_TEXT.static.templateGuideTemplateLabel);
+    setText('templateGuideOutputLabel', UI_TEXT.static.templateGuideOutputLabel);
+    setText('templateGuideVarsTitle', UI_TEXT.static.templateGuideVarsTitle);
+    setText('templateGuideVarCol', UI_TEXT.static.templateGuideVarCol);
+    setText('templateGuideDescCol', UI_TEXT.static.templateGuideDescCol);
+    setText('templateGuideExampleCol', UI_TEXT.static.templateGuideExampleCol);
+    setText('templateGuideUseVod', UI_TEXT.static.templateGuideUseVod);
+    setText('templateGuideUseParts', UI_TEXT.static.templateGuideUseParts);
+    setText('templateGuideUseClip', UI_TEXT.static.templateGuideUseClip);
+    setText('templateGuideCloseBtn', UI_TEXT.static.templateGuideClose);
+    setPlaceholder('templateGuideInput', UI_TEXT.static.vodTemplatePlaceholder);
     setPlaceholder('vodFilenameTemplate', UI_TEXT.static.vodTemplatePlaceholder);
     setPlaceholder('partsFilenameTemplate', UI_TEXT.static.partsTemplatePlaceholder);
     setPlaceholder('defaultClipFilenameTemplate', UI_TEXT.static.defaultClipTemplatePlaceholder);
@@ -106,6 +121,11 @@ function applyLanguageToStaticUI(): void {
     const status = document.getElementById('statusText')?.textContent?.trim() || '';
     if (status === UI_TEXTS.de.static.notConnected || status === UI_TEXTS.en.static.notConnected) {
         setText('statusText', UI_TEXT.static.notConnected);
+    }
+
+    const guideRefresh = (window as unknown as { refreshTemplateGuideTexts?: () => void }).refreshTemplateGuideTexts;
+    if (typeof guideRefresh === 'function') {
+        guideRefresh();
     }
 }
 
