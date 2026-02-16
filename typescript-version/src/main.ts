@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.1';
+const APP_VERSION = '4.1.2';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -27,6 +27,10 @@ const DEFAULT_METADATA_CACHE_MINUTES = 10;
 const DEFAULT_PERFORMANCE_MODE: PerformanceMode = 'balanced';
 const QUEUE_SAVE_DEBOUNCE_MS = 250;
 const MIN_FREE_DISK_BYTES = 128 * 1024 * 1024;
+const CACHE_CLEANUP_INTERVAL_MS = 60 * 1000;
+const MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES = 4096;
+const MAX_VOD_LIST_CACHE_ENTRIES = 512;
+const MAX_CLIP_INFO_CACHE_ENTRIES = 4096;
 
 // Timeouts
 const API_TIMEOUT = 10000;
@@ -343,6 +347,10 @@ const userIdLoginCache = new Map<string, string>();
 const loginToUserIdCache = new Map<string, CacheEntry<string>>();
 const vodListCache = new Map<string, CacheEntry<VOD[]>>();
 const clipInfoCache = new Map<string, CacheEntry<any>>();
+const inFlightUserIdRequests = new Map<string, Promise<string | null>>();
+const inFlightVodRequests = new Map<string, Promise<VOD[]>>();
+const inFlightClipRequests = new Map<string, Promise<any | null>>();
+let cacheCleanupTimer: NodeJS.Timeout | null = null;
 const runtimeMetrics: RuntimeMetrics = {
     cacheHits: 0,
     cacheMisses: 0,
@@ -1029,6 +1037,160 @@ function getMetadataCacheTtlMs(): number {
     return normalizeMetadataCacheMinutes(config.metadata_cache_minutes) * 60 * 1000;
 }
 
+function getCachedValue<T>(cache: Map<string, CacheEntry<T>>, key: string): T | undefined {
+    const cached = cache.get(key);
+    if (!cached) {
+        return undefined;
+    }
+
+    if (cached.expiresAt <= Date.now()) {
+        cache.delete(key);
+        return undefined;
+    }
+
+    cache.delete(key);
+    cache.set(key, cached);
+    return cached.value;
+}
+
+function pruneExpiredCacheEntries<T>(cache: Map<string, CacheEntry<T>>): number {
+    const now = Date.now();
+    let removed = 0;
+
+    for (const [key, entry] of cache.entries()) {
+        if (entry.expiresAt <= now) {
+            cache.delete(key);
+            removed += 1;
+        }
+    }
+
+    return removed;
+}
+
+function enforceCacheEntryLimit<T>(cache: Map<string, CacheEntry<T>>, maxEntries: number): number {
+    if (maxEntries <= 0) {
+        const removed = cache.size;
+        cache.clear();
+        return removed;
+    }
+
+    let removed = 0;
+    while (cache.size > maxEntries) {
+        const oldest = cache.keys().next().value as string | undefined;
+        if (!oldest) {
+            break;
+        }
+        cache.delete(oldest);
+        removed += 1;
+    }
+
+    return removed;
+}
+
+function setCachedValue<T>(
+    cache: Map<string, CacheEntry<T>>,
+    key: string,
+    value: T,
+    maxEntries: number
+): void {
+    cache.set(key, {
+        value,
+        expiresAt: Date.now() + getMetadataCacheTtlMs()
+    });
+
+    if (cache.size > maxEntries) {
+        pruneExpiredCacheEntries(cache);
+        enforceCacheEntryLimit(cache, maxEntries);
+    }
+}
+
+function cleanupMetadataCaches(reason: 'interval' | 'manual' | 'shutdown'): void {
+    const before = {
+        loginToUserId: loginToUserIdCache.size,
+        vodList: vodListCache.size,
+        clipInfo: clipInfoCache.size
+    };
+
+    const expired = {
+        loginToUserId: pruneExpiredCacheEntries(loginToUserIdCache),
+        vodList: pruneExpiredCacheEntries(vodListCache),
+        clipInfo: pruneExpiredCacheEntries(clipInfoCache)
+    };
+
+    const evicted = {
+        loginToUserId: enforceCacheEntryLimit(loginToUserIdCache, MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES),
+        vodList: enforceCacheEntryLimit(vodListCache, MAX_VOD_LIST_CACHE_ENTRIES),
+        clipInfo: enforceCacheEntryLimit(clipInfoCache, MAX_CLIP_INFO_CACHE_ENTRIES)
+    };
+
+    const removedTotal =
+        expired.loginToUserId + expired.vodList + expired.clipInfo +
+        evicted.loginToUserId + evicted.vodList + evicted.clipInfo;
+
+    if (removedTotal > 0) {
+        appendDebugLog('metadata-cache-cleanup', {
+            reason,
+            before,
+            after: {
+                loginToUserId: loginToUserIdCache.size,
+                vodList: vodListCache.size,
+                clipInfo: clipInfoCache.size
+            },
+            expired,
+            evicted,
+            removedTotal
+        });
+    }
+}
+
+function clearMetadataCaches(): void {
+    loginToUserIdCache.clear();
+    vodListCache.clear();
+    clipInfoCache.clear();
+}
+
+function startMetadataCacheCleanup(): void {
+    if (cacheCleanupTimer) {
+        return;
+    }
+
+    cacheCleanupTimer = setInterval(() => {
+        cleanupMetadataCaches('interval');
+    }, CACHE_CLEANUP_INTERVAL_MS);
+
+    cacheCleanupTimer.unref?.();
+}
+
+function stopMetadataCacheCleanup(): void {
+    if (!cacheCleanupTimer) {
+        return;
+    }
+
+    clearInterval(cacheCleanupTimer);
+    cacheCleanupTimer = null;
+}
+
+function withInFlightDedup<T>(
+    store: Map<string, Promise<T>>,
+    key: string,
+    factory: () => Promise<T>
+): Promise<T> {
+    const existing = store.get(key);
+    if (existing) {
+        return existing;
+    }
+
+    let requestPromise: Promise<T>;
+    requestPromise = factory().finally(() => {
+        if (store.get(key) === requestPromise) {
+            store.delete(key);
+        }
+    });
+
+    store.set(key, requestPromise);
+    return requestPromise;
+}
+
 function getRetryAttemptLimit(): number {
     switch (normalizePerformanceMode(config.performance_mode)) {
         case 'stability':
@@ -1356,10 +1518,10 @@ async function getPublicUserId(username: string): Promise<string | null> {
     const login = normalizeLogin(username);
     if (!login) return null;
 
-    const cached = loginToUserIdCache.get(login);
-    if (cached && cached.expiresAt > Date.now()) {
+    const cachedUserId = getCachedValue(loginToUserIdCache, login);
+    if (cachedUserId !== undefined) {
         runtimeMetrics.cacheHits += 1;
-        return cached.value;
+        return cachedUserId;
     }
 
     runtimeMetrics.cacheMisses += 1;
@@ -1373,7 +1535,7 @@ async function getPublicUserId(username: string): Promise<string | null> {
     const user = data?.user;
     if (!user?.id) return null;
 
-    loginToUserIdCache.set(login, { value: user.id, expiresAt: Date.now() + getMetadataCacheTtlMs() });
+    setCachedValue(loginToUserIdCache, login, user.id, MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES);
     userIdLoginCache.set(user.id, user.login || login);
     return user.id;
 }
@@ -1429,189 +1591,205 @@ async function getUserId(username: string): Promise<string | null> {
     const login = normalizeLogin(username);
     if (!login) return null;
 
-    const cached = loginToUserIdCache.get(login);
-    if (cached && cached.expiresAt > Date.now()) {
+    const cachedUserId = getCachedValue(loginToUserIdCache, login);
+    if (cachedUserId !== undefined) {
         runtimeMetrics.cacheHits += 1;
-        return cached.value;
+        return cachedUserId;
     }
 
-    runtimeMetrics.cacheMisses += 1;
-
-    const getUserViaPublicApi = async () => {
-        return await getPublicUserId(login);
-    };
-
-    if (!(await ensureTwitchAuth())) return await getUserViaPublicApi();
-
-    const fetchUser = async () => {
-        return await axios.get('https://api.twitch.tv/helix/users', {
-            params: { login },
-            headers: {
-                'Client-ID': config.client_id,
-                'Authorization': `Bearer ${accessToken}`
-            },
-            timeout: API_TIMEOUT
-        });
-    };
-
-    try {
-        const response = await fetchUser();
-        const user = response.data.data[0];
-        if (!user?.id) return await getUserViaPublicApi();
-
-        loginToUserIdCache.set(login, { value: user.id, expiresAt: Date.now() + getMetadataCacheTtlMs() });
-        userIdLoginCache.set(user.id, user.login || login);
-        return user.id;
-    } catch (e) {
-        if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
-            try {
-                const retryResponse = await fetchUser();
-                const user = retryResponse.data.data[0];
-                if (!user?.id) return await getUserViaPublicApi();
-
-                loginToUserIdCache.set(login, { value: user.id, expiresAt: Date.now() + getMetadataCacheTtlMs() });
-                userIdLoginCache.set(user.id, user.login || login);
-                return user.id;
-            } catch (retryError) {
-                console.error('Error getting user after relogin:', retryError);
-                return await getUserViaPublicApi();
-            }
+    return await withInFlightDedup(inFlightUserIdRequests, login, async () => {
+        const refreshedCachedUserId = getCachedValue(loginToUserIdCache, login);
+        if (refreshedCachedUserId !== undefined) {
+            runtimeMetrics.cacheHits += 1;
+            return refreshedCachedUserId;
         }
 
-        console.error('Error getting user:', e);
-        return await getUserViaPublicApi();
-    }
+        runtimeMetrics.cacheMisses += 1;
+
+        const getUserViaPublicApi = async () => {
+            return await getPublicUserId(login);
+        };
+
+        if (!(await ensureTwitchAuth())) return await getUserViaPublicApi();
+
+        const fetchUser = async () => {
+            return await axios.get('https://api.twitch.tv/helix/users', {
+                params: { login },
+                headers: {
+                    'Client-ID': config.client_id,
+                    'Authorization': `Bearer ${accessToken}`
+                },
+                timeout: API_TIMEOUT
+            });
+        };
+
+        try {
+            const response = await fetchUser();
+            const user = response.data.data[0];
+            if (!user?.id) return await getUserViaPublicApi();
+
+            setCachedValue(loginToUserIdCache, login, user.id, MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES);
+            userIdLoginCache.set(user.id, user.login || login);
+            return user.id;
+        } catch (e) {
+            if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
+                try {
+                    const retryResponse = await fetchUser();
+                    const user = retryResponse.data.data[0];
+                    if (!user?.id) return await getUserViaPublicApi();
+
+                    setCachedValue(loginToUserIdCache, login, user.id, MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES);
+                    userIdLoginCache.set(user.id, user.login || login);
+                    return user.id;
+                } catch (retryError) {
+                    console.error('Error getting user after relogin:', retryError);
+                    return await getUserViaPublicApi();
+                }
+            }
+
+            console.error('Error getting user:', e);
+            return await getUserViaPublicApi();
+        }
+    });
 }
 
 async function getVODs(userId: string, forceRefresh = false): Promise<VOD[]> {
     const cacheKey = `user:${userId}`;
     if (!forceRefresh) {
-        const cached = vodListCache.get(cacheKey);
-        if (cached && cached.expiresAt > Date.now()) {
+        const cachedVods = getCachedValue(vodListCache, cacheKey);
+        if (cachedVods !== undefined) {
             runtimeMetrics.cacheHits += 1;
-            return cached.value;
+            return cachedVods;
         }
     }
 
-    runtimeMetrics.cacheMisses += 1;
-
-    const getVodsViaPublicApi = async () => {
-        const login = userIdLoginCache.get(userId);
-        if (!login) return [];
-
-        const vods = await getPublicVODsByLogin(login);
-        vodListCache.set(cacheKey, {
-            value: vods,
-            expiresAt: Date.now() + getMetadataCacheTtlMs()
-        });
-        return vods;
-    };
-
-    if (!(await ensureTwitchAuth())) return await getVodsViaPublicApi();
-
-    const fetchVods = async () => {
-        return await axios.get('https://api.twitch.tv/helix/videos', {
-            params: {
-                user_id: userId,
-                type: 'archive',
-                first: 100
-            },
-            headers: {
-                'Client-ID': config.client_id,
-                'Authorization': `Bearer ${accessToken}`
-            },
-            timeout: API_TIMEOUT
-        });
-    };
-
-    try {
-        const response = await fetchVods();
-        const vods = response.data.data || [];
-        const login = vods[0]?.user_login;
-        if (login) {
-            userIdLoginCache.set(userId, normalizeLogin(login));
-        }
-
-        vodListCache.set(cacheKey, {
-            value: vods,
-            expiresAt: Date.now() + getMetadataCacheTtlMs()
-        });
-
-        return vods;
-    } catch (e) {
-        if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
-            try {
-                const retryResponse = await fetchVods();
-                const vods = retryResponse.data.data || [];
-                const login = vods[0]?.user_login;
-                if (login) {
-                    userIdLoginCache.set(userId, normalizeLogin(login));
-                }
-
-                vodListCache.set(cacheKey, {
-                    value: vods,
-                    expiresAt: Date.now() + getMetadataCacheTtlMs()
-                });
-
-                return vods;
-            } catch (retryError) {
-                console.error('Error getting VODs after relogin:', retryError);
-                return await getVodsViaPublicApi();
+    const requestKey = `${cacheKey}|${forceRefresh ? 'force' : 'default'}`;
+    return await withInFlightDedup(inFlightVodRequests, requestKey, async () => {
+        if (!forceRefresh) {
+            const refreshedCachedVods = getCachedValue(vodListCache, cacheKey);
+            if (refreshedCachedVods !== undefined) {
+                runtimeMetrics.cacheHits += 1;
+                return refreshedCachedVods;
             }
         }
 
-        console.error('Error getting VODs:', e);
-        return await getVodsViaPublicApi();
-    }
+        runtimeMetrics.cacheMisses += 1;
+
+        const getVodsViaPublicApi = async () => {
+            const login = userIdLoginCache.get(userId);
+            if (!login) return [];
+
+            const vods = await getPublicVODsByLogin(login);
+            setCachedValue(vodListCache, cacheKey, vods, MAX_VOD_LIST_CACHE_ENTRIES);
+            return vods;
+        };
+
+        if (!(await ensureTwitchAuth())) return await getVodsViaPublicApi();
+
+        const fetchVods = async () => {
+            return await axios.get('https://api.twitch.tv/helix/videos', {
+                params: {
+                    user_id: userId,
+                    type: 'archive',
+                    first: 100
+                },
+                headers: {
+                    'Client-ID': config.client_id,
+                    'Authorization': `Bearer ${accessToken}`
+                },
+                timeout: API_TIMEOUT
+            });
+        };
+
+        try {
+            const response = await fetchVods();
+            const vods = response.data.data || [];
+            const login = vods[0]?.user_login;
+            if (login) {
+                userIdLoginCache.set(userId, normalizeLogin(login));
+            }
+
+            setCachedValue(vodListCache, cacheKey, vods, MAX_VOD_LIST_CACHE_ENTRIES);
+            return vods;
+        } catch (e) {
+            if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
+                try {
+                    const retryResponse = await fetchVods();
+                    const vods = retryResponse.data.data || [];
+                    const login = vods[0]?.user_login;
+                    if (login) {
+                        userIdLoginCache.set(userId, normalizeLogin(login));
+                    }
+
+                    setCachedValue(vodListCache, cacheKey, vods, MAX_VOD_LIST_CACHE_ENTRIES);
+                    return vods;
+                } catch (retryError) {
+                    console.error('Error getting VODs after relogin:', retryError);
+                    return await getVodsViaPublicApi();
+                }
+            }
+
+            console.error('Error getting VODs:', e);
+            return await getVodsViaPublicApi();
+        }
+    });
 }
 
 async function getClipInfo(clipId: string): Promise<any | null> {
-    const cached = clipInfoCache.get(clipId);
-    if (cached && cached.expiresAt > Date.now()) {
+    const cachedClip = getCachedValue(clipInfoCache, clipId);
+    if (cachedClip !== undefined) {
         runtimeMetrics.cacheHits += 1;
-        return cached.value;
+        return cachedClip;
     }
 
-    runtimeMetrics.cacheMisses += 1;
-
-    if (!(await ensureTwitchAuth())) return null;
-
-    const fetchClip = async () => {
-        return await axios.get('https://api.twitch.tv/helix/clips', {
-            params: { id: clipId },
-            headers: {
-                'Client-ID': config.client_id,
-                'Authorization': `Bearer ${accessToken}`
-            },
-            timeout: API_TIMEOUT
-        });
-    };
-
-    try {
-        const response = await fetchClip();
-        const clip = response.data.data[0] || null;
-        if (clip) {
-            clipInfoCache.set(clipId, { value: clip, expiresAt: Date.now() + getMetadataCacheTtlMs() });
+    return await withInFlightDedup(inFlightClipRequests, clipId, async () => {
+        const refreshedCachedClip = getCachedValue(clipInfoCache, clipId);
+        if (refreshedCachedClip !== undefined) {
+            runtimeMetrics.cacheHits += 1;
+            return refreshedCachedClip;
         }
-        return clip;
-    } catch (e) {
-        if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
-            try {
-                const retryResponse = await fetchClip();
-                const clip = retryResponse.data.data[0] || null;
-                if (clip) {
-                    clipInfoCache.set(clipId, { value: clip, expiresAt: Date.now() + getMetadataCacheTtlMs() });
-                }
-                return clip;
-            } catch (retryError) {
-                console.error('Error getting clip after relogin:', retryError);
-                return null;
+
+        runtimeMetrics.cacheMisses += 1;
+
+        if (!(await ensureTwitchAuth())) return null;
+
+        const fetchClip = async () => {
+            return await axios.get('https://api.twitch.tv/helix/clips', {
+                params: { id: clipId },
+                headers: {
+                    'Client-ID': config.client_id,
+                    'Authorization': `Bearer ${accessToken}`
+                },
+                timeout: API_TIMEOUT
+            });
+        };
+
+        try {
+            const response = await fetchClip();
+            const clip = response.data.data[0] || null;
+            if (clip) {
+                setCachedValue(clipInfoCache, clipId, clip, MAX_CLIP_INFO_CACHE_ENTRIES);
             }
-        }
+            return clip;
+        } catch (e) {
+            if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
+                try {
+                    const retryResponse = await fetchClip();
+                    const clip = retryResponse.data.data[0] || null;
+                    if (clip) {
+                        setCachedValue(clipInfoCache, clipId, clip, MAX_CLIP_INFO_CACHE_ENTRIES);
+                    }
+                    return clip;
+                } catch (retryError) {
+                    console.error('Error getting clip after relogin:', retryError);
+                    return null;
+                }
+            }
 
-        console.error('Error getting clip:', e);
-        return null;
-    }
+            console.error('Error getting clip:', e);
+            return null;
+        }
+    });
 }
 
 // ==========================================
@@ -2531,9 +2709,7 @@ ipcMain.handle('save-config', (_, newConfig: Partial<Config>) => {
     }
 
     if (config.metadata_cache_minutes !== previousCacheMinutes) {
-        loginToUserIdCache.clear();
-        vodListCache.clear();
-        clipInfoCache.clear();
+        clearMetadataCaches();
     }
 
     saveConfig(config);
@@ -2863,6 +3039,7 @@ ipcMain.handle('save-video-dialog', async (_, defaultName: string) => {
 // ==========================================
 app.whenReady().then(() => {
     refreshBundledToolPaths();
+    startMetadataCacheCleanup();
     createWindow();
     appendDebugLog('startup-tools-check-skipped', 'Deferred to first use');
 
@@ -2874,6 +3051,9 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+    stopMetadataCacheCleanup();
+    cleanupMetadataCaches('shutdown');
+
     if (currentProcess) {
         currentProcess.kill();
     }
@@ -2885,5 +3065,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+    stopMetadataCacheCleanup();
+    cleanupMetadataCaches('shutdown');
     flushQueueSave();
 });
