@@ -15,6 +15,7 @@ async function init(): Promise<void> {
     byId<HTMLInputElement>('downloadPath').value = config.download_path ?? '';
     byId<HTMLSelectElement>('themeSelect').value = config.theme ?? 'twitch';
     byId<HTMLSelectElement>('languageSelect').value = config.language ?? 'en';
+    updateLanguagePicker(config.language ?? 'en');
     byId<HTMLSelectElement>('downloadMode').value = config.download_mode ?? 'full';
     byId<HTMLInputElement>('partMinutes').value = String(config.part_minutes ?? 120);
 

@@ -606,6 +606,62 @@ body {
     border-color: var(--accent);
 }
 
+.language-picker {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.lang-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 6px;
+    background: var(--bg-main);
+    color: var(--text);
+    padding: 9px 10px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.lang-option:hover {
+    border-color: rgba(255,255,255,0.26);
+}
+
+.lang-option.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px rgba(145, 70, 255, 0.2);
+}
+
+.flag-icon {
+    width: 16px;
+    height: 12px;
+    border-radius: 2px;
+    border: 1px solid rgba(0,0,0,0.35);
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+}
+
+.flag-de {
+    background: linear-gradient(to bottom, #111 0 33.33%, #dd0000 33.33% 66.66%, #ffce00 66.66% 100%);
+}
+
+.flag-en {
+    background: repeating-linear-gradient(to bottom, #b22234 0 7.7%, #ffffff 7.7% 15.4%);
+}
+
+.flag-en::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 45%;
+    height: 56%;
+    background: #3c3b6e;
+}
+
 .form-row {
     display: flex;
     gap: 10px;

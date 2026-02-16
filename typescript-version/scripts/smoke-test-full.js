@@ -201,7 +201,9 @@ async function run() {
         const deState = {
           nav: (document.getElementById('navSettingsText')?.textContent || '').trim(),
           retry: (document.getElementById('btnRetryFailed')?.textContent || '').trim(),
-          deFlag: (document.getElementById('languageDeText')?.textContent || '').trim()
+          deText: (document.getElementById('languageDeText')?.textContent || '').trim(),
+          deIcon: !!document.querySelector('#langOptionDe .flag-icon.flag-de'),
+          deActive: !!document.getElementById('langOptionDe')?.classList.contains('active')
         };
 
         lang.value = 'en';
@@ -210,14 +212,18 @@ async function run() {
         const enState = {
           nav: (document.getElementById('navSettingsText')?.textContent || '').trim(),
           retry: (document.getElementById('btnRetryFailed')?.textContent || '').trim(),
-          enFlag: (document.getElementById('languageEnText')?.textContent || '').trim()
+          enText: (document.getElementById('languageEnText')?.textContent || '').trim(),
+          enIcon: !!document.querySelector('#langOptionEn .flag-icon.flag-en'),
+          enActive: !!document.getElementById('langOptionEn')?.classList.contains('active')
         };
 
         checks.language = { deState, enState };
         assert(deState.nav.includes('Einstellungen'), 'German language switch failed');
         assert(enState.nav.includes('Settings'), 'English language switch failed');
-        assert(deState.deFlag.includes('🇩🇪'), 'German flag missing');
-        assert(enState.enFlag.includes('🇺🇸'), 'English flag missing');
+        assert(deState.deIcon, 'German flag icon missing');
+        assert(enState.enIcon, 'English flag icon missing');
+        assert(deState.deActive, 'German language button did not activate');
+        assert(enState.enActive, 'English language button did not activate');
 
         await window.api.saveConfig({ client_id: '', client_secret: '', download_path: tmpDir });
         window.showTab('vods');

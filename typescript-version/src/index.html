@@ -300,9 +300,19 @@
                         </div>
                         <div class="form-group">
                             <label id="languageLabel">Sprache</label>
-                            <select id="languageSelect" onchange="changeLanguage(this.value)">
-                                <option value="de" id="languageDeText">🇩🇪 Deutsch</option>
-                                <option value="en" id="languageEnText">🇺🇸 English</option>
+                            <div class="language-picker" id="languagePicker">
+                                <button type="button" class="lang-option" id="langOptionDe" onclick="selectLanguageOption('de')" aria-pressed="false">
+                                    <span class="flag-icon flag-de" aria-hidden="true"></span>
+                                    <span id="languageDeText">Deutsch</span>
+                                </button>
+                                <button type="button" class="lang-option" id="langOptionEn" onclick="selectLanguageOption('en')" aria-pressed="false">
+                                    <span class="flag-icon flag-en" aria-hidden="true"></span>
+                                    <span id="languageEnText">English</span>
+                                </button>
+                            </div>
+                            <select id="languageSelect" onchange="changeLanguage(this.value)" style="display:none">
+                                <option value="de">de</option>
+                                <option value="en">en</option>
                             </select>
                         </div>
                     </div>
@@ -345,7 +355,7 @@
 
                     <div class="settings-card">
                         <h3 id="updateTitle">Updates</h3>
-                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v4.0.2</p>
+                        <p id="versionInfo" style="margin-bottom: 10px; color: var(--text-secondary);">Version: v4.0.3</p>
                         <button class="btn-secondary" id="checkUpdateBtn" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
 
@@ -377,7 +387,7 @@
                     <div class="status-dot" id="statusDot"></div>
                     <span id="statusText">Nicht verbunden</span>
                 </div>
-                <span id="versionText">v4.0.2</span>
+                <span id="versionText">v4.0.3</span>
             </div>
         </main>
     </div>

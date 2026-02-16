@@ -22,6 +22,7 @@ function updateStatus(text: string, connected: boolean): void {
 function changeLanguage(lang: string): void {
     const normalized = setLanguage(lang);
     byId<HTMLSelectElement>('languageSelect').value = normalized;
+    updateLanguagePicker(normalized);
     config.language = normalized;
     void window.api.saveConfig({ language: normalized });
 
@@ -38,6 +39,21 @@ function changeLanguage(lang: string): void {
     } else {
         byId('pageTitle').textContent = (UI_TEXT.tabs as Record<string, string>)[activeTab] || UI_TEXT.appName;
     }
+}
+
+function updateLanguagePicker(lang: string): void {
+    const de = byId<HTMLButtonElement>('langOptionDe');
+    const en = byId<HTMLButtonElement>('langOptionEn');
+
+    const isDe = lang === 'de';
+    de.classList.toggle('active', isDe);
+    en.classList.toggle('active', !isDe);
+    de.setAttribute('aria-pressed', String(isDe));
+    en.setAttribute('aria-pressed', String(!isDe));
+}
+
+function selectLanguageOption(lang: string): void {
+    changeLanguage(lang);
 }
 
 function renderPreflightResult(result: PreflightResult): void {
