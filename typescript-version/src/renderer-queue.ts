@@ -18,6 +18,25 @@ function buildQueueFingerprint(url: string, streamer: string, date: string, cust
     ].join('|');
 }
 
+let lastQueueRenderFingerprint = '';
+
+function getQueueRenderFingerprint(items: QueueItem[]): string {
+    const lang = typeof currentLanguage === 'string' ? currentLanguage : 'en';
+    const pieces = items.map((item) => [
+        item.id,
+        item.status,
+        Math.round((Number(item.progress) || 0) * 10),
+        item.currentPart || 0,
+        item.totalParts || 0,
+        item.speed || '',
+        item.eta || '',
+        item.progressStatus || '',
+        item.last_error || ''
+    ].join(':'));
+
+    return `${lang}|${pieces.join('|')}`;
+}
+
 function hasActiveQueueDuplicate(url: string, streamer: string, date: string, customClip?: CustomClip): boolean {
     const target = buildQueueFingerprint(url, streamer, date, customClip);
     return queue.some((item) => {
@@ -130,7 +149,13 @@ function renderQueue(): void {
     const hasFailed = queue.some((item) => item.status === 'error');
     retryBtn.disabled = !hasFailed;
 
+    const renderFingerprint = getQueueRenderFingerprint(queue);
+    if (renderFingerprint === lastQueueRenderFingerprint) {
+        return;
+    }
+
     if (queue.length === 0) {
+        lastQueueRenderFingerprint = renderFingerprint;
         list.innerHTML = `<div style="color: var(--text-secondary); font-size: 12px; text-align: center; padding: 15px;">${UI_TEXT.queue.empty}</div>`;
         return;
     }
@@ -165,6 +190,8 @@ function renderQueue(): void {
             </div>
         `;
     }).join('');
+
+    lastQueueRenderFingerprint = renderFingerprint;
 }
 
 async function toggleDownload(): Promise<void> {

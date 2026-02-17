@@ -591,7 +591,7 @@ body {
     margin-bottom: 6px;
 }
 
-.form-group input, .form-group select {
+.form-group input:not([type="checkbox"]):not([type="radio"]), .form-group select {
     width: 100%;
     background: var(--bg-main);
     border: 1px solid rgba(255,255,255,0.1);
@@ -601,9 +601,14 @@ body {
     font-size: 14px;
 }
 
-.form-group input:focus, .form-group select:focus {
+.form-group input:not([type="checkbox"]):not([type="radio"]):focus, .form-group select:focus {
     outline: none;
     border-color: var(--accent);
+}
+
+.form-group input[type="checkbox"],
+.form-group input[type="radio"] {
+    width: auto;
 }
 
 .language-picker {
