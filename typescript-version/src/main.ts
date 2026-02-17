@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.3';
+const APP_VERSION = '4.1.4';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -27,6 +27,7 @@ const DEFAULT_METADATA_CACHE_MINUTES = 10;
 const DEFAULT_PERFORMANCE_MODE: PerformanceMode = 'balanced';
 const QUEUE_SAVE_DEBOUNCE_MS = 250;
 const MIN_FREE_DISK_BYTES = 128 * 1024 * 1024;
+const TOOL_PATH_REFRESH_TTL_MS = 10 * 1000;
 const CACHE_CLEANUP_INTERVAL_MS = 60 * 1000;
 const MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES = 4096;
 const MAX_VOD_LIST_CACHE_ENTRIES = 512;
@@ -373,23 +374,40 @@ let streamlinkCommandCache: { command: string; prefixArgs: string[] } | null = n
 let bundledStreamlinkPath: string | null = null;
 let bundledFFmpegPath: string | null = null;
 let bundledFFprobePath: string | null = null;
+let streamlinkPathCache: string | null = null;
+let ffmpegPathCache: string | null = null;
+let ffprobePathCache: string | null = null;
+let bundledToolPathSignature = '';
+let bundledToolPathRefreshedAt = 0;
 
 // ==========================================
 // TOOL PATHS
 // ==========================================
 function getStreamlinkPath(): string {
+    if (streamlinkPathCache) {
+        if (streamlinkPathCache === 'streamlink' || fs.existsSync(streamlinkPathCache)) {
+            return streamlinkPathCache;
+        }
+        streamlinkPathCache = null;
+    }
+
     if (bundledStreamlinkPath && fs.existsSync(bundledStreamlinkPath)) {
-        return bundledStreamlinkPath;
+        streamlinkPathCache = bundledStreamlinkPath;
+        return streamlinkPathCache;
     }
 
     try {
         if (process.platform === 'win32') {
             const result = execSync('where streamlink', { encoding: 'utf-8' });
             const paths = result.trim().split('\n');
-            if (paths.length > 0) return paths[0].trim();
+            if (paths.length > 0) {
+                streamlinkPathCache = paths[0].trim();
+                return streamlinkPathCache;
+            }
         } else {
             const result = execSync('which streamlink', { encoding: 'utf-8' });
-            return result.trim();
+            streamlinkPathCache = result.trim();
+            return streamlinkPathCache;
         }
     } catch { }
 
@@ -400,10 +418,14 @@ function getStreamlinkPath(): string {
     ];
 
     for (const p of commonPaths) {
-        if (fs.existsSync(p)) return p;
+        if (fs.existsSync(p)) {
+            streamlinkPathCache = p;
+            return streamlinkPathCache;
+        }
     }
 
-    return 'streamlink';
+    streamlinkPathCache = 'streamlink';
+    return streamlinkPathCache;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -450,7 +472,7 @@ async function runPreflight(autoFix = false): Promise<PreflightResult> {
     if (autoFix) {
         await ensureStreamlinkInstalled();
         await ensureFfmpegInstalled();
-        refreshBundledToolPaths();
+        refreshBundledToolPaths(true);
     }
 
     const streamlinkCmd = getStreamlinkCommand();
@@ -531,10 +553,44 @@ function findFileRecursive(rootDir: string, fileName: string): string | null {
     return null;
 }
 
-function refreshBundledToolPaths(): void {
-    bundledStreamlinkPath = findFileRecursive(TOOLS_STREAMLINK_DIR, process.platform === 'win32' ? 'streamlink.exe' : 'streamlink');
-    bundledFFmpegPath = findFileRecursive(TOOLS_FFMPEG_DIR, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
-    bundledFFprobePath = findFileRecursive(TOOLS_FFMPEG_DIR, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+function getDirectoryMtimeMs(directoryPath: string): number {
+    try {
+        return fs.statSync(directoryPath).mtimeMs;
+    } catch {
+        return 0;
+    }
+}
+
+function refreshBundledToolPaths(force = false): void {
+    const now = Date.now();
+    const signature = `${getDirectoryMtimeMs(TOOLS_STREAMLINK_DIR)}|${getDirectoryMtimeMs(TOOLS_FFMPEG_DIR)}`;
+
+    if (!force && signature === bundledToolPathSignature && (now - bundledToolPathRefreshedAt) < TOOL_PATH_REFRESH_TTL_MS) {
+        return;
+    }
+
+    bundledToolPathSignature = signature;
+    bundledToolPathRefreshedAt = now;
+
+    const nextBundledStreamlinkPath = findFileRecursive(TOOLS_STREAMLINK_DIR, process.platform === 'win32' ? 'streamlink.exe' : 'streamlink');
+    const nextBundledFFmpegPath = findFileRecursive(TOOLS_FFMPEG_DIR, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+    const nextBundledFFprobePath = findFileRecursive(TOOLS_FFMPEG_DIR, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+
+    const changed =
+        nextBundledStreamlinkPath !== bundledStreamlinkPath ||
+        nextBundledFFmpegPath !== bundledFFmpegPath ||
+        nextBundledFFprobePath !== bundledFFprobePath;
+
+    bundledStreamlinkPath = nextBundledStreamlinkPath;
+    bundledFFmpegPath = nextBundledFFmpegPath;
+    bundledFFprobePath = nextBundledFFprobePath;
+
+    if (changed) {
+        streamlinkPathCache = null;
+        ffmpegPathCache = null;
+        ffprobePathCache = null;
+        streamlinkCommandCache = null;
+    }
 }
 
 async function downloadFile(url: string, destinationPath: string): Promise<boolean> {
@@ -634,7 +690,7 @@ async function ensureStreamlinkInstalled(): Promise<boolean> {
         try { fs.unlinkSync(zipPath); } catch { }
         if (!extractOk) return false;
 
-        refreshBundledToolPaths();
+        refreshBundledToolPaths(true);
         streamlinkCommandCache = null;
 
         const cmd = getStreamlinkCommand();
@@ -675,7 +731,7 @@ async function ensureFfmpegInstalled(): Promise<boolean> {
         try { fs.unlinkSync(zipPath); } catch { }
         if (!extractOk) return false;
 
-        refreshBundledToolPaths();
+        refreshBundledToolPaths(true);
 
         const newFfmpegPath = getFFmpegPath();
         const newFfprobePath = getFFprobePath();
@@ -726,18 +782,30 @@ function getStreamlinkCommand(): { command: string; prefixArgs: string[] } {
 }
 
 function getFFmpegPath(): string {
+    if (ffmpegPathCache) {
+        if (ffmpegPathCache === 'ffmpeg' || fs.existsSync(ffmpegPathCache)) {
+            return ffmpegPathCache;
+        }
+        ffmpegPathCache = null;
+    }
+
     if (bundledFFmpegPath && fs.existsSync(bundledFFmpegPath)) {
-        return bundledFFmpegPath;
+        ffmpegPathCache = bundledFFmpegPath;
+        return ffmpegPathCache;
     }
 
     try {
         if (process.platform === 'win32') {
             const result = execSync('where ffmpeg', { encoding: 'utf-8' });
             const paths = result.trim().split('\n');
-            if (paths.length > 0) return paths[0].trim();
+            if (paths.length > 0) {
+                ffmpegPathCache = paths[0].trim();
+                return ffmpegPathCache;
+            }
         } else {
             const result = execSync('which ffmpeg', { encoding: 'utf-8' });
-            return result.trim();
+            ffmpegPathCache = result.trim();
+            return ffmpegPathCache;
         }
     } catch { }
 
@@ -748,20 +816,45 @@ function getFFmpegPath(): string {
     ];
 
     for (const p of commonPaths) {
-        if (fs.existsSync(p)) return p;
+        if (fs.existsSync(p)) {
+            ffmpegPathCache = p;
+            return ffmpegPathCache;
+        }
     }
 
-    return 'ffmpeg';
+    ffmpegPathCache = 'ffmpeg';
+    return ffmpegPathCache;
 }
 
 function getFFprobePath(): string {
+    if (ffprobePathCache) {
+        if (ffprobePathCache === 'ffprobe' || ffprobePathCache === 'ffprobe.exe' || fs.existsSync(ffprobePathCache)) {
+            return ffprobePathCache;
+        }
+        ffprobePathCache = null;
+    }
+
     if (bundledFFprobePath && fs.existsSync(bundledFFprobePath)) {
-        return bundledFFprobePath;
+        ffprobePathCache = bundledFFprobePath;
+        return ffprobePathCache;
     }
 
     const ffmpegPath = getFFmpegPath();
     const ffprobeExe = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
-    return path.join(path.dirname(ffmpegPath), ffprobeExe);
+
+    if (ffmpegPath === 'ffmpeg') {
+        ffprobePathCache = ffprobeExe;
+        return ffprobePathCache;
+    }
+
+    const derivedFfprobePath = path.join(path.dirname(ffmpegPath), ffprobeExe);
+    if (fs.existsSync(derivedFfprobePath)) {
+        ffprobePathCache = derivedFfprobePath;
+        return ffprobePathCache;
+    }
+
+    ffprobePathCache = ffprobeExe;
+    return ffprobePathCache;
 }
 
 function appendDebugLog(message: string, details?: unknown): void {
@@ -3038,7 +3131,7 @@ ipcMain.handle('save-video-dialog', async (_, defaultName: string) => {
 // APP LIFECYCLE
 // ==========================================
 app.whenReady().then(() => {
-    refreshBundledToolPaths();
+    refreshBundledToolPaths(true);
     startMetadataCacheCleanup();
     createWindow();
     appendDebugLog('startup-tools-check-skipped', 'Deferred to first use');

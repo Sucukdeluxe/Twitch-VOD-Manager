@@ -1,3 +1,5 @@
+let selectStreamerRequestId = 0;
+
 function renderStreamers(): void {
     const list = byId('streamerList');
     list.innerHTML = '';
@@ -50,12 +52,18 @@ async function removeStreamer(name: string): Promise<void> {
 }
 
 async function selectStreamer(name: string, forceRefresh = false): Promise<void> {
+    const requestId = ++selectStreamerRequestId;
+    const isStaleRequest = () => requestId !== selectStreamerRequestId || currentStreamer !== name;
+
     currentStreamer = name;
     renderStreamers();
     byId('pageTitle').textContent = name;
 
     if (!isConnected) {
         await connect();
+        if (isStaleRequest()) {
+            return;
+        }
     }
 
     if (!isConnected) {
@@ -65,12 +73,20 @@ async function selectStreamer(name: string, forceRefresh = false): Promise<void>
     byId('vodGrid').innerHTML = `<div class="empty-state"><p>${UI_TEXT.vods.loading}</p></div>`;
 
     const userId = await window.api.getUserId(name);
+    if (isStaleRequest()) {
+        return;
+    }
+
     if (!userId) {
         byId('vodGrid').innerHTML = `<div class="empty-state"><h3>${UI_TEXT.vods.notFound}</h3></div>`;
         return;
     }
 
     const vods = await window.api.getVODs(userId, forceRefresh);
+    if (isStaleRequest()) {
+        return;
+    }
+
     renderVODs(vods, name);
 }
 
