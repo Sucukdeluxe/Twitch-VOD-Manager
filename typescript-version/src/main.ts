@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.6';
+const APP_VERSION = '4.1.7';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -344,10 +344,13 @@ let mainWindow: BrowserWindow | null = null;
 let config = loadConfig();
 let accessToken: string | null = null;
 let downloadQueue: QueueItem[] = loadQueue();
+let queueIdCounter = 0;
+let lastQueueBroadcastFingerprint = '';
 let isDownloading = false;
 let currentProcess: ChildProcess | null = null;
 let currentDownloadCancelled = false;
 let pauseRequested = false;
+let activeQueueItemId: string | null = null;
 let downloadStartTime = 0;
 let downloadedBytes = 0;
 const userIdLoginCache = new Map<string, string>();
@@ -1414,6 +1417,34 @@ function getQueueCounts(queueData: QueueItem[] = downloadQueue): RuntimeMetricsS
     }
 
     return counts;
+}
+
+function generateQueueItemId(): string {
+    queueIdCounter = (queueIdCounter + 1) % 1000;
+    return `${Date.now()}-${queueIdCounter}`;
+}
+
+function getQueueBroadcastFingerprint(queueData: QueueItem[] = downloadQueue): string {
+    return queueData.map((item) => [
+        item.id,
+        item.status,
+        Math.round((Number(item.progress) || 0) * 10),
+        item.currentPart || 0,
+        item.totalParts || 0,
+        item.speed || '',
+        item.eta || '',
+        item.last_error || ''
+    ].join(':')).join('|');
+}
+
+function emitQueueUpdated(force = false): void {
+    const nextFingerprint = getQueueBroadcastFingerprint(downloadQueue);
+    if (!force && nextFingerprint === lastQueueBroadcastFingerprint) {
+        return;
+    }
+
+    lastQueueBroadcastFingerprint = nextFingerprint;
+    mainWindow?.webContents.send('queue-updated', downloadQueue);
 }
 
 function getRuntimeMetricsSnapshot(): RuntimeMetricsSnapshot {
@@ -2634,7 +2665,7 @@ async function processQueue(): Promise<void> {
     isDownloading = true;
     pauseRequested = false;
     mainWindow?.webContents.send('download-started');
-    mainWindow?.webContents.send('queue-updated', downloadQueue);
+    emitQueueUpdated();
 
     while (isDownloading && !pauseRequested) {
         const item = pickNextPendingQueueItem();
@@ -2652,11 +2683,12 @@ async function processQueue(): Promise<void> {
         runtimeMetrics.downloadsStarted += 1;
         runtimeMetrics.activeItemId = item.id;
         runtimeMetrics.activeItemTitle = item.title;
+        activeQueueItemId = item.id;
 
         currentDownloadCancelled = false;
         item.status = 'downloading';
         saveQueue(downloadQueue);
-        mainWindow?.webContents.send('queue-updated', downloadQueue);
+        emitQueueUpdated();
 
         item.last_error = '';
 
@@ -2710,7 +2742,7 @@ async function processQueue(): Promise<void> {
                     totalParts: item.totalParts
                 } as DownloadProgress);
                 saveQueue(downloadQueue);
-                mainWindow?.webContents.send('queue-updated', downloadQueue);
+                emitQueueUpdated();
                 await sleep(retryDelaySeconds * 1000);
             } else {
                 runtimeMetrics.retriesExhausted += 1;
@@ -2730,6 +2762,7 @@ async function processQueue(): Promise<void> {
 
         runtimeMetrics.activeItemId = null;
         runtimeMetrics.activeItemTitle = null;
+        activeQueueItemId = null;
 
         appendDebugLog('queue-item-finished', {
             itemId: item.id,
@@ -2738,16 +2771,17 @@ async function processQueue(): Promise<void> {
         });
 
         saveQueue(downloadQueue);
-        mainWindow?.webContents.send('queue-updated', downloadQueue);
+        emitQueueUpdated();
     }
 
     isDownloading = false;
     pauseRequested = false;
     runtimeMetrics.activeItemId = null;
     runtimeMetrics.activeItemTitle = null;
+    activeQueueItemId = null;
 
     saveQueue(downloadQueue);
-    mainWindow?.webContents.send('queue-updated', downloadQueue);
+    emitQueueUpdated();
     mainWindow?.webContents.send('download-finished');
     appendDebugLog('queue-finished', { items: downloadQueue.length });
 }
@@ -2969,27 +3003,37 @@ ipcMain.handle('add-to-queue', (_, item: Omit<QueueItem, 'id' | 'status' | 'prog
 
     const queueItem: QueueItem = {
         ...item,
-        id: Date.now().toString(),
+        id: generateQueueItemId(),
         status: 'pending',
         progress: 0
     };
     downloadQueue.push(queueItem);
     saveQueue(downloadQueue);
-    mainWindow?.webContents.send('queue-updated', downloadQueue);
+    emitQueueUpdated();
     return downloadQueue;
 });
 
 ipcMain.handle('remove-from-queue', (_, id: string) => {
+    const wasActiveItem = activeQueueItemId === id;
+
+    if (wasActiveItem) {
+        currentDownloadCancelled = true;
+        if (currentProcess) {
+            currentProcess.kill();
+        }
+        appendDebugLog('queue-item-removed-active-cancelled', { id });
+    }
+
     downloadQueue = downloadQueue.filter(item => item.id !== id);
     saveQueue(downloadQueue);
-    mainWindow?.webContents.send('queue-updated', downloadQueue);
+    emitQueueUpdated();
     return downloadQueue;
 });
 
 ipcMain.handle('clear-completed', () => {
     downloadQueue = downloadQueue.filter(item => item.status !== 'completed');
     saveQueue(downloadQueue);
-    mainWindow?.webContents.send('queue-updated', downloadQueue);
+    emitQueueUpdated();
     return downloadQueue;
 });
 
@@ -3003,7 +3047,7 @@ ipcMain.handle('reorder-queue', (_, orderIds: string[]) => {
 
     downloadQueue = withOrder;
     saveQueue(downloadQueue);
-    mainWindow?.webContents.send('queue-updated', downloadQueue);
+    emitQueueUpdated();
     return downloadQueue;
 });
 
@@ -3020,7 +3064,7 @@ ipcMain.handle('retry-failed-downloads', () => {
     });
 
     saveQueue(downloadQueue);
-    mainWindow?.webContents.send('queue-updated', downloadQueue);
+    emitQueueUpdated();
 
     if (!isDownloading) {
         void processQueue();
@@ -3034,12 +3078,12 @@ ipcMain.handle('start-download', async () => {
 
     const hasPendingItems = downloadQueue.some(item => item.status === 'pending');
     if (!hasPendingItems) {
-        mainWindow?.webContents.send('queue-updated', downloadQueue);
+        emitQueueUpdated();
         return false;
     }
 
     saveQueue(downloadQueue);
-    mainWindow?.webContents.send('queue-updated', downloadQueue);
+    emitQueueUpdated();
 
     processQueue();
     return true;
