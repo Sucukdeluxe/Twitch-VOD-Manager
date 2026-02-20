@@ -1,4 +1,13 @@
 let lastRuntimeMetricsOutput = '';
+let lastDebugLogOutput = '';
+
+function canRunSettingsAutoRefresh(): boolean {
+    if (document.hidden) {
+        return false;
+    }
+
+    return document.querySelector('.tab-content.active')?.id === 'settingsTab';
+}
 
 async function connect(): Promise<void> {
     const hasCredentials = Boolean((config.client_id ?? '').toString().trim() && (config.client_secret ?? '').toString().trim());
@@ -142,6 +151,10 @@ function toggleRuntimeMetricsAutoRefresh(enabled: boolean): void {
 
     if (enabled) {
         runtimeMetricsAutoRefreshTimer = window.setInterval(() => {
+            if (!canRunSettingsAutoRefresh()) {
+                return;
+            }
+
             void refreshRuntimeMetrics(false);
         }, 2000);
     }
@@ -245,8 +258,16 @@ async function runPreflight(autoFix = false): Promise<void> {
 async function refreshDebugLog(): Promise<void> {
     const text = await window.api.getDebugLog(250);
     const panel = byId('debugLogOutput');
-    panel.textContent = text;
-    panel.scrollTop = panel.scrollHeight;
+    const keepAtBottom = (panel.scrollHeight - panel.scrollTop - panel.clientHeight) < 20;
+
+    if (text !== lastDebugLogOutput) {
+        panel.textContent = text;
+        lastDebugLogOutput = text;
+    }
+
+    if (keepAtBottom) {
+        panel.scrollTop = panel.scrollHeight;
+    }
 }
 
 function toggleDebugAutoRefresh(enabled: boolean): void {
@@ -257,8 +278,12 @@ function toggleDebugAutoRefresh(enabled: boolean): void {
 
     if (enabled) {
         debugLogAutoRefreshTimer = window.setInterval(() => {
+            if (!canRunSettingsAutoRefresh()) {
+                return;
+            }
+
             void refreshDebugLog();
-        }, 1500);
+        }, 2000);
     }
 }
 

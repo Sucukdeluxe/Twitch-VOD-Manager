@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.10';
+const APP_VERSION = '4.1.11';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -30,6 +30,9 @@ const MIN_FREE_DISK_BYTES = 128 * 1024 * 1024;
 const TOOL_PATH_REFRESH_TTL_MS = 10 * 1000;
 const DEBUG_LOG_FLUSH_INTERVAL_MS = 1000;
 const DEBUG_LOG_BUFFER_FLUSH_LINES = 48;
+const DEBUG_LOG_READ_TAIL_BYTES = 512 * 1024;
+const DEBUG_LOG_MAX_BYTES = 8 * 1024 * 1024;
+const DEBUG_LOG_TRIM_TO_BYTES = 4 * 1024 * 1024;
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const AUTO_UPDATE_STARTUP_CHECK_DELAY_MS = 5000;
 const AUTO_UPDATE_MIN_CHECK_GAP_MS = 45 * 1000;
@@ -533,9 +536,76 @@ function flushPendingDebugLogLines(): void {
         const payload = pendingDebugLogLines.join('');
         pendingDebugLogLines = [];
         fs.appendFileSync(DEBUG_LOG_FILE, payload);
+        trimDebugLogFileIfNeeded();
     } catch {
         // ignore debug log errors
     }
+}
+
+function trimDebugLogFileIfNeeded(): void {
+    try {
+        if (!fs.existsSync(DEBUG_LOG_FILE)) {
+            return;
+        }
+
+        const stats = fs.statSync(DEBUG_LOG_FILE);
+        if (stats.size <= DEBUG_LOG_MAX_BYTES) {
+            return;
+        }
+
+        const bytesToKeep = Math.min(DEBUG_LOG_TRIM_TO_BYTES, stats.size);
+        const startOffset = Math.max(0, stats.size - bytesToKeep);
+        const buffer = Buffer.allocUnsafe(bytesToKeep);
+
+        let fileHandle: number | null = null;
+        try {
+            fileHandle = fs.openSync(DEBUG_LOG_FILE, 'r');
+            fs.readSync(fileHandle, buffer, 0, bytesToKeep, startOffset);
+        } finally {
+            if (fileHandle !== null) {
+                fs.closeSync(fileHandle);
+            }
+        }
+
+        const firstLineBreak = buffer.indexOf(0x0a);
+        const trimmed = firstLineBreak >= 0 && firstLineBreak + 1 < buffer.length
+            ? buffer.subarray(firstLineBreak + 1)
+            : buffer;
+
+        fs.writeFileSync(DEBUG_LOG_FILE, trimmed);
+    } catch {
+        // ignore debug log errors
+    }
+}
+
+function readDebugLogTailFromDisk(): string {
+    const stats = fs.statSync(DEBUG_LOG_FILE);
+    if (stats.size <= 0) {
+        return '';
+    }
+
+    const bytesToRead = Math.min(stats.size, DEBUG_LOG_READ_TAIL_BYTES);
+    if (bytesToRead === stats.size) {
+        return fs.readFileSync(DEBUG_LOG_FILE, 'utf-8');
+    }
+
+    const buffer = Buffer.allocUnsafe(bytesToRead);
+    let fileHandle: number | null = null;
+    try {
+        fileHandle = fs.openSync(DEBUG_LOG_FILE, 'r');
+        fs.readSync(fileHandle, buffer, 0, bytesToRead, stats.size - bytesToRead);
+    } finally {
+        if (fileHandle !== null) {
+            fs.closeSync(fileHandle);
+        }
+    }
+
+    const firstLineBreak = buffer.indexOf(0x0a);
+    const slice = firstLineBreak >= 0 && firstLineBreak + 1 < buffer.length
+        ? buffer.subarray(firstLineBreak + 1)
+        : buffer;
+
+    return slice.toString('utf-8');
 }
 
 function startDebugLogFlushTimer(): void {
@@ -569,7 +639,7 @@ function readDebugLog(lines = 200): string {
             return 'Debug-Log ist leer.';
         }
 
-        const text = fs.readFileSync(DEBUG_LOG_FILE, 'utf-8');
+        const text = readDebugLogTailFromDisk();
         const rows = text.split(/\r?\n/).filter(Boolean);
         return rows.slice(-lines).join('\n') || 'Debug-Log ist leer.';
     } catch (e) {
