@@ -178,7 +178,7 @@ interface ApiBridge {
     cutVideo(inputFile: string, startTime: number, endTime: number): Promise<{ success: boolean; outputFile: string | null }>;
     mergeVideos(inputFiles: string[], outputFile: string): Promise<{ success: boolean; outputFile: string | null }>;
     getVersion(): Promise<string>;
-    checkUpdate(): Promise<{ checking?: boolean; error?: boolean }>;
+    checkUpdate(): Promise<{ checking?: boolean; error?: boolean; skipped?: 'ready-to-install' | 'in-progress' | 'throttled' | 'error' | string }>;
     downloadUpdate(): Promise<{ downloading?: boolean; error?: boolean }>;
     installUpdate(): Promise<void>;
     openExternal(url: string): Promise<void>;

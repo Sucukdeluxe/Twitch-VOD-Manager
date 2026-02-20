@@ -10,6 +10,8 @@ async function init(): Promise<void> {
     config.language = language;
     const initialQueue = await window.api.getQueue();
     queue = Array.isArray(initialQueue) ? initialQueue : [];
+    downloading = await window.api.isDownloading();
+    markQueueActivity();
     const version = await window.api.getVersion();
 
     byId('versionText').textContent = `v${version}`;

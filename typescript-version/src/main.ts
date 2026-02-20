@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.7';
+const APP_VERSION = '4.1.8';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -396,6 +396,7 @@ let autoUpdateStartupTimer: NodeJS.Timeout | null = null;
 let autoUpdateCheckInProgress = false;
 let autoUpdateReadyToInstall = false;
 let lastAutoUpdateCheckAt = 0;
+let twitchLoginInFlight: Promise<boolean> | null = null;
 
 // ==========================================
 // TOOL PATHS
@@ -1447,6 +1448,10 @@ function emitQueueUpdated(force = false): void {
     mainWindow?.webContents.send('queue-updated', downloadQueue);
 }
 
+function hasQueueItemId(id: string): boolean {
+    return downloadQueue.some((item) => item.id === id);
+}
+
 function getRuntimeMetricsSnapshot(): RuntimeMetricsSnapshot {
     return {
         ...runtimeMetrics,
@@ -1644,6 +1649,22 @@ async function twitchLogin(): Promise<boolean> {
     }
 }
 
+function requestTwitchLogin(): Promise<boolean> {
+    if (twitchLoginInFlight) {
+        return twitchLoginInFlight;
+    }
+
+    let loginPromise: Promise<boolean>;
+    loginPromise = twitchLogin().finally(() => {
+        if (twitchLoginInFlight === loginPromise) {
+            twitchLoginInFlight = null;
+        }
+    });
+
+    twitchLoginInFlight = loginPromise;
+    return loginPromise;
+}
+
 async function ensureTwitchAuth(forceRefresh = false): Promise<boolean> {
     if (!config.client_id || !config.client_secret) {
         accessToken = null;
@@ -1654,7 +1675,7 @@ async function ensureTwitchAuth(forceRefresh = false): Promise<boolean> {
         return true;
     }
 
-    return await twitchLogin();
+    return await requestTwitchLogin();
 }
 
 function normalizeLogin(input: string): string {
@@ -2749,6 +2770,14 @@ async function processQueue(): Promise<void> {
             }
         }
 
+        if (!hasQueueItemId(item.id)) {
+            appendDebugLog('queue-item-finished-removed', { itemId: item.id });
+            runtimeMetrics.activeItemId = null;
+            runtimeMetrics.activeItemTitle = null;
+            activeQueueItemId = null;
+            continue;
+        }
+
         const wasPaused = pauseRequested || (finalResult.error || '').includes('pausiert');
         item.status = finalResult.success ? 'completed' : (wasPaused ? 'paused' : 'error');
         item.progress = finalResult.success ? 100 : item.progress;
@@ -2812,6 +2841,13 @@ function createWindow(): void {
     }
 
     mainWindow.loadFile(path.join(__dirname, '../src/index.html'));
+
+    mainWindow.webContents.on('did-finish-load', () => {
+        emitQueueUpdated(true);
+        if (isDownloading) {
+            mainWindow?.webContents.send('download-started');
+        }
+    });
 
     mainWindow.on('closed', () => {
         mainWindow = null;
@@ -2961,6 +2997,7 @@ ipcMain.handle('save-config', (_, newConfig: Partial<Config>) => {
 
     if (config.client_id !== previousClientId || config.client_secret !== previousClientSecret) {
         accessToken = null;
+        twitchLoginInFlight = null;
     }
 
     if (config.metadata_cache_minutes !== previousCacheMinutes) {
@@ -3021,6 +3058,9 @@ ipcMain.handle('remove-from-queue', (_, id: string) => {
         if (currentProcess) {
             currentProcess.kill();
         }
+        activeQueueItemId = null;
+        runtimeMetrics.activeItemId = null;
+        runtimeMetrics.activeItemTitle = null;
         appendDebugLog('queue-item-removed-active-cancelled', { id });
     }
 

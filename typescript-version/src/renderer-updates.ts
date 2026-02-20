@@ -3,7 +3,16 @@ async function checkUpdateSilent(): Promise<void> {
 }
 
 async function checkUpdate(): Promise<void> {
-    await window.api.checkUpdate();
+    const result = await window.api.checkUpdate();
+
+    if (result?.error) {
+        return;
+    }
+
+    const skippedReason = result?.skipped;
+    if (skippedReason === 'in-progress' || skippedReason === 'ready-to-install' || skippedReason === 'throttled') {
+        return;
+    }
 
     setTimeout(() => {
         if (byId('updateBanner').style.display !== 'flex') {
