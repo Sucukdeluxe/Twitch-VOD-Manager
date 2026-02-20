@@ -88,6 +88,16 @@ async function checkUpdate(): Promise<void> {
             notifyUpdate(UI_TEXT.updates.checkInProgress, 'info');
             return;
         }
+
+        manualUpdateCheckPending = false;
+        updateCheckInProgress = false;
+        setCheckButtonCheckingState(false);
+
+        window.setTimeout(() => {
+            if (!updateReady && byId('updateBanner').style.display !== 'flex') {
+                notifyUpdate(UI_TEXT.updates.latest, 'info');
+            }
+        }, 2500);
     } catch {
         manualUpdateCheckPending = false;
         updateCheckInProgress = false;
@@ -141,7 +151,9 @@ function downloadUpdate(): void {
 
 window.api.onUpdateChecking(() => {
     updateCheckInProgress = true;
-    setCheckButtonCheckingState(true);
+    if (manualUpdateCheckPending) {
+        setCheckButtonCheckingState(true);
+    }
 });
 
 window.api.onUpdateAvailable((info: UpdateInfo) => {

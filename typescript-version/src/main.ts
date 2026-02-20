@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.9';
+const APP_VERSION = '4.1.10';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -34,6 +34,7 @@ const AUTO_UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const AUTO_UPDATE_STARTUP_CHECK_DELAY_MS = 5000;
 const AUTO_UPDATE_MIN_CHECK_GAP_MS = 45 * 1000;
 const AUTO_UPDATE_AUTO_DOWNLOAD = true;
+const AUTO_UPDATE_CHECK_TIMEOUT_MS = 30 * 1000;
 const CACHE_CLEANUP_INTERVAL_MS = 60 * 1000;
 const MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES = 4096;
 const MAX_VOD_LIST_CACHE_ENTRIES = 512;
@@ -2884,7 +2885,23 @@ async function requestUpdateCheck(source: UpdateCheckSource, force = false): Pro
     appendDebugLog('update-check-start', { source });
 
     try {
-        await autoUpdater.checkForUpdates();
+        let timeoutHandle: NodeJS.Timeout | null = null;
+        try {
+            await Promise.race([
+                autoUpdater.checkForUpdates(),
+                new Promise<never>((_, reject) => {
+                    timeoutHandle = setTimeout(() => {
+                        reject(new Error(`Update check timed out after ${AUTO_UPDATE_CHECK_TIMEOUT_MS}ms`));
+                    }, AUTO_UPDATE_CHECK_TIMEOUT_MS);
+                })
+            ]);
+        } finally {
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+                timeoutHandle = null;
+            }
+        }
+
         return { started: true };
     } catch (err) {
         appendDebugLog('update-check-failed', { source, error: String(err) });
