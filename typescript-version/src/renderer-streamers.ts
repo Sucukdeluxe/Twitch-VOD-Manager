@@ -1,4 +1,31 @@
 let selectStreamerRequestId = 0;
+let vodRenderTaskId = 0;
+const VOD_RENDER_CHUNK_SIZE = 64;
+
+function buildVodCardHtml(vod: VOD, streamer: string): string {
+    const thumb = vod.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180');
+    const date = formatUiDate(vod.created_at);
+    const escapedTitle = vod.title.replace(/'/g, "\\'").replace(/\"/g, '&quot;');
+    const safeDisplayTitle = escapeHtml(vod.title || UI_TEXT.vods.untitled);
+
+    return `
+        <div class="vod-card">
+            <img class="vod-thumbnail" loading="lazy" decoding="async" src="${thumb}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 320 180%22><rect fill=%22%23333%22 width=%22320%22 height=%22180%22/></svg>'">
+            <div class="vod-info">
+                <div class="vod-title">${safeDisplayTitle}</div>
+                <div class="vod-meta">
+                    <span>${date}</span>
+                    <span>${vod.duration}</span>
+                    <span>${formatUiNumber(vod.view_count)} ${UI_TEXT.vods.views}</span>
+                </div>
+            </div>
+            <div class="vod-actions">
+                <button class="vod-btn secondary" onclick="openClipDialog('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">Clip</button>
+                <button class="vod-btn primary" onclick="addToQueue('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">${UI_TEXT.vods.addQueue}</button>
+            </div>
+        </div>
+    `;
+}
 
 function renderStreamers(): void {
     const list = byId('streamerList');
@@ -92,36 +119,40 @@ async function selectStreamer(name: string, forceRefresh = false): Promise<void>
 
 function renderVODs(vods: VOD[] | null | undefined, streamer: string): void {
     const grid = byId('vodGrid');
+    const renderTaskId = ++vodRenderTaskId;
+
+    const scheduleNextChunk = (nextStartIndex: number): void => {
+        const delayMs = document.hidden ? 16 : 0;
+        window.setTimeout(() => {
+            renderChunk(nextStartIndex);
+        }, delayMs);
+    };
 
     if (!vods || vods.length === 0) {
         grid.innerHTML = `<div class="empty-state"><h3>${UI_TEXT.vods.noResultsTitle}</h3><p>${UI_TEXT.vods.noResultsText}</p></div>`;
         return;
     }
 
-    grid.innerHTML = vods.map((vod: VOD) => {
-        const thumb = vod.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180');
-        const date = formatUiDate(vod.created_at);
-        const escapedTitle = vod.title.replace(/'/g, "\\'").replace(/\"/g, '&quot;');
-        const safeDisplayTitle = escapeHtml(vod.title || UI_TEXT.vods.untitled);
+    grid.innerHTML = '';
 
-        return `
-            <div class="vod-card">
-                <img class="vod-thumbnail" src="${thumb}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 320 180%22><rect fill=%22%23333%22 width=%22320%22 height=%22180%22/></svg>'">
-                <div class="vod-info">
-                    <div class="vod-title">${safeDisplayTitle}</div>
-                    <div class="vod-meta">
-                        <span>${date}</span>
-                        <span>${vod.duration}</span>
-                        <span>${formatUiNumber(vod.view_count)} ${UI_TEXT.vods.views}</span>
-                    </div>
-                </div>
-                <div class="vod-actions">
-                    <button class="vod-btn secondary" onclick="openClipDialog('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">Clip</button>
-                    <button class="vod-btn primary" onclick="addToQueue('${vod.url}', '${escapedTitle}', '${vod.created_at}', '${streamer}', '${vod.duration}')">${UI_TEXT.vods.addQueue}</button>
-                </div>
-            </div>
-        `;
-    }).join('');
+    const renderChunk = (startIndex: number): void => {
+        if (renderTaskId !== vodRenderTaskId) {
+            return;
+        }
+
+        const chunk = vods.slice(startIndex, startIndex + VOD_RENDER_CHUNK_SIZE);
+        if (!chunk.length) {
+            return;
+        }
+
+        grid.insertAdjacentHTML('beforeend', chunk.map((vod) => buildVodCardHtml(vod, streamer)).join(''));
+
+        if (startIndex + chunk.length < vods.length) {
+            scheduleNextChunk(startIndex + chunk.length);
+        }
+    };
+
+    renderChunk(0);
 }
 
 async function refreshVODs(): Promise<void> {

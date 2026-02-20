@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.4';
+const APP_VERSION = '4.1.5';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -28,6 +28,8 @@ const DEFAULT_PERFORMANCE_MODE: PerformanceMode = 'balanced';
 const QUEUE_SAVE_DEBOUNCE_MS = 250;
 const MIN_FREE_DISK_BYTES = 128 * 1024 * 1024;
 const TOOL_PATH_REFRESH_TTL_MS = 10 * 1000;
+const DEBUG_LOG_FLUSH_INTERVAL_MS = 1000;
+const DEBUG_LOG_BUFFER_FLUSH_LINES = 48;
 const CACHE_CLEANUP_INTERVAL_MS = 60 * 1000;
 const MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES = 4096;
 const MAX_VOD_LIST_CACHE_ENTRIES = 512;
@@ -379,6 +381,8 @@ let ffmpegPathCache: string | null = null;
 let ffprobePathCache: string | null = null;
 let bundledToolPathSignature = '';
 let bundledToolPathRefreshedAt = 0;
+let debugLogFlushTimer: NodeJS.Timeout | null = null;
+let pendingDebugLogLines: string[] = [];
 
 // ==========================================
 // TOOL PATHS
@@ -502,8 +506,47 @@ async function runPreflight(autoFix = false): Promise<PreflightResult> {
     return result;
 }
 
+function flushPendingDebugLogLines(): void {
+    if (!pendingDebugLogLines.length) {
+        return;
+    }
+
+    try {
+        const payload = pendingDebugLogLines.join('');
+        pendingDebugLogLines = [];
+        fs.appendFileSync(DEBUG_LOG_FILE, payload);
+    } catch {
+        // ignore debug log errors
+    }
+}
+
+function startDebugLogFlushTimer(): void {
+    if (debugLogFlushTimer) {
+        return;
+    }
+
+    debugLogFlushTimer = setInterval(() => {
+        flushPendingDebugLogLines();
+    }, DEBUG_LOG_FLUSH_INTERVAL_MS);
+
+    debugLogFlushTimer.unref?.();
+}
+
+function stopDebugLogFlushTimer(flush = true): void {
+    if (debugLogFlushTimer) {
+        clearInterval(debugLogFlushTimer);
+        debugLogFlushTimer = null;
+    }
+
+    if (flush) {
+        flushPendingDebugLogLines();
+    }
+}
+
 function readDebugLog(lines = 200): string {
     try {
+        flushPendingDebugLogLines();
+
         if (!fs.existsSync(DEBUG_LOG_FILE)) {
             return 'Debug-Log ist leer.';
         }
@@ -863,7 +906,14 @@ function appendDebugLog(message: string, details?: unknown): void {
         const payload = details === undefined
             ? ''
             : ` | ${typeof details === 'string' ? details : JSON.stringify(details)}`;
-        fs.appendFileSync(DEBUG_LOG_FILE, `[${ts}] ${message}${payload}\n`);
+
+        pendingDebugLogLines.push(`[${ts}] ${message}${payload}\n`);
+
+        if (pendingDebugLogLines.length >= DEBUG_LOG_BUFFER_FLUSH_LINES) {
+            flushPendingDebugLogLines();
+        } else {
+            startDebugLogFlushTimer();
+        }
     } catch {
         // ignore debug log errors
     }
@@ -3133,6 +3183,7 @@ ipcMain.handle('save-video-dialog', async (_, defaultName: string) => {
 app.whenReady().then(() => {
     refreshBundledToolPaths(true);
     startMetadataCacheCleanup();
+    startDebugLogFlushTimer();
     createWindow();
     appendDebugLog('startup-tools-check-skipped', 'Deferred to first use');
 
@@ -3146,6 +3197,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
     stopMetadataCacheCleanup();
     cleanupMetadataCaches('shutdown');
+    stopDebugLogFlushTimer(true);
 
     if (currentProcess) {
         currentProcess.kill();
@@ -3160,5 +3212,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
     stopMetadataCacheCleanup();
     cleanupMetadataCaches('shutdown');
+    stopDebugLogFlushTimer(true);
     flushQueueSave();
 });

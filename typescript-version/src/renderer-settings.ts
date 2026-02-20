@@ -1,3 +1,5 @@
+let lastRuntimeMetricsOutput = '';
+
 async function connect(): Promise<void> {
     const hasCredentials = Boolean((config.client_id ?? '').toString().trim() && (config.client_secret ?? '').toString().trim());
     if (!hasCredentials) {
@@ -73,9 +75,11 @@ function applyTemplatePreset(preset: string): void {
     validateFilenameTemplates();
 }
 
-async function refreshRuntimeMetrics(): Promise<void> {
+async function refreshRuntimeMetrics(showLoading = true): Promise<void> {
     const output = byId('runtimeMetricsOutput');
-    output.textContent = UI_TEXT.static.runtimeMetricsLoading;
+    if (showLoading) {
+        output.textContent = UI_TEXT.static.runtimeMetricsLoading;
+    }
 
     try {
         const metrics = await window.api.getRuntimeMetrics();
@@ -92,9 +96,16 @@ async function refreshRuntimeMetrics(): Promise<void> {
             `${UI_TEXT.static.runtimeMetricUpdated}: ${new Date(metrics.timestamp).toLocaleString(currentLanguage === 'en' ? 'en-US' : 'de-DE')}`
         ];
 
-        output.textContent = lines.join('\n');
+        const nextOutput = lines.join('\n');
+        if (nextOutput !== lastRuntimeMetricsOutput) {
+            output.textContent = nextOutput;
+            lastRuntimeMetricsOutput = nextOutput;
+        }
     } catch {
-        output.textContent = UI_TEXT.static.runtimeMetricsError;
+        if (lastRuntimeMetricsOutput !== UI_TEXT.static.runtimeMetricsError) {
+            output.textContent = UI_TEXT.static.runtimeMetricsError;
+            lastRuntimeMetricsOutput = UI_TEXT.static.runtimeMetricsError;
+        }
     }
 }
 
@@ -131,7 +142,7 @@ function toggleRuntimeMetricsAutoRefresh(enabled: boolean): void {
 
     if (enabled) {
         runtimeMetricsAutoRefreshTimer = window.setInterval(() => {
-            void refreshRuntimeMetrics();
+            void refreshRuntimeMetrics(false);
         }, 2000);
     }
 }

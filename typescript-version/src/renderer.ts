@@ -1,3 +1,9 @@
+const QUEUE_SYNC_FAST_MS = 900;
+const QUEUE_SYNC_DEFAULT_MS = 1800;
+const QUEUE_SYNC_IDLE_MS = 4500;
+const QUEUE_SYNC_HIDDEN_MS = 9000;
+const QUEUE_SYNC_RECENT_ACTIVITY_WINDOW_MS = 15000;
+
 async function init(): Promise<void> {
     config = await window.api.getConfig();
     const language = setLanguage((config.language as string) || 'en');
@@ -34,6 +40,7 @@ async function init(): Promise<void> {
     window.api.onQueueUpdated((q: QueueItem[]) => {
         queue = mergeQueueState(Array.isArray(q) ? q : []);
         renderQueue();
+        markQueueActivity();
     });
 
     window.api.onQueueDuplicateSkipped((payload) => {
@@ -57,16 +64,19 @@ async function init(): Promise<void> {
         item.totalBytes = progress.totalBytes;
         item.progressStatus = progress.status;
         renderQueue();
+        markQueueActivity();
     });
 
     window.api.onDownloadStarted(() => {
         downloading = true;
         updateDownloadButtonState();
+        markQueueActivity();
     });
 
     window.api.onDownloadFinished(() => {
         downloading = false;
         updateDownloadButtonState();
+        markQueueActivity();
     });
 
     window.api.onCutProgress((percent: number) => {
@@ -98,12 +108,71 @@ async function init(): Promise<void> {
     validateFilenameTemplates();
     void refreshRuntimeMetrics();
 
-    setInterval(() => {
-        void syncQueueAndDownloadState();
-    }, 2000);
+    document.addEventListener('visibilitychange', () => {
+        scheduleQueueSync(document.hidden ? 600 : 150);
+    });
+
+    scheduleQueueSync(QUEUE_SYNC_DEFAULT_MS);
 }
 
 let toastHideTimer: number | null = null;
+let queueSyncTimer: number | null = null;
+let queueSyncInFlight = false;
+let lastQueueActivityAt = Date.now();
+
+function markQueueActivity(): void {
+    lastQueueActivityAt = Date.now();
+}
+
+function hasActiveQueueWork(): boolean {
+    return queue.some((item) => item.status === 'pending' || item.status === 'downloading' || item.status === 'paused');
+}
+
+function getNextQueueSyncDelayMs(): number {
+    if (document.hidden) {
+        return QUEUE_SYNC_HIDDEN_MS;
+    }
+
+    if (downloading || queue.some((item) => item.status === 'downloading')) {
+        return QUEUE_SYNC_FAST_MS;
+    }
+
+    if (hasActiveQueueWork()) {
+        return QUEUE_SYNC_DEFAULT_MS;
+    }
+
+    const idleForMs = Date.now() - lastQueueActivityAt;
+    return idleForMs > QUEUE_SYNC_RECENT_ACTIVITY_WINDOW_MS ? QUEUE_SYNC_IDLE_MS : QUEUE_SYNC_DEFAULT_MS;
+}
+
+function scheduleQueueSync(delayMs = getNextQueueSyncDelayMs()): void {
+    if (queueSyncTimer) {
+        clearTimeout(queueSyncTimer);
+        queueSyncTimer = null;
+    }
+
+    queueSyncTimer = window.setTimeout(() => {
+        queueSyncTimer = null;
+        void runQueueSyncCycle();
+    }, Math.max(300, Math.floor(delayMs)));
+}
+
+async function runQueueSyncCycle(): Promise<void> {
+    if (queueSyncInFlight) {
+        scheduleQueueSync(400);
+        return;
+    }
+
+    queueSyncInFlight = true;
+    try {
+        await syncQueueAndDownloadState();
+    } catch {
+        // ignore transient IPC errors and retry on next cycle
+    } finally {
+        queueSyncInFlight = false;
+        scheduleQueueSync();
+    }
+}
 
 function showAppToast(message: string, type: 'info' | 'warn' = 'info'): void {
     let toast = document.getElementById('appToast');
@@ -161,6 +230,18 @@ function mergeQueueState(nextQueue: QueueItem[]): QueueItem[] {
     });
 }
 
+function getQueueStateFingerprint(items: QueueItem[]): string {
+    return items.map((item) => [
+        item.id,
+        item.status,
+        Math.round((Number(item.progress) || 0) * 10),
+        item.currentPart || 0,
+        item.totalParts || 0,
+        item.last_error || '',
+        item.progressStatus || ''
+    ].join(':')).join('|');
+}
+
 function updateDownloadButtonState(): void {
     const btn = byId('btnStart');
     const hasPaused = queue.some((item) => item.status === 'paused');
@@ -169,8 +250,13 @@ function updateDownloadButtonState(): void {
 }
 
 async function syncQueueAndDownloadState(): Promise<void> {
+    const previousFingerprint = getQueueStateFingerprint(queue);
     const latestQueue = await window.api.getQueue();
     queue = mergeQueueState(Array.isArray(latestQueue) ? latestQueue : []);
+    const nextFingerprint = getQueueStateFingerprint(queue);
+    if (nextFingerprint !== previousFingerprint) {
+        markQueueActivity();
+    }
     renderQueue();
 
     const backendDownloading = await window.api.isDownloading();
