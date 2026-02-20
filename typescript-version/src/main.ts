@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.5';
+const APP_VERSION = '4.1.6';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -30,6 +30,9 @@ const MIN_FREE_DISK_BYTES = 128 * 1024 * 1024;
 const TOOL_PATH_REFRESH_TTL_MS = 10 * 1000;
 const DEBUG_LOG_FLUSH_INTERVAL_MS = 1000;
 const DEBUG_LOG_BUFFER_FLUSH_LINES = 48;
+const AUTO_UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+const AUTO_UPDATE_STARTUP_CHECK_DELAY_MS = 5000;
+const AUTO_UPDATE_MIN_CHECK_GAP_MS = 45 * 1000;
 const CACHE_CLEANUP_INTERVAL_MS = 60 * 1000;
 const MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES = 4096;
 const MAX_VOD_LIST_CACHE_ENTRIES = 512;
@@ -43,6 +46,7 @@ const TWITCH_WEB_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 
 type PerformanceMode = 'stability' | 'balanced' | 'speed';
 type RetryErrorClass = 'network' | 'rate_limit' | 'auth' | 'tooling' | 'integrity' | 'io' | 'validation' | 'unknown';
+type UpdateCheckSource = 'startup' | 'interval' | 'manual';
 
 // Ensure directories exist
 if (!fs.existsSync(APPDATA_DIR)) {
@@ -383,6 +387,12 @@ let bundledToolPathSignature = '';
 let bundledToolPathRefreshedAt = 0;
 let debugLogFlushTimer: NodeJS.Timeout | null = null;
 let pendingDebugLogLines: string[] = [];
+let autoUpdaterInitialized = false;
+let autoUpdateCheckTimer: NodeJS.Timeout | null = null;
+let autoUpdateStartupTimer: NodeJS.Timeout | null = null;
+let autoUpdateCheckInProgress = false;
+let autoUpdateReadyToInstall = false;
+let lastAutoUpdateCheckAt = 0;
 
 // ==========================================
 // TOOL PATHS
@@ -2782,7 +2792,75 @@ function createWindow(): void {
 // ==========================================
 // AUTO-UPDATER (electron-updater)
 // ==========================================
+async function requestUpdateCheck(source: UpdateCheckSource, force = false): Promise<{ started: boolean; reason?: string }> {
+    if (autoUpdateReadyToInstall) {
+        return { started: false, reason: 'ready-to-install' };
+    }
+
+    if (autoUpdateCheckInProgress) {
+        return { started: false, reason: 'in-progress' };
+    }
+
+    const now = Date.now();
+    if (!force && lastAutoUpdateCheckAt > 0 && (now - lastAutoUpdateCheckAt) < AUTO_UPDATE_MIN_CHECK_GAP_MS) {
+        return { started: false, reason: 'throttled' };
+    }
+
+    autoUpdateCheckInProgress = true;
+    lastAutoUpdateCheckAt = now;
+    appendDebugLog('update-check-start', { source });
+
+    try {
+        await autoUpdater.checkForUpdates();
+        return { started: true };
+    } catch (err) {
+        appendDebugLog('update-check-failed', { source, error: String(err) });
+        console.error('Update check failed:', err);
+        return { started: false, reason: 'error' };
+    } finally {
+        autoUpdateCheckInProgress = false;
+    }
+}
+
+function stopAutoUpdatePolling(): void {
+    if (autoUpdateCheckTimer) {
+        clearInterval(autoUpdateCheckTimer);
+        autoUpdateCheckTimer = null;
+    }
+
+    if (autoUpdateStartupTimer) {
+        clearTimeout(autoUpdateStartupTimer);
+        autoUpdateStartupTimer = null;
+    }
+}
+
+function startAutoUpdatePolling(): void {
+    if (!autoUpdateCheckTimer) {
+        autoUpdateCheckTimer = setInterval(() => {
+            void requestUpdateCheck('interval');
+        }, AUTO_UPDATE_CHECK_INTERVAL_MS);
+
+        autoUpdateCheckTimer.unref?.();
+    }
+
+    if (autoUpdateStartupTimer) {
+        clearTimeout(autoUpdateStartupTimer);
+        autoUpdateStartupTimer = null;
+    }
+
+    autoUpdateStartupTimer = setTimeout(() => {
+        autoUpdateStartupTimer = null;
+        void requestUpdateCheck('startup', true);
+    }, AUTO_UPDATE_STARTUP_CHECK_DELAY_MS);
+}
+
 function setupAutoUpdater() {
+    if (autoUpdaterInitialized) {
+        startAutoUpdatePolling();
+        return;
+    }
+
+    autoUpdaterInitialized = true;
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
 
@@ -2792,6 +2870,7 @@ function setupAutoUpdater() {
 
     autoUpdater.on('update-available', (info) => {
         console.log('Update available:', info.version);
+        autoUpdateReadyToInstall = false;
         if (mainWindow) {
             mainWindow.webContents.send('update-available', {
                 version: info.version,
@@ -2818,6 +2897,7 @@ function setupAutoUpdater() {
 
     autoUpdater.on('update-downloaded', (info) => {
         console.log('Update downloaded:', info.version);
+        autoUpdateReadyToInstall = true;
         if (mainWindow) {
             mainWindow.webContents.send('update-downloaded', {
                 version: info.version
@@ -2826,13 +2906,11 @@ function setupAutoUpdater() {
     });
 
     autoUpdater.on('error', (err) => {
+        autoUpdateCheckInProgress = false;
         console.error('Auto-updater error:', err);
     });
 
-    // Check for updates
-    autoUpdater.checkForUpdates().catch(err => {
-        console.error('Update check failed:', err);
-    });
+    startAutoUpdatePolling();
 }
 
 // ==========================================
@@ -3015,8 +3093,15 @@ ipcMain.handle('get-version', () => APP_VERSION);
 
 ipcMain.handle('check-update', async () => {
     try {
-        const result = await autoUpdater.checkForUpdates();
-        return { checking: true };
+        setupAutoUpdater();
+        const result = await requestUpdateCheck('manual', true);
+        if (result.reason === 'error') {
+            return { error: true };
+        }
+
+        return result.started
+            ? { checking: true }
+            : { checking: true, skipped: result.reason };
     } catch (err) {
         console.error('Update check failed:', err);
         return { error: true };
@@ -3025,6 +3110,7 @@ ipcMain.handle('check-update', async () => {
 
 ipcMain.handle('download-update', async () => {
     try {
+        autoUpdateReadyToInstall = false;
         await autoUpdater.downloadUpdate();
         return { downloading: true };
     } catch (err) {
@@ -3198,6 +3284,7 @@ app.on('window-all-closed', () => {
     stopMetadataCacheCleanup();
     cleanupMetadataCaches('shutdown');
     stopDebugLogFlushTimer(true);
+    stopAutoUpdatePolling();
 
     if (currentProcess) {
         currentProcess.kill();
@@ -3213,5 +3300,6 @@ app.on('before-quit', () => {
     stopMetadataCacheCleanup();
     cleanupMetadataCaches('shutdown');
     stopDebugLogFlushTimer(true);
+    stopAutoUpdatePolling();
     flushQueueSave();
 });
