@@ -197,7 +197,13 @@ const UI_TEXT_DE = {
     updates: {
         bannerDefault: 'Neue Version verfugbar!',
         latest: 'Du hast die neueste Version!',
+        checking: 'Suche nach Updates...',
+        checkInProgress: 'Update-Prufung lauft bereits.',
+        readyToInstall: 'Update ist bereit zur Installation.',
+        checkFailed: 'Update-Prufung fehlgeschlagen.',
         downloading: 'Wird heruntergeladen...',
+        downloadInProgress: 'Update-Download lauft bereits.',
+        downloadFailed: 'Update-Download fehlgeschlagen.',
         available: 'verfugbar!',
         downloadNow: 'Jetzt herunterladen',
         downloadLabel: 'Download',

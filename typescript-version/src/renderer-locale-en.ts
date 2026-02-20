@@ -197,7 +197,13 @@ const UI_TEXT_EN = {
     updates: {
         bannerDefault: 'New version available!',
         latest: 'You are on the latest version!',
+        checking: 'Checking for updates...',
+        checkInProgress: 'Update check is already running.',
+        readyToInstall: 'Update is ready to install.',
+        checkFailed: 'Update check failed.',
         downloading: 'Downloading...',
+        downloadInProgress: 'Update download is already running.',
+        downloadFailed: 'Update download failed.',
         available: 'available!',
         downloadNow: 'Download now',
         downloadLabel: 'Download',

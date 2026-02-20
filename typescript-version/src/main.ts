@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.8';
+const APP_VERSION = '4.1.9';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -33,6 +33,7 @@ const DEBUG_LOG_BUFFER_FLUSH_LINES = 48;
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const AUTO_UPDATE_STARTUP_CHECK_DELAY_MS = 5000;
 const AUTO_UPDATE_MIN_CHECK_GAP_MS = 45 * 1000;
+const AUTO_UPDATE_AUTO_DOWNLOAD = true;
 const CACHE_CLEANUP_INTERVAL_MS = 60 * 1000;
 const MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES = 4096;
 const MAX_VOD_LIST_CACHE_ENTRIES = 512;
@@ -47,6 +48,7 @@ const TWITCH_WEB_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 type PerformanceMode = 'stability' | 'balanced' | 'speed';
 type RetryErrorClass = 'network' | 'rate_limit' | 'auth' | 'tooling' | 'integrity' | 'io' | 'validation' | 'unknown';
 type UpdateCheckSource = 'startup' | 'interval' | 'manual';
+type UpdateDownloadSource = 'auto' | 'manual';
 
 // Ensure directories exist
 if (!fs.existsSync(APPDATA_DIR)) {
@@ -395,6 +397,7 @@ let autoUpdateCheckTimer: NodeJS.Timeout | null = null;
 let autoUpdateStartupTimer: NodeJS.Timeout | null = null;
 let autoUpdateCheckInProgress = false;
 let autoUpdateReadyToInstall = false;
+let autoUpdateDownloadInProgress = false;
 let lastAutoUpdateCheckAt = 0;
 let twitchLoginInFlight: Promise<boolean> | null = null;
 
@@ -2892,6 +2895,30 @@ async function requestUpdateCheck(source: UpdateCheckSource, force = false): Pro
     }
 }
 
+async function requestUpdateDownload(source: UpdateDownloadSource): Promise<{ started: boolean; reason?: string }> {
+    if (autoUpdateReadyToInstall) {
+        return { started: false, reason: 'ready-to-install' };
+    }
+
+    if (autoUpdateDownloadInProgress) {
+        return { started: false, reason: 'in-progress' };
+    }
+
+    autoUpdateDownloadInProgress = true;
+    appendDebugLog('update-download-start', { source });
+
+    try {
+        await autoUpdater.downloadUpdate();
+        return { started: true };
+    } catch (err) {
+        appendDebugLog('update-download-failed', { source, error: String(err) });
+        console.error('Download failed:', err);
+        return { started: false, reason: 'error' };
+    } finally {
+        autoUpdateDownloadInProgress = false;
+    }
+}
+
 function stopAutoUpdatePolling(): void {
     if (autoUpdateCheckTimer) {
         clearInterval(autoUpdateCheckTimer);
@@ -2936,21 +2963,28 @@ function setupAutoUpdater() {
 
     autoUpdater.on('checking-for-update', () => {
         console.log('Checking for updates...');
+        mainWindow?.webContents.send('update-checking');
     });
 
     autoUpdater.on('update-available', (info) => {
         console.log('Update available:', info.version);
         autoUpdateReadyToInstall = false;
+        autoUpdateDownloadInProgress = false;
         if (mainWindow) {
             mainWindow.webContents.send('update-available', {
                 version: info.version,
                 releaseDate: info.releaseDate
             });
         }
+
+        if (AUTO_UPDATE_AUTO_DOWNLOAD) {
+            void requestUpdateDownload('auto');
+        }
     });
 
     autoUpdater.on('update-not-available', () => {
         console.log('No updates available');
+        mainWindow?.webContents.send('update-not-available');
     });
 
     autoUpdater.on('download-progress', (progress) => {
@@ -2968,6 +3002,7 @@ function setupAutoUpdater() {
     autoUpdater.on('update-downloaded', (info) => {
         console.log('Update downloaded:', info.version);
         autoUpdateReadyToInstall = true;
+        autoUpdateDownloadInProgress = false;
         if (mainWindow) {
             mainWindow.webContents.send('update-downloaded', {
                 version: info.version
@@ -2977,6 +3012,10 @@ function setupAutoUpdater() {
 
     autoUpdater.on('error', (err) => {
         autoUpdateCheckInProgress = false;
+        autoUpdateDownloadInProgress = false;
+        const message = String(err);
+        appendDebugLog('auto-updater-error', message);
+        mainWindow?.webContents.send('update-error', { message });
         console.error('Auto-updater error:', err);
     });
 
@@ -3194,9 +3233,15 @@ ipcMain.handle('check-update', async () => {
 
 ipcMain.handle('download-update', async () => {
     try {
-        autoUpdateReadyToInstall = false;
-        await autoUpdater.downloadUpdate();
-        return { downloading: true };
+        setupAutoUpdater();
+        const result = await requestUpdateDownload('manual');
+        if (result.reason === 'error') {
+            return { error: true };
+        }
+
+        return result.started
+            ? { downloading: true }
+            : { downloading: true, skipped: result.reason };
     } catch (err) {
         console.error('Download failed:', err);
         return { error: true };

@@ -179,7 +179,7 @@ interface ApiBridge {
     mergeVideos(inputFiles: string[], outputFile: string): Promise<{ success: boolean; outputFile: string | null }>;
     getVersion(): Promise<string>;
     checkUpdate(): Promise<{ checking?: boolean; error?: boolean; skipped?: 'ready-to-install' | 'in-progress' | 'throttled' | 'error' | string }>;
-    downloadUpdate(): Promise<{ downloading?: boolean; error?: boolean }>;
+    downloadUpdate(): Promise<{ downloading?: boolean; error?: boolean; skipped?: 'ready-to-install' | 'in-progress' | 'error' | string }>;
     installUpdate(): Promise<void>;
     openExternal(url: string): Promise<void>;
     runPreflight(autoFix: boolean): Promise<PreflightResult>;
@@ -193,9 +193,12 @@ interface ApiBridge {
     onDownloadFinished(callback: () => void): void;
     onCutProgress(callback: (percent: number) => void): void;
     onMergeProgress(callback: (percent: number) => void): void;
+    onUpdateChecking(callback: () => void): void;
     onUpdateAvailable(callback: (info: UpdateInfo) => void): void;
+    onUpdateNotAvailable(callback: () => void): void;
     onUpdateDownloadProgress(callback: (progress: UpdateDownloadProgress) => void): void;
     onUpdateDownloaded(callback: (info: UpdateInfo) => void): void;
+    onUpdateError(callback: (payload: { message: string }) => void): void;
 }
 
 interface Window {

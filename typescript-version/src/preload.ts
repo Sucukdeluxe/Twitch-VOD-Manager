@@ -165,13 +165,22 @@ contextBridge.exposeInMainWorld('api', {
     },
 
     // Auto-Update Events
+    onUpdateChecking: (callback: () => void) => {
+        ipcRenderer.on('update-checking', () => callback());
+    },
     onUpdateAvailable: (callback: (info: { version: string; releaseDate?: string }) => void) => {
         ipcRenderer.on('update-available', (_, info) => callback(info));
+    },
+    onUpdateNotAvailable: (callback: () => void) => {
+        ipcRenderer.on('update-not-available', () => callback());
     },
     onUpdateDownloadProgress: (callback: (progress: { percent: number; bytesPerSecond: number; transferred: number; total: number }) => void) => {
         ipcRenderer.on('update-download-progress', (_, progress) => callback(progress));
     },
     onUpdateDownloaded: (callback: (info: { version: string }) => void) => {
         ipcRenderer.on('update-downloaded', (_, info) => callback(info));
+    },
+    onUpdateError: (callback: (payload: { message: string }) => void) => {
+        ipcRenderer.on('update-error', (_, payload) => callback(payload));
     }
 });
