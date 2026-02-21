@@ -8,7 +8,7 @@ import { autoUpdater } from 'electron-updater';
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.11';
+const APP_VERSION = '4.1.12';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -403,6 +403,8 @@ let autoUpdateCheckInProgress = false;
 let autoUpdateReadyToInstall = false;
 let autoUpdateDownloadInProgress = false;
 let lastAutoUpdateCheckAt = 0;
+let latestKnownUpdateVersion: string | null = null;
+let downloadedUpdateVersion: string | null = null;
 let twitchLoginInFlight: Promise<boolean> | null = null;
 
 // ==========================================
@@ -2921,6 +2923,12 @@ function createWindow(): void {
         if (isDownloading) {
             mainWindow?.webContents.send('download-started');
         }
+
+        if (autoUpdateReadyToInstall && downloadedUpdateVersion) {
+            mainWindow?.webContents.send('update-downloaded', {
+                version: downloadedUpdateVersion
+            });
+        }
     });
 
     mainWindow.on('closed', () => {
@@ -2936,11 +2944,48 @@ function createWindow(): void {
 // ==========================================
 // AUTO-UPDATER (electron-updater)
 // ==========================================
-async function requestUpdateCheck(source: UpdateCheckSource, force = false): Promise<{ started: boolean; reason?: string }> {
-    if (autoUpdateReadyToInstall) {
-        return { started: false, reason: 'ready-to-install' };
+function normalizeUpdateVersion(version: string | null | undefined): string {
+    return (version || '').trim().replace(/^v/i, '');
+}
+
+function compareUpdateVersions(left: string | null | undefined, right: string | null | undefined): number {
+    const a = normalizeUpdateVersion(left);
+    const b = normalizeUpdateVersion(right);
+
+    if (!a && !b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+
+    const aParts = a.split('.').map((part) => {
+        const numeric = Number(part.replace(/[^0-9].*$/, ''));
+        return Number.isFinite(numeric) ? numeric : 0;
+    });
+
+    const bParts = b.split('.').map((part) => {
+        const numeric = Number(part.replace(/[^0-9].*$/, ''));
+        return Number.isFinite(numeric) ? numeric : 0;
+    });
+
+    const maxLength = Math.max(aParts.length, bParts.length);
+    for (let i = 0; i < maxLength; i += 1) {
+        const av = aParts[i] || 0;
+        const bv = bParts[i] || 0;
+        if (av > bv) return 1;
+        if (av < bv) return -1;
     }
 
+    return 0;
+}
+
+function hasNewerKnownUpdateThanDownloaded(): boolean {
+    if (!latestKnownUpdateVersion || !downloadedUpdateVersion) {
+        return false;
+    }
+
+    return compareUpdateVersions(latestKnownUpdateVersion, downloadedUpdateVersion) > 0;
+}
+
+async function requestUpdateCheck(source: UpdateCheckSource, force = false): Promise<{ started: boolean; reason?: string }> {
     if (autoUpdateCheckInProgress) {
         return { started: false, reason: 'in-progress' };
     }
@@ -2983,7 +3028,7 @@ async function requestUpdateCheck(source: UpdateCheckSource, force = false): Pro
 }
 
 async function requestUpdateDownload(source: UpdateDownloadSource): Promise<{ started: boolean; reason?: string }> {
-    if (autoUpdateReadyToInstall) {
+    if (autoUpdateReadyToInstall && !hasNewerKnownUpdateThanDownloaded()) {
         return { started: false, reason: 'ready-to-install' };
     }
 
@@ -3054,12 +3099,44 @@ function setupAutoUpdater() {
     });
 
     autoUpdater.on('update-available', (info) => {
-        console.log('Update available:', info.version);
-        autoUpdateReadyToInstall = false;
+        const incomingVersion = normalizeUpdateVersion(info.version);
+        const displayVersion = incomingVersion || info.version;
+
+        if (latestKnownUpdateVersion && compareUpdateVersions(incomingVersion, latestKnownUpdateVersion) < 0) {
+            appendDebugLog('update-available-ignored-older', {
+                incomingVersion: displayVersion,
+                knownVersion: latestKnownUpdateVersion
+            });
+            return;
+        }
+
+        latestKnownUpdateVersion = incomingVersion || latestKnownUpdateVersion;
+
+        const hasAlreadyDownloadedThisVersion = Boolean(
+            autoUpdateReadyToInstall &&
+            downloadedUpdateVersion &&
+            compareUpdateVersions(downloadedUpdateVersion, incomingVersion) === 0
+        );
+
+        console.log('Update available:', displayVersion);
+        if (!hasAlreadyDownloadedThisVersion) {
+            autoUpdateReadyToInstall = false;
+        }
+
         autoUpdateDownloadInProgress = false;
+
+        if (hasAlreadyDownloadedThisVersion) {
+            if (mainWindow) {
+                mainWindow.webContents.send('update-downloaded', {
+                    version: displayVersion
+                });
+            }
+            return;
+        }
+
         if (mainWindow) {
             mainWindow.webContents.send('update-available', {
-                version: info.version,
+                version: displayVersion,
                 releaseDate: info.releaseDate
             });
         }
@@ -3087,12 +3164,17 @@ function setupAutoUpdater() {
     });
 
     autoUpdater.on('update-downloaded', (info) => {
-        console.log('Update downloaded:', info.version);
+        const downloadedVersion = normalizeUpdateVersion(info.version) || info.version;
+        console.log('Update downloaded:', downloadedVersion);
         autoUpdateReadyToInstall = true;
         autoUpdateDownloadInProgress = false;
+        downloadedUpdateVersion = downloadedVersion;
+        if (!latestKnownUpdateVersion || compareUpdateVersions(downloadedVersion, latestKnownUpdateVersion) > 0) {
+            latestKnownUpdateVersion = downloadedVersion;
+        }
         if (mainWindow) {
             mainWindow.webContents.send('update-downloaded', {
-                version: info.version
+                version: downloadedVersion
             });
         }
     });
