@@ -4,11 +4,12 @@ import * as fs from 'fs';
 import { spawn, ChildProcess, execSync, exec, spawnSync } from 'child_process';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
+import { compareUpdateVersions, isNewerUpdateVersion, normalizeUpdateVersion } from './update-version-utils';
 
 // ==========================================
 // CONFIG & CONSTANTS
 // ==========================================
-const APP_VERSION = '4.1.12';
+const APP_VERSION = '4.1.13';
 const UPDATE_CHECK_URL = 'http://24-music.de/version.json';
 
 // Paths
@@ -2944,45 +2945,12 @@ function createWindow(): void {
 // ==========================================
 // AUTO-UPDATER (electron-updater)
 // ==========================================
-function normalizeUpdateVersion(version: string | null | undefined): string {
-    return (version || '').trim().replace(/^v/i, '');
-}
-
-function compareUpdateVersions(left: string | null | undefined, right: string | null | undefined): number {
-    const a = normalizeUpdateVersion(left);
-    const b = normalizeUpdateVersion(right);
-
-    if (!a && !b) return 0;
-    if (!a) return -1;
-    if (!b) return 1;
-
-    const aParts = a.split('.').map((part) => {
-        const numeric = Number(part.replace(/[^0-9].*$/, ''));
-        return Number.isFinite(numeric) ? numeric : 0;
-    });
-
-    const bParts = b.split('.').map((part) => {
-        const numeric = Number(part.replace(/[^0-9].*$/, ''));
-        return Number.isFinite(numeric) ? numeric : 0;
-    });
-
-    const maxLength = Math.max(aParts.length, bParts.length);
-    for (let i = 0; i < maxLength; i += 1) {
-        const av = aParts[i] || 0;
-        const bv = bParts[i] || 0;
-        if (av > bv) return 1;
-        if (av < bv) return -1;
-    }
-
-    return 0;
-}
-
 function hasNewerKnownUpdateThanDownloaded(): boolean {
     if (!latestKnownUpdateVersion || !downloadedUpdateVersion) {
         return false;
     }
 
-    return compareUpdateVersions(latestKnownUpdateVersion, downloadedUpdateVersion) > 0;
+    return isNewerUpdateVersion(latestKnownUpdateVersion, downloadedUpdateVersion);
 }
 
 async function requestUpdateCheck(source: UpdateCheckSource, force = false): Promise<{ started: boolean; reason?: string }> {
