@@ -1,0 +1,620 @@
+let updateCheckInProgress = false;
+let updateDownloadInProgress = false;
+let manualUpdateCheckPending = false;
+let manualUpdateOutcomeHandled = false;
+let latestUpdateVersion = '';
+let latestUpdateInfo: UpdateInfo | null = null;
+let latestDownloadProgress: UpdateDownloadProgress | null = null;
+let updateBannerState: 'idle' | 'available' | 'downloading' | 'ready' = 'idle';
+let updateChangelogExpanded = false;
+let shouldOpenUpdateModalOnAvailable = false;
+
+const SKIPPED_UPDATE_VERSION_KEY = 'twitch-vod-manager:skipped-update-version';
+
+function getSkippedUpdateVersion(): string {
+    return safeLocalStorageGet(SKIPPED_UPDATE_VERSION_KEY);
+}
+
+function persistSkippedUpdateVersion(version: string): void {
+    safeLocalStorageSet(SKIPPED_UPDATE_VERSION_KEY, version);
+}
+
+function clearSkippedUpdateVersion(): void {
+    safeLocalStorageRemove(SKIPPED_UPDATE_VERSION_KEY);
+}
+
+function notifyUpdate(message: string, type: 'info' | 'warn' = 'info'): void {
+    const toastFn = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
+    if (typeof toastFn === 'function') {
+        toastFn(message, type);
+    } else if (type === 'warn') {
+        alert(message);
+    }
+}
+
+function rememberUpdateInfo(info?: UpdateInfo | null): UpdateInfo {
+    const version = info?.version || latestUpdateVersion || latestUpdateInfo?.version || '?';
+    latestUpdateVersion = version;
+    latestUpdateInfo = {
+        ...(latestUpdateInfo || { version }),
+        ...(info || {}),
+        version
+    };
+    return latestUpdateInfo;
+}
+
+function getActiveUpdateInfo(): UpdateInfo {
+    return rememberUpdateInfo();
+}
+
+function formatUpdateTemplate(template: string, version: string): string {
+    return template.replace(/\{version\}/g, version);
+}
+
+function formatReleaseDate(dateValue?: string): string {
+    if (!dateValue) {
+        return '';
+    }
+
+    const parsed = new Date(dateValue);
+    if (Number.isNaN(parsed.getTime())) {
+        return '';
+    }
+
+    return new Intl.DateTimeFormat(getIntlLocale(), { dateStyle: 'medium' }).format(parsed);
+}
+
+function getUpdateModalMetaText(info: UpdateInfo): string {
+    const parts: string[] = [];
+    const releaseName = (info.releaseName || '').trim();
+    const canonicalNames = new Set([info.version, `v${info.version}`]);
+
+    if (releaseName && !canonicalNames.has(releaseName)) {
+        parts.push(`${UI_TEXT.updates.releasedLabel}: ${releaseName}`);
+    }
+
+    const formattedDate = formatReleaseDate(info.releaseDate);
+    if (formattedDate) {
+        parts.push(formattedDate);
+    }
+
+    return parts.join(' | ');
+}
+
+function setCheckButtonCheckingState(enabled: boolean): void {
+    const btn = byId<HTMLButtonElement>('checkUpdateBtn');
+    btn.disabled = enabled;
+    btn.textContent = enabled ? UI_TEXT.updates.checking : UI_TEXT.static.checkUpdates;
+}
+
+function showUpdateBanner(): void {
+    byId('updateBanner').classList.add('show');
+}
+
+function hideUpdateBanner(): void {
+    byId('updateBanner').classList.remove('show');
+}
+
+function setUpdateBannerAvailableUi(info: UpdateInfo): void {
+    const activeInfo = rememberUpdateInfo(info);
+    updateReady = false;
+    updateDownloadInProgress = false;
+    latestDownloadProgress = null;
+    updateBannerState = 'available';
+
+    showUpdateBanner();
+    byId('updateProgress').classList.add('is-hidden');
+
+    const bar = byId('updateProgressBar');
+    bar.classList.remove('downloading');
+    bar.style.width = '0%';
+
+    byId('updateText').textContent = `Version ${activeInfo.version} ${UI_TEXT.updates.available}`;
+    const button = byId<HTMLButtonElement>('updateButton');
+    button.textContent = UI_TEXT.updates.downloadNow;
+    button.disabled = false;
+}
+
+function setDownloadPendingUi(): void {
+    updateReady = false;
+    updateBannerState = 'downloading';
+
+    showUpdateBanner();
+    const button = byId<HTMLButtonElement>('updateButton');
+    button.textContent = UI_TEXT.updates.downloading;
+    button.disabled = true;
+    byId('updateProgress').classList.remove('is-hidden');
+
+    const bar = byId('updateProgressBar');
+    bar.classList.add('downloading');
+    const pendingPct = latestDownloadProgress ? latestDownloadProgress.percent : 30;
+    bar.style.width = `${pendingPct}%`;
+    byId('updateProgressGauge').setAttribute('aria-valuenow', String(Math.round(pendingPct)));
+
+    if (!latestDownloadProgress) {
+        byId('updateText').textContent = `Version ${latestUpdateVersion || '?'} ${UI_TEXT.updates.downloading}`;
+    }
+}
+
+function setDownloadReadyUi(info?: UpdateInfo): void {
+    const activeInfo = rememberUpdateInfo(info);
+    showUpdateBanner();
+    updateReady = true;
+    updateDownloadInProgress = false;
+    updateBannerState = 'ready';
+    latestDownloadProgress = null;
+
+    const bar = byId('updateProgressBar');
+    bar.classList.remove('downloading');
+    bar.style.width = '100%';
+    byId('updateProgressGauge').setAttribute('aria-valuenow', '100');
+
+    byId('updateProgress').classList.remove('is-hidden');
+    byId('updateText').textContent = `Version ${activeInfo.version} ${UI_TEXT.updates.ready}`;
+    const button = byId<HTMLButtonElement>('updateButton');
+    button.textContent = UI_TEXT.updates.installNow;
+    button.disabled = false;
+}
+
+function appendInlineMarkdown(target: HTMLElement, text: string): void {
+    const parts = text.split(/(\*\*[^*]+\*\*)/g);
+
+    for (const part of parts) {
+        if (!part) {
+            continue;
+        }
+
+        const strongMatch = part.match(/^\*\*(.+)\*\*$/);
+        if (strongMatch) {
+            const strong = document.createElement('strong');
+            strong.textContent = strongMatch[1].trim();
+            target.appendChild(strong);
+            continue;
+        }
+
+        target.appendChild(document.createTextNode(part));
+    }
+}
+
+function renderUpdateChangelog(notes?: string): void {
+    const card = byId<HTMLElement>('updateChangelogCard');
+    const panel = byId<HTMLElement>('updateChangelogPanel');
+    const content = byId<HTMLElement>('updateChangelogContent');
+    const empty = byId<HTMLElement>('updateChangelogEmpty');
+    const normalized = (notes || '').replace(/\r/g, '').trim();
+
+    content.innerHTML = '';
+    empty.hidden = true;
+
+    if (!normalized) {
+        card.classList.add('is-hidden');
+        panel.hidden = true;
+        updateChangelogExpanded = false;
+        return;
+    }
+
+    card.classList.remove('is-hidden');
+
+    const fragment = document.createDocumentFragment();
+    let currentList: HTMLUListElement | null = null;
+    let lastBlockWasHeading = false;
+
+    const flushList = (): void => {
+        currentList = null;
+    };
+
+    const ensureList = (): HTMLUListElement => {
+        if (currentList) {
+            return currentList;
+        }
+
+        currentList = document.createElement('ul');
+        currentList.className = 'update-changelog-list';
+        fragment.appendChild(currentList);
+        return currentList;
+    };
+
+    const appendListItem = (line: string): void => {
+        const item = document.createElement('li');
+        appendInlineMarkdown(item, line);
+        ensureList().appendChild(item);
+    };
+
+    for (const rawLine of normalized.split('\n')) {
+        const line = rawLine.trim();
+        if (!line) {
+            flushList();
+            lastBlockWasHeading = false;
+            continue;
+        }
+
+        const boldHeadingMatch = line.match(/^\*\*(.+?)\*\*:?$/);
+        const markdownHeadingMatch = line.match(/^#{1,6}\s+(.+)$/);
+        if (boldHeadingMatch || markdownHeadingMatch) {
+            flushList();
+            const heading = document.createElement('h4');
+            heading.className = 'update-changelog-heading';
+            heading.textContent = (boldHeadingMatch?.[1] || markdownHeadingMatch?.[1] || '').trim();
+            fragment.appendChild(heading);
+            lastBlockWasHeading = true;
+            continue;
+        }
+
+        const listMatch = line.match(/^(?:[-*+]\s+|\d+\.\s+)(.+)$/);
+        if (listMatch) {
+            appendListItem(listMatch[1].trim());
+            lastBlockWasHeading = false;
+            continue;
+        }
+
+        if (lastBlockWasHeading) {
+            appendListItem(line);
+            lastBlockWasHeading = false;
+            continue;
+        }
+
+        flushList();
+        const paragraph = document.createElement('p');
+        paragraph.className = 'update-changelog-paragraph';
+        appendInlineMarkdown(paragraph, line);
+        fragment.appendChild(paragraph);
+        lastBlockWasHeading = false;
+    }
+
+    if (!fragment.childNodes.length) {
+        empty.hidden = false;
+    } else {
+        content.appendChild(fragment);
+    }
+
+    panel.hidden = !updateChangelogExpanded;
+}
+
+function refreshUpdateChangelogToggleText(): void {
+    const toggle = byId<HTMLButtonElement>('updateChangelogToggle');
+    const card = byId<HTMLElement>('updateChangelogCard');
+    if (card.classList.contains('is-hidden')) {
+        return;
+    }
+
+    toggle.textContent = updateChangelogExpanded ? UI_TEXT.updates.hideChangelog : UI_TEXT.updates.showChangelog;
+}
+
+function refreshUpdateModalTexts(): void {
+    const info = getActiveUpdateInfo();
+    const isReady = updateReady;
+
+    byId('updateModalTitle').textContent = isReady
+        ? UI_TEXT.updates.modalReadyTitle
+        : UI_TEXT.updates.modalAvailableTitle;
+    byId('updateModalMessage').textContent = formatUpdateTemplate(
+        isReady ? UI_TEXT.updates.modalReadyMessage : UI_TEXT.updates.modalAvailableMessage,
+        info.version
+    );
+    byId('updateModalDismissBtn').textContent = UI_TEXT.updates.modalDismiss;
+    byId('updateModalConfirmBtn').textContent = isReady
+        ? UI_TEXT.updates.modalInstallConfirm
+        : UI_TEXT.updates.modalDownloadConfirm;
+    // Skip-version only makes sense before the download. Once the .exe is
+    // already on disk and ready to install, hide the button.
+    const skipBtn = byId<HTMLButtonElement>('updateModalSkipBtn');
+    skipBtn.textContent = UI_TEXT.updates.modalSkipVersion;
+    skipBtn.classList.toggle('is-hidden', isReady);
+    byId('updateChangelogLabel').textContent = UI_TEXT.updates.changelogLabel;
+    byId('updateChangelogEmpty').textContent = UI_TEXT.updates.noChangelog;
+
+    const metaText = getUpdateModalMetaText(info);
+    const meta = byId('updateModalMeta');
+    meta.textContent = metaText;
+    meta.classList.toggle('is-hidden', !metaText);
+
+    renderUpdateChangelog(info.releaseNotes);
+    refreshUpdateChangelogToggleText();
+}
+
+function openUpdateModal(info?: UpdateInfo): void {
+    rememberUpdateInfo(info);
+    updateChangelogExpanded = false;
+    byId('updateModal').classList.add('show');
+    refreshUpdateModalTexts();
+}
+
+function dismissUpdateModal(): void {
+    byId('updateModal').classList.remove('show');
+}
+
+function skipUpdateVersion(): void {
+    const v = (latestUpdateInfo?.version || latestUpdateVersion || '').trim();
+    if (v) {
+        persistSkippedUpdateVersion(v);
+    }
+    dismissUpdateModal();
+    hideUpdateBanner();
+    updateBannerState = 'idle';
+    // Note: latestUpdateInfo is intentionally kept so a manual "Check for
+    // updates" can still re-surface the same version if the user changes
+    // their mind (manual checks bypass the skip-version filter).
+}
+
+function confirmUpdateModal(): void {
+    dismissUpdateModal();
+
+    if (updateReady) {
+        void window.api.installUpdate();
+        return;
+    }
+
+    downloadUpdate();
+}
+
+function toggleUpdateChangelog(): void {
+    const card = byId<HTMLElement>('updateChangelogCard');
+    if (card.classList.contains('is-hidden')) {
+        return;
+    }
+
+    updateChangelogExpanded = !updateChangelogExpanded;
+    byId<HTMLElement>('updateChangelogPanel').hidden = !updateChangelogExpanded;
+    refreshUpdateChangelogToggleText();
+}
+
+function handleUpdateModalOverlayClick(event: MouseEvent): void {
+    if (event.target === byId('updateModal')) {
+        dismissUpdateModal();
+    }
+}
+
+function refreshUpdateUiTexts(): void {
+    const button = byId<HTMLButtonElement>('updateButton');
+    const progress = byId('updateProgress');
+    const bar = byId('updateProgressBar');
+
+    if (updateBannerState === 'available' && latestUpdateInfo) {
+        setUpdateBannerAvailableUi(latestUpdateInfo);
+    } else if (updateBannerState === 'downloading') {
+        button.textContent = UI_TEXT.updates.downloading;
+        button.disabled = true;
+        progress.classList.remove('is-hidden');
+        if (latestDownloadProgress) {
+            bar.classList.remove('downloading');
+            bar.style.width = `${latestDownloadProgress.percent}%`;
+            const mb = (latestDownloadProgress.transferred / 1024 / 1024).toFixed(1);
+            const totalMb = (latestDownloadProgress.total / 1024 / 1024).toFixed(1);
+            byId('updateText').textContent = `${UI_TEXT.updates.downloadLabel}: ${mb} / ${totalMb} MB (${latestDownloadProgress.percent.toFixed(0)}%)`;
+        } else {
+            setDownloadPendingUi();
+        }
+    } else if (updateBannerState === 'ready' && latestUpdateInfo) {
+        setDownloadReadyUi(latestUpdateInfo);
+    } else {
+        hideUpdateBanner();
+        progress.classList.add('is-hidden');
+        bar.classList.remove('downloading');
+        bar.style.width = '0%';
+        byId('updateText').textContent = UI_TEXT.updates.bannerDefault;
+        button.textContent = UI_TEXT.updates.downloadNow;
+        button.disabled = false;
+    }
+
+    refreshUpdateModalTexts();
+}
+
+async function checkUpdateSilent(): Promise<void> {
+    try {
+        shouldOpenUpdateModalOnAvailable = true;
+        await window.api.checkUpdate();
+    } catch {
+        shouldOpenUpdateModalOnAvailable = false;
+        // ignore silent updater errors
+    }
+}
+
+async function checkUpdate(): Promise<void> {
+    manualUpdateCheckPending = true;
+    manualUpdateOutcomeHandled = false;
+    shouldOpenUpdateModalOnAvailable = true;
+    setCheckButtonCheckingState(true);
+
+    try {
+        const result = await window.api.checkUpdate();
+
+        if (result?.error) {
+            shouldOpenUpdateModalOnAvailable = false;
+            manualUpdateOutcomeHandled = true;
+            manualUpdateCheckPending = false;
+            updateCheckInProgress = false;
+            setCheckButtonCheckingState(false);
+            notifyUpdate(UI_TEXT.updates.checkFailed, 'warn');
+            return;
+        }
+
+        const skippedReason = result?.skipped;
+        if (skippedReason === 'ready-to-install') {
+            shouldOpenUpdateModalOnAvailable = false;
+            manualUpdateOutcomeHandled = true;
+            manualUpdateCheckPending = false;
+            updateCheckInProgress = false;
+            setCheckButtonCheckingState(false);
+            if (latestUpdateInfo || updateReady) {
+                openUpdateModal(getActiveUpdateInfo());
+            } else {
+                notifyUpdate(UI_TEXT.updates.readyToInstall, 'info');
+            }
+            return;
+        }
+
+        if (skippedReason === 'in-progress' || skippedReason === 'throttled') {
+            shouldOpenUpdateModalOnAvailable = false;
+            manualUpdateOutcomeHandled = true;
+            manualUpdateCheckPending = false;
+            updateCheckInProgress = false;
+            setCheckButtonCheckingState(false);
+            notifyUpdate(UI_TEXT.updates.checkInProgress, 'info');
+            return;
+        }
+
+        manualUpdateCheckPending = false;
+        updateCheckInProgress = false;
+        setCheckButtonCheckingState(false);
+
+        window.setTimeout(() => {
+            if (!manualUpdateOutcomeHandled && !updateReady && !byId('updateBanner').classList.contains('show')) {
+                shouldOpenUpdateModalOnAvailable = false;
+                notifyUpdate(UI_TEXT.updates.latest, 'info');
+            }
+        }, 2500);
+    } catch {
+        shouldOpenUpdateModalOnAvailable = false;
+        manualUpdateOutcomeHandled = true;
+        manualUpdateCheckPending = false;
+        updateCheckInProgress = false;
+        setCheckButtonCheckingState(false);
+        notifyUpdate(UI_TEXT.updates.checkFailed, 'warn');
+    }
+}
+
+function downloadUpdate(): void {
+    if (updateReady) {
+        dismissUpdateModal();
+        void window.api.installUpdate();
+        return;
+    }
+
+    if (updateDownloadInProgress) {
+        notifyUpdate(UI_TEXT.updates.downloadInProgress, 'info');
+        return;
+    }
+
+    updateDownloadInProgress = true;
+    latestDownloadProgress = null;
+    dismissUpdateModal();
+    setDownloadPendingUi();
+
+    void window.api.downloadUpdate().then((result) => {
+        if (result?.error) {
+            updateDownloadInProgress = false;
+            if (latestUpdateInfo) {
+                setUpdateBannerAvailableUi(latestUpdateInfo);
+            }
+            notifyUpdate(UI_TEXT.updates.downloadFailed, 'warn');
+            return;
+        }
+
+        if (result?.skipped === 'ready-to-install') {
+            setDownloadReadyUi(getActiveUpdateInfo());
+            openUpdateModal(getActiveUpdateInfo());
+            return;
+        }
+
+        if (result?.skipped === 'in-progress') {
+            notifyUpdate(UI_TEXT.updates.downloadInProgress, 'info');
+        }
+    }).catch(() => {
+        updateDownloadInProgress = false;
+        if (latestUpdateInfo) {
+            setUpdateBannerAvailableUi(latestUpdateInfo);
+        }
+        notifyUpdate(UI_TEXT.updates.downloadFailed, 'warn');
+    });
+}
+
+window.api.onUpdateChecking(() => {
+    updateCheckInProgress = true;
+    if (manualUpdateCheckPending) {
+        setCheckButtonCheckingState(true);
+    }
+});
+
+window.api.onUpdateAvailable((info: UpdateInfo) => {
+    const activeInfo = rememberUpdateInfo(info);
+    updateCheckInProgress = false;
+    updateReady = false;
+    updateDownloadInProgress = false;
+    const wasManual = manualUpdateCheckPending;
+    manualUpdateCheckPending = false;
+    manualUpdateOutcomeHandled = true;
+    latestDownloadProgress = null;
+    setCheckButtonCheckingState(false);
+
+    // If the user explicitly skipped this exact version, suppress the auto
+    // notification entirely — banner stays hidden, no modal popup. A manual
+    // "Check for updates" click overrides the skip so the user can change
+    // their mind.
+    const isSkipped = getSkippedUpdateVersion() === activeInfo.version;
+    if (isSkipped && !wasManual) {
+        shouldOpenUpdateModalOnAvailable = false;
+        return;
+    }
+
+    setUpdateBannerAvailableUi(activeInfo);
+
+    if (shouldOpenUpdateModalOnAvailable) {
+        openUpdateModal(activeInfo);
+    }
+
+    shouldOpenUpdateModalOnAvailable = false;
+});
+
+
+window.api.onUpdateNotAvailable(() => {
+    updateCheckInProgress = false;
+    setCheckButtonCheckingState(false);
+    manualUpdateOutcomeHandled = true;
+
+    if (manualUpdateCheckPending) {
+        notifyUpdate(UI_TEXT.updates.latest, 'info');
+    }
+
+    shouldOpenUpdateModalOnAvailable = false;
+    manualUpdateCheckPending = false;
+});
+
+window.api.onUpdateDownloadProgress((progress: UpdateDownloadProgress) => {
+    updateDownloadInProgress = true;
+    updateBannerState = 'downloading';
+    latestDownloadProgress = progress;
+
+    const bar = byId('updateProgressBar');
+    bar.classList.remove('downloading');
+    bar.style.width = progress.percent + '%';
+    byId('updateProgressGauge').setAttribute('aria-valuenow', String(Math.round(progress.percent)));
+
+    showUpdateBanner();
+    byId('updateProgress').classList.remove('is-hidden');
+
+    const mb = (progress.transferred / 1024 / 1024).toFixed(1);
+    const totalMb = (progress.total / 1024 / 1024).toFixed(1);
+    byId('updateText').textContent = `${UI_TEXT.updates.downloadLabel}: ${mb} / ${totalMb} MB (${progress.percent.toFixed(0)}%)`;
+});
+
+window.api.onUpdateDownloaded((info: UpdateInfo) => {
+    // Once a version is actually downloaded the user clearly stopped
+    // skipping it — clear the skip flag so future updates aren't masked
+    // by a stale entry.
+    clearSkippedUpdateVersion();
+    const activeInfo = rememberUpdateInfo(info);
+    setDownloadReadyUi(activeInfo);
+    openUpdateModal(activeInfo);
+});
+
+window.api.onUpdateError(() => {
+    updateCheckInProgress = false;
+    const wasDownloading = updateDownloadInProgress;
+    updateDownloadInProgress = false;
+    manualUpdateCheckPending = false;
+    manualUpdateOutcomeHandled = true;
+    shouldOpenUpdateModalOnAvailable = false;
+    setCheckButtonCheckingState(false);
+
+    if (!updateReady && latestUpdateInfo) {
+        setUpdateBannerAvailableUi(latestUpdateInfo);
+    }
+
+    notifyUpdate(wasDownloading ? UI_TEXT.updates.downloadFailed : UI_TEXT.updates.checkFailed, 'warn');
+});
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && byId('updateModal').classList.contains('show')) {
+        dismissUpdateModal();
+    }
+});

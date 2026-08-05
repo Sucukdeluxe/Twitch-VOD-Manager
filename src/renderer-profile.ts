@@ -1,0 +1,218 @@
+// Profile-header renderer. Owns the streamerProfileHeader div above the
+// VOD grid: hidden when no streamer is selected, skeleton while loading,
+// full card once profile data is back. Smooth fade-in is in CSS.
+
+let activeProfileRequestId = 0;
+
+function formatProfileFollowers(count: number | null): string {
+    if (count == null) return '–';
+    if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(count >= 10_000_000 ? 0 : 1)}M`;
+    if (count >= 1_000) return `${(count / 1_000).toFixed(count >= 10_000 ? 0 : 1)}K`;
+    return String(count);
+}
+
+function formatLastStreamAgo(iso: string | null): string {
+    if (!iso) return '–';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return '–';
+    const minutes = Math.floor(ms / 60_000);
+    if (minutes < 60) return UI_TEXT.profile.agoMinutes.replace('{n}', String(minutes));
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return UI_TEXT.profile.agoHours.replace('{n}', String(hours));
+    const days = Math.floor(hours / 24);
+    if (days < 30) return UI_TEXT.profile.agoDays.replace('{n}', String(days));
+    const months = Math.floor(days / 30);
+    if (months < 12) return UI_TEXT.profile.agoMonths.replace('{n}', String(months));
+    const years = Math.floor(days / 365);
+    return UI_TEXT.profile.agoYears.replace('{n}', String(years));
+}
+
+function hideStreamerProfileHeader(): void {
+    const el = document.getElementById('streamerProfileHeader');
+    if (!el) return;
+    el.classList.add('is-hidden');
+    applyHtml(el, '');
+}
+
+function renderStreamerProfileSkeleton(login: string): void {
+    const el = document.getElementById('streamerProfileHeader');
+    if (!el) return;
+    el.classList.remove('is-live', 'is-hidden');
+    el.classList.add('streamer-profile-skeleton');
+    applyHtml(el, `
+        <div class="streamer-profile-skel-block avatar"></div>
+        <div class="streamer-profile-body">
+            <div class="streamer-profile-name-row">
+                <div class="streamer-profile-skel-block name"></div>
+                <div class="streamer-profile-skel-block badge"></div>
+            </div>
+            <div class="streamer-profile-skel-block subtitle"></div>
+            <div class="streamer-profile-stats streamer-profile-skel-stats">
+                <div class="streamer-profile-skel-block" style="width:100px; height:14px;"></div>
+                <div class="streamer-profile-skel-block" style="width:80px; height:14px;"></div>
+                <div class="streamer-profile-skel-block" style="width:120px; height:14px;"></div>
+            </div>
+        </div>
+    `);
+}
+
+function renderStreamerProfileCard(p: StreamerProfile): void {
+    const el = document.getElementById('streamerProfileHeader');
+    if (!el) return;
+    el.classList.remove('streamer-profile-skeleton', 'is-hidden');
+    if (p.isLive) el.classList.add('is-live'); else el.classList.remove('is-live');
+
+    const safeLogin = p.login.replace(/'/g, "\\'");
+    const safeUrl = p.twitchUrl.replace(/'/g, "\\'");
+
+    const avatarBlock = p.avatarUrl
+        ? `<img class="streamer-profile-avatar${p.isLive ? ' is-live' : ''}" src="${escapeHtml(p.avatarUrl)}" alt="${escapeHtml(p.displayName)}" referrerpolicy="no-referrer" onerror="onProfileAvatarError(this)">`
+        : `<div class="streamer-profile-avatar-fallback">${escapeHtml((p.displayName || p.login || '?').slice(0, 1).toUpperCase())}</div>`;
+
+    const badges: string[] = [];
+    if (p.broadcasterType === 'partner') badges.push(`<span class="streamer-profile-badge partner">${escapeHtml(UI_TEXT.profile.partner)}</span>`);
+    if (p.broadcasterType === 'affiliate') badges.push(`<span class="streamer-profile-badge affiliate">${escapeHtml(UI_TEXT.profile.affiliate)}</span>`);
+
+    const bio = p.description
+        ? `<div class="streamer-profile-bio" title="${escapeHtml(p.description)}">${escapeHtml(p.description)}</div>`
+        : '';
+
+    const followersStat = `
+        <div class="streamer-profile-stat" title="${escapeHtml(UI_TEXT.profile.followers)}">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+            <strong>${escapeHtml(formatProfileFollowers(p.followerCount))}</strong> ${escapeHtml(UI_TEXT.profile.followers)}
+        </div>`;
+    const vodsStat = `
+        <div class="streamer-profile-stat" title="${escapeHtml(UI_TEXT.profile.vodsTooltip)}">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>
+            <strong>${p.vodCount}</strong> ${escapeHtml(UI_TEXT.profile.vods)}
+        </div>`;
+    const lastStreamStat = `
+        <div class="streamer-profile-stat" title="${p.lastStreamAt ? escapeHtml(new Date(p.lastStreamAt).toLocaleString()) : ''}">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+            ${escapeHtml(UI_TEXT.profile.lastStream)}: <strong>${escapeHtml(formatLastStreamAgo(p.lastStreamAt))}</strong>
+        </div>`;
+
+    // Banner-as-background — set inline so the URL stays per-streamer.
+    // The darkening gradient is handled by the .streamer-profile-header::before
+    // pseudo so the banner itself stays bright and unfiltered here.
+    const bannerStyle = p.bannerUrl
+        ? `background-image: url("${p.bannerUrl.replace(/"/g, '%22')}");`
+        : '';
+
+    // Live preview block — only when currently live. Big card with
+    // current preview frame + viewer count + title + game + record CTA.
+    const liveCard = p.isLive
+        ? `
+            <div class="streamer-profile-live-card" role="button" tabindex="0" aria-label="${escapeHtml(UI_TEXT.profile.liveCardTooltip)}" onclick="triggerLiveRecordingFromProfile('${safeLogin}')" onkeydown="if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();triggerLiveRecordingFromProfile('${safeLogin}');}" title="${escapeHtml(UI_TEXT.profile.liveCardTooltip)}">
+                ${p.currentStreamPreviewUrl
+                    ? `<img class="streamer-profile-live-thumb" src="${escapeHtml(p.currentStreamPreviewUrl)}" alt="${escapeHtml(UI_TEXT.profile.liveThumbAlt)}" onerror="onProfileLivePreviewError(this)">`
+                    : `<div class="streamer-profile-live-thumb-fallback"></div>`}
+                <div class="streamer-profile-live-body">
+                    <div class="streamer-profile-live-badge-row">
+                        <span class="streamer-profile-badge live">${escapeHtml(UI_TEXT.profile.liveBadge)}</span>
+                        ${typeof p.currentStreamViewers === 'number' ? `<span class="streamer-profile-live-viewers"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg> ${escapeHtml(formatProfileFollowers(p.currentStreamViewers))}</span>` : ''}
+                    </div>
+                    ${p.currentTitle ? `<div class="streamer-profile-live-title">${escapeHtml(p.currentTitle)}</div>` : ''}
+                    ${p.currentGame ? `<div class="streamer-profile-live-game">${escapeHtml(p.currentGame)}</div>` : ''}
+                    <button type="button" class="streamer-profile-btn primary streamer-profile-live-rec-btn" onclick="event.stopPropagation(); triggerLiveRecordingFromProfile('${safeLogin}')">${escapeHtml(UI_TEXT.profile.recordNow)}</button>
+                </div>
+            </div>
+        ` : '';
+
+    applyHtml(el, `
+        ${bannerStyle ? `<div class="streamer-profile-banner-bg" style="${bannerStyle}"></div>` : ''}
+        <div class="streamer-profile-row">
+            <div class="streamer-profile-avatar-wrap" role="button" tabindex="0" aria-label="${escapeHtml(UI_TEXT.profile.openTwitchTooltip)}" onclick="openTwitchChannel('${safeUrl}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openTwitchChannel('${safeUrl}');}" title="${escapeHtml(UI_TEXT.profile.openTwitchTooltip)}">
+                ${avatarBlock}
+            </div>
+            <div class="streamer-profile-body">
+                <div class="streamer-profile-name-row">
+                    <span class="streamer-profile-display-name">${escapeHtml(p.displayName)}</span>
+                    <span class="streamer-profile-login">@${escapeHtml(p.login)}</span>
+                    ${badges.join('')}
+                </div>
+                ${bio}
+                <div class="streamer-profile-stats">
+                    ${followersStat}
+                    ${vodsStat}
+                    ${lastStreamStat}
+                </div>
+            </div>
+            <div class="streamer-profile-actions">
+                <button type="button" class="streamer-profile-btn primary" onclick="openTwitchChannel('${safeUrl}')">${escapeHtml(UI_TEXT.profile.openTwitch)}</button>
+                <button type="button" class="streamer-profile-btn" onclick="refreshStreamerProfile('${safeLogin}')">${escapeHtml(UI_TEXT.profile.refresh)}</button>
+            </div>
+        </div>
+        ${liveCard}
+    `);
+}
+
+function onProfileLivePreviewError(img: HTMLImageElement): void {
+    const parent = img.parentElement;
+    if (!parent) return;
+    const fallback = document.createElement('div');
+    fallback.className = 'streamer-profile-live-thumb-fallback';
+    parent.replaceChild(fallback, img);
+}
+
+function triggerLiveRecordingFromProfile(login: string): void {
+    const fn = (window as unknown as { triggerLiveRecording?: (login: string) => Promise<void> }).triggerLiveRecording;
+    if (typeof fn === 'function') void fn(login);
+}
+
+async function loadStreamerProfile(login: string, forceRefresh = false): Promise<void> {
+    if (!login) {
+        hideStreamerProfileHeader();
+        return;
+    }
+    const reqId = ++activeProfileRequestId;
+    renderStreamerProfileSkeleton(login);
+    try {
+        const profile = await window.api.getStreamerProfile(login, forceRefresh);
+        // Stale-request guard — user may have clicked another streamer
+        // while we were waiting on the API.
+        if (reqId !== activeProfileRequestId) return;
+        if (!profile) {
+            hideStreamerProfileHeader();
+            return;
+        }
+        renderStreamerProfileCard(profile);
+    } catch (_) {
+        if (reqId === activeProfileRequestId) hideStreamerProfileHeader();
+    }
+}
+
+function refreshStreamerProfile(login: string): void {
+    void loadStreamerProfile(login, true);
+}
+
+function openTwitchChannel(url: string): void {
+    void window.api.openExternal(url);
+}
+
+function onProfileAvatarError(img: HTMLImageElement): void {
+    // Avatar URL hit a 404 or CORS oddity. Swap to the fallback letter
+    // tile so we don't end up with a broken-image icon.
+    const parent = img.parentElement;
+    if (!parent) return;
+    const fallback = document.createElement('div');
+    fallback.className = 'streamer-profile-avatar-fallback';
+    const alt = img.getAttribute('alt') || '';
+    fallback.textContent = (alt || '?').slice(0, 1).toUpperCase();
+    parent.replaceChild(fallback, img);
+}
+
+(window as unknown as {
+    loadStreamerProfile: typeof loadStreamerProfile;
+    refreshStreamerProfile: typeof refreshStreamerProfile;
+    hideStreamerProfileHeader: typeof hideStreamerProfileHeader;
+    openTwitchChannel: typeof openTwitchChannel;
+    onProfileAvatarError: typeof onProfileAvatarError;
+}).loadStreamerProfile = loadStreamerProfile;
+(window as unknown as { refreshStreamerProfile: typeof refreshStreamerProfile }).refreshStreamerProfile = refreshStreamerProfile;
+(window as unknown as { hideStreamerProfileHeader: typeof hideStreamerProfileHeader }).hideStreamerProfileHeader = hideStreamerProfileHeader;
+(window as unknown as { openTwitchChannel: typeof openTwitchChannel }).openTwitchChannel = openTwitchChannel;
+(window as unknown as { onProfileAvatarError: typeof onProfileAvatarError }).onProfileAvatarError = onProfileAvatarError;
+(window as unknown as { onProfileLivePreviewError: typeof onProfileLivePreviewError }).onProfileLivePreviewError = onProfileLivePreviewError;
+(window as unknown as { triggerLiveRecordingFromProfile: typeof triggerLiveRecordingFromProfile }).triggerLiveRecordingFromProfile = triggerLiveRecordingFromProfile;

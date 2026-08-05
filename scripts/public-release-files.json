@@ -1,0 +1,24 @@
+{
+  "files": [
+    ".gitignore",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+    "assets",
+    "build",
+    "eslint.config.mjs",
+    "package-lock.json",
+    "package.json",
+    "scripts/public-release-files.json",
+    "scripts/smoke-test-full.js",
+    "scripts/smoke-test-merge-split-logic.js",
+    "scripts/smoke-test-public-release-config.js",
+    "scripts/smoke-test-settings-autosave.js",
+    "scripts/smoke-test-template-guide.js",
+    "scripts/smoke-test-update-version-logic.js",
+    "scripts/smoke-test.js",
+    "src",
+    "tsconfig.json",
+    "vitest.config.ts"
+  ]
+}

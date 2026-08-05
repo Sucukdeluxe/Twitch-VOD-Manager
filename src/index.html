@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:;">
+    <title>Twitch VOD Manager</title>
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="theme-twitch">
+    <div class="update-banner" id="updateBanner">
+        <span id="updateText">Neue Version verfügbar!</span>
+        <div id="updateProgress" class="update-banner-progress-wrap is-hidden">
+            <div class="update-banner-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Update download" id="updateProgressGauge">
+                <div id="updateProgressBar" class="update-banner-progress-bar"></div>
+            </div>
+        </div>
+        <button type="button" id="updateButton" onclick="downloadUpdate()">Jetzt herunterladen</button>
+    </div>
+
+    <div class="modal-overlay" id="updateModal" role="dialog" aria-modal="true" aria-labelledby="updateModalTitle" onclick="handleUpdateModalOverlayClick(event)">
+        <div class="modal update-modal">
+            <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="dismissUpdateModal()">x</button>
+            <div class="update-modal-eyebrow" id="updateModalEyebrow">Updates</div>
+            <h2 id="updateModalTitle">Update verfugbar</h2>
+            <p class="update-modal-message" id="updateModalMessage">Version 0.0.0 ist verfugbar. Jetzt herunterladen?</p>
+            <div class="update-modal-meta is-hidden" id="updateModalMeta"></div>
+
+            <div class="update-changelog-card is-hidden" id="updateChangelogCard">
+                <div class="update-changelog-header">
+                    <span class="update-changelog-label" id="updateChangelogLabel">Changelog</span>
+                    <button type="button" class="update-changelog-toggle" id="updateChangelogToggle" onclick="toggleUpdateChangelog()">Changelog anzeigen</button>
+                </div>
+                <div class="update-changelog-panel" id="updateChangelogPanel" hidden>
+                    <div class="update-changelog-content" id="updateChangelogContent"></div>
+                    <p class="update-changelog-empty" id="updateChangelogEmpty" hidden>Kein Changelog verfugbar.</p>
+                </div>
+            </div>
+
+            <div class="modal-actions update-modal-actions">
+                <button class="btn-secondary" id="updateModalDismissBtn" type="button" onclick="dismissUpdateModal()">Nein</button>
+                <button class="btn-secondary" id="updateModalSkipBtn" type="button" onclick="skipUpdateVersion()">Diese Version ueberspringen</button>
+                <button class="btn-primary" id="updateModalConfirmBtn" type="button" onclick="confirmUpdateModal()">Ja, herunterladen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Clip Dialog Modal -->
+    <div class="modal-overlay" id="clipModal" role="dialog" aria-modal="true" aria-labelledby="clipDialogTitle">
+        <div class="modal clip-modal">
+            <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="closeClipDialog()">x</button>
+            <h2 class="clip-modal-title" id="clipDialogTitle">VOD zuschneiden</h2>
+
+            <div class="clip-modal-field">
+                <label class="clip-modal-label" id="clipDialogStartLabel" for="clipStartSlider">Start:</label>
+                <input type="range" id="clipStartSlider" min="0" max="100" value="0" oninput="updateFromSlider('start')">
+                <div class="clip-modal-time-row">
+                    <label class="clip-modal-meta" id="clipDialogStartTimeLabel" for="clipStartTime">Startzeit (HH:MM:SS):</label>
+                    <input type="text" id="clipStartTime" value="00:00:00" class="clip-modal-time-input" onchange="updateFromInput('start')">
+                </div>
+            </div>
+
+            <div class="clip-modal-field">
+                <label class="clip-modal-label" id="clipDialogEndLabel" for="clipEndSlider">Ende:</label>
+                <input type="range" id="clipEndSlider" min="0" max="100" value="60" oninput="updateFromSlider('end')">
+                <div class="clip-modal-time-row">
+                    <label class="clip-modal-meta" id="clipDialogEndTimeLabel" for="clipEndTime">Endzeit (HH:MM:SS):</label>
+                    <input type="text" id="clipEndTime" value="00:01:00" class="clip-modal-time-input" onchange="updateFromInput('end')">
+                </div>
+            </div>
+
+            <div class="clip-modal-duration">
+                <span id="clipDialogDurationLabel" class="clip-modal-meta">Dauer: </span>
+                <span id="clipDurationDisplay" class="clip-modal-duration-value">00:01:00</span>
+            </div>
+
+            <div class="clip-modal-field">
+                <label class="clip-modal-label" id="clipDialogPartLabel" for="clipStartPart">Start Part-Nummer (optional, fur Fortsetzung):</label>
+                <input type="text" id="clipStartPart" placeholder="z.B. 42" class="clip-modal-part-input" oninput="updateFilenameExamples()">
+                <div id="clipDialogPartHint" class="clip-modal-hint">Leer lassen = Teil 1</div>
+            </div>
+
+            <div class="clip-modal-field">
+                <label class="clip-modal-label" id="clipDialogFormatLabel">Dateinamen-Format:</label>
+                <label class="clip-radio-row">
+                    <input type="radio" name="filenameFormat" value="simple" checked onchange="updateFilenameExamples()">
+                    <span id="formatSimple" class="clip-radio-label">01.02.2026_1.mp4 (Standard)</span>
+                </label>
+                <label class="clip-radio-row">
+                    <input type="radio" name="filenameFormat" value="timestamp" onchange="updateFilenameExamples()">
+                    <span id="formatTimestamp" class="clip-radio-label">01.02.2026_CLIP_00-00-00_1.mp4 (mit Zeitstempel)</span>
+                </label>
+                <label class="clip-radio-row">
+                    <input type="radio" name="filenameFormat" value="parts" onchange="updateFilenameExamples()">
+                    <span id="formatParts" class="clip-radio-label">01.02.2026_Part01.mp4 (Parts-Format)</span>
+                </label>
+                <label class="clip-radio-row">
+                    <input type="radio" name="filenameFormat" value="template" onchange="updateFilenameExamples()">
+                    <span id="formatTemplate" class="clip-radio-label">{date}_{part}.mp4 (benutzerdefiniert)</span>
+                </label>
+
+                <div id="clipFilenameTemplateWrap" class="clip-template-wrap">
+                    <input type="text" id="clipFilenameTemplate" value="{date}_{part}.mp4" placeholder="{date}_{part}.mp4" class="clip-modal-template-input" oninput="updateFilenameExamples()">
+                    <div id="clipTemplateHelp" class="clip-modal-hint">Platzhalter: {title} {id} {channel} {date} {part} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}</div>
+                    <div id="clipTemplateLint" class="template-lint ok">Template-Check: OK</div>
+                    <button type="button" class="btn-secondary" id="clipTemplateGuideBtn" onclick="openTemplateGuide('clip')">Template Guide</button>
+                </div>
+            </div>
+
+            <div class="clip-modal-actions">
+                <button type="button" class="btn-pill success" id="clipDialogConfirmBtn" style="padding: 12px 30px;" onclick="confirmClipDialog()">Zur Queue hinzufugen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Events Viewer Modal -->
+    <div class="modal-overlay" id="eventsViewerModal" role="dialog" aria-modal="true" aria-labelledby="eventsViewerTitle">
+        <div class="modal viewer-modal viewer-modal-events">
+            <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="closeEventsViewer()">x</button>
+            <h2 id="eventsViewerTitle" class="viewer-modal-title"></h2>
+            <div id="eventsViewerStatus" class="viewer-modal-status" role="status" aria-live="polite"></div>
+            <div id="eventsViewerList" class="viewer-modal-list"></div>
+        </div>
+    </div>
+
+    <!-- Chat Replay Viewer Modal -->
+    <div class="modal-overlay" id="chatViewerModal" role="dialog" aria-modal="true" aria-labelledby="chatViewerTitle">
+        <div class="modal viewer-modal viewer-modal-chat">
+            <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="closeChatViewer()">x</button>
+            <h2 id="chatViewerTitle" class="viewer-modal-title"></h2>
+            <div class="viewer-modal-filter-row">
+                <input type="text" id="chatViewerFilter" class="viewer-modal-filter-input" placeholder="Filter..." oninput="onChatViewerFilterChange()">
+                <span id="chatViewerStatus" class="viewer-modal-status viewer-modal-status-inline" role="status" aria-live="polite"></span>
+            </div>
+            <div id="chatViewerList" class="viewer-modal-list viewer-modal-list-chat"></div>
+        </div>
+    </div>
+
+    <!-- Template Guide Modal -->
+    <div class="modal-overlay" id="templateGuideModal" role="dialog" aria-modal="true" aria-labelledby="templateGuideTitle">
+        <div class="modal template-guide-modal">
+            <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="closeTemplateGuide()">x</button>
+            <h2 id="templateGuideTitle">Template Guide</h2>
+            <p id="templateGuideIntro" class="template-guide-intro">Nutze Variablen fur Dateinamen und prufe das Ergebnis als Live-Vorschau.</p>
+
+            <div class="template-guide-actions">
+                <button type="button" class="btn-secondary" id="templateGuideUseVod" onclick="setTemplateGuidePreset('vod')">VOD Template</button>
+                <button type="button" class="btn-secondary" id="templateGuideUseParts" onclick="setTemplateGuidePreset('parts')">VOD Part Template</button>
+                <button type="button" class="btn-secondary" id="templateGuideUseClip" onclick="setTemplateGuidePreset('clip')">Clip Template</button>
+            </div>
+
+            <label id="templateGuideTemplateLabel" for="templateGuideInput" class="template-guide-label">Template</label>
+            <input type="text" id="templateGuideInput" class="template-guide-input" oninput="updateTemplateGuidePreview()" placeholder="{title}.mp4">
+
+            <div class="template-guide-preview-box">
+                <div class="template-guide-preview-label" id="templateGuideOutputLabel">Live Vorschau</div>
+                <div id="templateGuideOutput" class="template-guide-output">-</div>
+                <div id="templateGuideContext" class="template-guide-context"></div>
+            </div>
+
+            <h3 id="templateGuideVarsTitle" class="template-guide-vars-title">Verfugbare Variablen</h3>
+            <div class="template-guide-table-wrap">
+                <table class="template-guide-table" aria-labelledby="templateGuideVarsTitle">
+                    <thead>
+                        <tr>
+                            <th id="templateGuideVarCol" scope="col">Variable</th>
+                            <th id="templateGuideDescCol" scope="col">Beschreibung</th>
+                            <th id="templateGuideExampleCol" scope="col">Beispiel</th>
+                        </tr>
+                    </thead>
+                    <tbody id="templateGuideBody"></tbody>
+                </table>
+            </div>
+
+            <div class="template-guide-footer">
+                <button type="button" class="btn-secondary" id="templateGuideCloseBtn" onclick="closeTemplateGuide()">Schliessen</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="app">
+        <aside class="sidebar">
+            <div class="logo">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>
+                <span id="logoText">Twitch VOD Manager</span>
+            </div>
+
+            <nav class="nav">
+                <div class="nav-item active" role="button" tabindex="0" aria-current="page" data-tab="vods" onclick="showTab('vods')">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM9 8l7 4-7 4V8z"/></svg>
+                    <span id="navVodsText">Twitch VODs</span>
+                </div>
+                <div class="nav-item" role="button" tabindex="0" data-tab="clips" onclick="showTab('clips')">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+                    <span id="navClipsText">Twitch Clips</span>
+                </div>
+                <div class="nav-item" role="button" tabindex="0" data-tab="cutter" onclick="showTab('cutter')">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm0 12c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm6-7.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zM19 3l-6 6 2 2 7-7V3h-3z"/></svg>
+                    <span id="navCutterText">Video schneiden</span>
+                </div>
+                <div class="nav-item" role="button" tabindex="0" data-tab="merge" onclick="showTab('merge')">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z"/></svg>
+                    <span id="navMergeText">Videos zusammenfugen</span>
+                </div>
+                <div class="nav-item" role="button" tabindex="0" data-tab="stats" onclick="showTab('stats')">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h2v8H3zm4-7h2v15H7zm4 4h2v11h-2zm4 4h2v7h-2zm4-8h2v15h-2z"/></svg>
+                    <span id="navStatsText">Statistik</span>
+                </div>
+                <div class="nav-item" role="button" tabindex="0" data-tab="archive" onclick="showTab('archive')">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                    <span id="navArchiveText">Archiv</span>
+                </div>
+                <div class="nav-item" role="button" tabindex="0" data-tab="settings" onclick="showTab('settings')">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                    <span id="navSettingsText">Einstellungen</span>
+                </div>
+            </nav>
+
+            <div class="section-title" id="streamerSectionTitle">
+                <span class="section-title-label">
+                    <span id="streamerSectionTitleText">Streamer</span>
+                    <span id="streamerSectionCounter" class="streamer-section-counter"></span>
+                </span>
+                <button id="btnStreamerBulkRemove" class="btn-close is-hidden" type="button" onclick="bulkRemoveStreamers()" title="Bulk remove">x</button>
+            </div>
+            <input type="text" id="streamerListFilter" class="filter-input compact is-hidden" placeholder="Filter..." oninput="onStreamerListFilterChange()">
+            <div class="streamers" id="streamerList"></div>
+
+            <div class="queue-section">
+                <div class="queue-header">
+                    <span class="queue-title" id="queueTitleText">Warteschlange</span>
+                    <span class="queue-count" id="queueCount">0</span>
+                </div>
+                <div class="queue-list" id="queueList"></div>
+                <div class="queue-actions">
+                    <button type="button" class="btn btn-start" id="btnStart" onclick="toggleDownload()">Start</button>
+                    <button type="button" class="btn btn-merge-group is-hidden" id="btnMergeGroup" onclick="createMergeGroupFromSelection()">Merge &amp; Split</button>
+                    <button type="button" class="btn btn-retry" id="btnRetryFailed" onclick="retryFailedDownloads()" title="Nur fehlgeschlagene Downloads erneut starten">Wiederholen</button>
+                    <button type="button" class="btn btn-clear" id="btnClear" onclick="clearCompleted()">Leeren</button>
+                </div>
+            </div>
+            <div class="stats-bar" id="statsBar"></div>
+        </aside>
+
+        <main class="main">
+            <header class="header">
+                <h1 id="pageTitle">VODs</h1>
+                <div class="header-actions">
+                    <div class="header-search">
+                        <input type="text" id="newStreamer" placeholder="Streamer hinzufugen..." onkeypress="if(event.key==='Enter')addStreamer()">
+                        <button id="btnAddStreamer" type="button" onclick="addStreamer()" aria-label="Add streamer" title="Add streamer">+</button>
+                    </div>
+                    <button type="button" class="btn-icon" onclick="refreshVODs()">
+                        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                        <span id="refreshText">Aktualisieren</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="content">
+                <!-- VODs Tab -->
+                <div class="tab-content active" id="vodsTab">
+                    <div id="streamerProfileHeader" class="streamer-profile-header is-hidden"></div>
+                    <div class="vod-filter-row">
+                        <input type="text" id="vodFilterInput" class="filter-input" placeholder="Filter VODs..." oninput="onVodFilterInput()">
+                        <button type="button" id="vodFilterClearBtn" class="btn-close is-hidden" onclick="clearVodFilter()" title="Clear filter">x</button>
+                        <label id="vodSortLabel" for="vodSortSelect" class="form-sublabel vod-sort-label">Sort:</label>
+                        <select id="vodSortSelect" class="select-compact" onchange="onVodSortChange()">
+                            <option value="date_desc">Newest first</option>
+                            <option value="date_asc">Oldest first</option>
+                            <option value="views_desc">Most viewed</option>
+                            <option value="duration_desc">Longest first</option>
+                            <option value="duration_asc">Shortest first</option>
+                        </select>
+                        <span id="vodFilterCount" class="form-sublabel vod-filter-count"></span>
+                        <label id="vodHideDownloadedLabel" class="inline-toggle" title="">
+                            <input type="checkbox" id="vodHideDownloadedToggle" onchange="onVodHideDownloadedChange()">
+                            <span id="vodHideDownloadedText">Hide downloaded</span>
+                        </label>
+                    </div>
+                    <div id="vodBulkBar" class="vod-bulk-bar is-hidden">
+                        <span id="vodBulkCount" class="vod-bulk-count">0 selected</span>
+                        <span class="vod-bulk-spacer"></span>
+                        <button id="vodBulkAddBtn" class="btn-pill primary" type="button" onclick="bulkAddSelectedVodsToQueue()">+ Queue</button>
+                        <button id="vodBulkMarkBtn" class="btn-pill" type="button" onclick="bulkMarkSelectedDownloaded(true)">Mark as downloaded</button>
+                        <button id="vodBulkUnmarkBtn" class="btn-pill" type="button" onclick="bulkMarkSelectedDownloaded(false)">Unmark</button>
+                        <button id="vodBulkClearBtn" class="btn-pill" type="button" onclick="clearVodSelection()">Clear</button>
+                    </div>
+                    <div class="vod-grid" id="vodGrid">
+                        <div class="empty-state">
+                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-4 5-4v8zm2-8l5 4-5 4V9z"/></svg>
+                            <h3 id="vodGridEmptyTitle">Keine VODs</h3>
+                            <p id="vodGridEmptyText">Wahle einen Streamer aus der Liste oder fuge einen neuen hinzu.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Clips Tab -->
+                <div class="tab-content" id="clipsTab">
+                    <div class="clip-input">
+                        <h2 id="clipsHeading">Twitch Clip-Download</h2>
+                        <input type="text" id="clipUrl" placeholder="https://clips.twitch.tv/... oder https://www.twitch.tv/.../clip/...">
+                        <button type="button" class="btn-primary" onclick="downloadClip()" id="btnClip">Clip herunterladen</button>
+                        <div class="clip-status" id="clipStatus" role="status" aria-live="polite"></div>
+                    </div>
+
+                    <div class="settings-card centered">
+                        <h3 id="clipsInfoTitle">Info</h3>
+                        <p id="clipsInfoText" class="info-text">
+                            Unterstutzte Formate:
+                            - https://clips.twitch.tv/ClipName
+                            - https://www.twitch.tv/streamer/clip/ClipName
+
+                            Clips werden im Download-Ordner unter "Clips/StreamerName/" gespeichert.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Video Cutter Tab -->
+                <div class="tab-content" id="cutterTab">
+                    <div class="cutter-container">
+                        <div class="settings-card">
+                            <h3 id="cutterSelectTitle">Video auswahlen</h3>
+                            <div class="form-row">
+                                <input type="text" id="cutterFilePath" readonly placeholder="Keine Datei ausgewahlt...">
+                                <button type="button" class="btn-secondary" id="cutterBrowseBtn" onclick="selectCutterVideo()">Durchsuchen</button>
+                            </div>
+                        </div>
+
+                        <div class="video-preview" id="cutterPreview">
+                            <div class="placeholder">
+                                <svg aria-hidden="true" width="64" height="64" viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM9 8l7 4-7 4V8z"/></svg>
+                                <p id="cutterPreviewPlaceholder">Video auswaehlen um Vorschau zu sehen</p>
+                            </div>
+                        </div>
+
+                        <div class="cutter-info" id="cutterInfo">
+                            <div class="cutter-info-item">
+                                <span class="cutter-info-label" id="cutterInfoDurationLabel">Dauer</span>
+                                <span class="cutter-info-value" id="infoDuration">--:--:--</span>
+                            </div>
+                            <div class="cutter-info-item">
+                                <span class="cutter-info-label" id="cutterInfoResolutionLabel">Aufloesung</span>
+                                <span class="cutter-info-value" id="infoResolution">----x----</span>
+                            </div>
+                            <div class="cutter-info-item">
+                                <span class="cutter-info-label" id="cutterInfoFpsLabel">FPS</span>
+                                <span class="cutter-info-value" id="infoFps">--</span>
+                            </div>
+                            <div class="cutter-info-item">
+                                <span class="cutter-info-label" id="cutterInfoSelectionLabel">Auswahl</span>
+                                <span class="cutter-info-value" id="infoSelection">--:--:--</span>
+                            </div>
+                        </div>
+
+                        <div class="timeline-container" id="timelineContainer">
+                            <div class="timeline" id="timeline" onclick="seekTimeline(event)">
+                                <div class="timeline-selection" id="timelineSelection"></div>
+                                <div class="timeline-current" id="timelineCurrent"></div>
+                            </div>
+
+                            <div class="time-inputs">
+                                <div class="time-input-group">
+                                    <label id="cutterStartLabel" for="startTime">Start:</label>
+                                    <input type="text" id="startTime" value="00:00:00" onchange="updateTimeFromInput()">
+                                </div>
+                                <div class="time-input-group">
+                                    <label id="cutterEndLabel" for="endTime">Ende:</label>
+                                    <input type="text" id="endTime" value="00:00:00" onchange="updateTimeFromInput()">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="progress-container" id="cutProgress">
+                            <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Cut progress" id="cutProgressGauge">
+                                <div class="progress-bar-fill" id="cutProgressBar"></div>
+                            </div>
+                            <div class="progress-text" id="cutProgressText">0%</div>
+                        </div>
+
+                        <div class="cutter-actions">
+                            <button type="button" class="btn-primary" id="btnCut" onclick="startCutting()" disabled>Schneiden</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Merge Tab -->
+                <div class="tab-content" id="mergeTab">
+                    <div class="merge-container">
+                        <div class="settings-card">
+                            <h3 id="mergeTitle">Videos zusammenfugen</h3>
+                            <p id="mergeDesc" class="card-intro">
+                                Wahle mehrere Videos aus um sie zu einem Video zusammenzufugen.
+                                Die Reihenfolge kann per Drag & Drop geandert werden.
+                            </p>
+                            <button type="button" class="btn-secondary" id="mergeAddBtn" onclick="addMergeFiles()">+ Videos hinzufugen</button>
+                        </div>
+
+                        <div class="file-list" id="mergeFileList">
+                            <div class="empty-state merge-empty-state">
+                                <svg aria-hidden="true" width="48" height="48" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                                <p id="mergeEmptyText">Keine Videos ausgewahlt</p>
+                            </div>
+                        </div>
+
+                        <div class="progress-container" id="mergeProgress">
+                            <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Merge progress" id="mergeProgressGauge">
+                                <div class="progress-bar-fill" id="mergeProgressBar"></div>
+                            </div>
+                            <div class="progress-text" id="mergeProgressText">0%</div>
+                        </div>
+
+                        <div class="merge-actions">
+                            <button type="button" class="btn-primary" id="btnMerge" onclick="startMerging()" disabled>Zusammenfugen</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Statistics Tab -->
+                <div class="tab-content" id="statsTab">
+                    <div class="settings-card">
+                        <div class="form-row section-header">
+                            <h3 id="statsTitle">Archiv-Statistik</h3>
+                            <div class="section-header-actions">
+                                <span id="statsLastScannedLabel" class="form-sublabel" role="status" aria-live="polite"></span>
+                                <button type="button" class="btn-secondary" id="btnStatsRefresh" onclick="refreshArchiveStats()">Aktualisieren</button>
+                            </div>
+                        </div>
+                        <p id="statsIntro" class="card-intro flush">Aggregiert ueber den Download-Ordner. Live-Aufnahmen liegen unter <code>{streamer}/live/</code>, VOD-Downloads direkt unter <code>{streamer}/</code>. Lade-Zeit skaliert mit der Anzahl Dateien.</p>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="statsSummaryTitle">Uebersicht</h3>
+                        <div id="statsSummaryGrid" class="stats-summary-grid"></div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="statsTopStreamersTitle">Top Streamer (nach Groesse)</h3>
+                        <div id="statsTopStreamers"></div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="statsActivityTitle">Aktivitaet (letzte 30 Tage)</h3>
+                        <div id="statsActivity"></div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="statsSizeBucketsTitle">Aufnahme-Groessen-Verteilung</h3>
+                        <div id="statsSizeBuckets"></div>
+                    </div>
+                </div>
+
+                <!-- Archive Search Tab -->
+                <div class="tab-content" id="archiveTab">
+                    <div class="settings-card">
+                        <h3 id="archiveTitle">Archiv durchsuchen</h3>
+                        <p id="archiveIntro" class="card-intro">Suche nach Dateinamen, Streamern oder Datum-Strings. Treffer zeigen Recordings (Live + VOD); zugehoerige Chat- und Events-Dateien werden als Companion-Buttons angeboten.</p>
+                        <div class="form-row search-bar">
+                            <input type="text" id="archiveSearchQuery" class="filter-input flex-1-1-240" placeholder="Suche...">
+                            <select id="archiveSearchType" class="select-compact">
+                                <option value="all">Alle Typen</option>
+                                <option value="live">Live-Aufnahmen</option>
+                                <option value="vod">VOD-Downloads</option>
+                            </select>
+                            <select id="archiveSearchStreamer" class="select-compact size-md">
+                                <option value="">Alle Streamer</option>
+                            </select>
+                            <select id="archiveSearchSort" class="select-compact">
+                                <option value="date_desc">Neueste zuerst</option>
+                                <option value="date_asc">Aelteste zuerst</option>
+                                <option value="size_desc">Groesste zuerst</option>
+                                <option value="size_asc">Kleinste zuerst</option>
+                                <option value="name_asc">Name (A-Z)</option>
+                            </select>
+                            <button type="button" class="btn-secondary" id="btnArchiveSearch" onclick="performArchiveSearch()">Suchen</button>
+                        </div>
+                        <div id="archiveSearchSummary" class="form-sublabel" role="status" aria-live="polite"></div>
+                    </div>
+                    <div class="settings-card">
+                        <div id="archiveSearchResults"></div>
+                    </div>
+                </div>
+
+                <!-- Settings Tab -->
+                <div class="tab-content" id="settingsTab">
+                    <div class="settings-card">
+                        <h3 id="designTitle">Design</h3>
+                        <div class="form-group">
+                            <label id="themeLabel" for="themeSelect">Theme</label>
+                            <select id="themeSelect" onchange="changeTheme(this.value)">
+                                <option value="twitch">Twitch</option>
+                                <option value="discord">Discord</option>
+                                <option value="youtube">YouTube</option>
+                                <option value="apple">Apple</option>
+                                <option value="light" id="themeLightOption">Light</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label id="languageLabel">Sprache</label>
+                            <div class="language-picker" id="languagePicker" role="group" aria-labelledby="languageLabel">
+                                <button type="button" class="lang-option" id="langOptionDe" onclick="selectLanguageOption('de')" aria-pressed="false">
+                                    <span class="flag-icon flag-de" aria-hidden="true"></span>
+                                    <span id="languageDeText">Deutsch</span>
+                                </button>
+                                <button type="button" class="lang-option" id="langOptionEn" onclick="selectLanguageOption('en')" aria-pressed="false">
+                                    <span class="flag-icon flag-en" aria-hidden="true"></span>
+                                    <span id="languageEnText">English</span>
+                                </button>
+                            </div>
+                            <select id="languageSelect" onchange="changeLanguage(this.value)" style="display:none">
+                                <option value="de">de</option>
+                                <option value="en">en</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="apiTitle">Twitch API</h3>
+                        <p id="apiHelpText" class="card-intro">
+                            <span id="apiHelpIntro">Du brauchst eine Client-ID und ein Client-Secret von Twitch.</span>
+                            <a href="#" id="apiHelpLink" onclick="event.preventDefault(); openTwitchDevConsole()">dev.twitch.tv/console/apps</a>
+                        </p>
+                        <div class="form-group">
+                            <label id="clientIdLabel" for="clientId">Client ID</label>
+                            <input type="text" id="clientId" placeholder="Twitch Client ID">
+                        </div>
+                        <div class="form-group">
+                            <label id="clientSecretLabel" for="clientSecret">Client Secret</label>
+                            <input type="password" id="clientSecret" placeholder="Twitch Client Secret">
+                        </div>
+                        <button type="button" class="btn-primary" id="saveSettingsBtn" onclick="saveSettings()">Speichern & Verbinden</button>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="downloadSettingsTitle">Download-Einstellungen</h3>
+                        <div class="form-group">
+                            <label id="storageLabel" for="downloadPath">Speicherort</label>
+                            <div class="form-row">
+                                <input type="text" id="downloadPath" readonly>
+                                <button type="button" class="btn-secondary" onclick="selectFolder()">Ordner</button>
+                                <button type="button" class="btn-secondary" id="openFolderBtn" onclick="openFolder()">Offnen</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label id="modeLabel" for="downloadMode">Download-Modus</label>
+                            <select id="downloadMode">
+                                <option value="full" id="modeFullText">Ganzes VOD</option>
+                                <option value="parts" id="modePartsText">In Teile splitten</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label id="partMinutesLabel" for="partMinutes">Teil-Lange (Minuten)</label>
+                            <input type="number" id="partMinutes" value="120" min="10" max="480">
+                        </div>
+                        <div class="form-group">
+                            <label id="parallelDownloadsLabel" for="parallelDownloads">Parallele Downloads</label>
+                            <select id="parallelDownloads">
+                                <option value="1" id="parallelDownloads1">1 (Standard)</option>
+                                <option value="2" id="parallelDownloads2">2 (Parallel)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label id="streamlinkQualityLabel" for="streamlinkQuality">Stream-Qualitaet</label>
+                            <select id="streamlinkQuality">
+                                <option value="best" id="streamlinkQualityBest">Best (Standard)</option>
+                                <option value="source" id="streamlinkQualitySource">Source (Original)</option>
+                                <option value="1080p60" id="streamlinkQuality1080p60">1080p60</option>
+                                <option value="720p60" id="streamlinkQuality720p60">720p60</option>
+                                <option value="720p" id="streamlinkQuality720p">720p</option>
+                                <option value="480p" id="streamlinkQuality480p">480p</option>
+                                <option value="audio_only" id="streamlinkQualityAudio">Audio only</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label id="performanceModeLabel" for="performanceMode">Performance-Profil</label>
+                            <select id="performanceMode">
+                                <option value="stability" id="performanceModeStability">Max Stabilitat</option>
+                                <option value="balanced" id="performanceModeBalanced">Ausgewogen</option>
+                                <option value="speed" id="performanceModeSpeed">Max Geschwindigkeit</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="toggle-row">
+                                <input type="checkbox" id="smartSchedulerToggle" checked>
+                                <span id="smartSchedulerLabel">Smart Queue Scheduler aktivieren</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="duplicatePreventionToggle" checked>
+                                <span id="duplicatePreventionLabel">Duplikate in Queue verhindern</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="persistQueueToggle" checked>
+                                <span id="persistQueueLabel">Queue zwischen App-Starts speichern</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="autoResumeQueueToggle">
+                                <span id="autoResumeQueueLabel">Queue beim Start automatisch fortsetzen</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="notifyEachCompletionToggle">
+                                <span id="notifyEachCompletionLabel">Benachrichtigung bei jedem fertigen Download</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="streamlinkDisableAdsToggle" checked>
+                                <span id="streamlinkDisableAdsLabel">Twitch-Ads beim Download ueberspringen</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="downloadChatReplayToggle">
+                                <span id="downloadChatReplayLabel">Chat-Replay parallel zum VOD speichern (.chat.json)</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="captureLiveChatToggle">
+                                <span id="captureLiveChatLabel">Live-Chat waehrend der Aufnahme mitschneiden (.chat.jsonl)</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="logStreamEventsToggle" checked>
+                                <span id="logStreamEventsLabel">Stream-Events bei Live-Aufnahmen mitloggen (.events.jsonl)</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="autoResumeLiveRecordingToggle" checked>
+                                <span id="autoResumeLiveRecordingLabel">Live-Aufnahme automatisch fortsetzen wenn Streamlink abbricht (max. 5 Versuche)</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="autoMergeResumedPartsToggle">
+                                <span id="autoMergeResumedPartsLabel">Fortgesetzte Aufnahme-Parts automatisch zu einer Datei zusammenfuegen (ffmpeg concat)</span>
+                            </label>
+                            <label class="toggle-row indented">
+                                <input type="checkbox" id="deletePartsAfterMergeToggle">
+                                <span id="deletePartsAfterMergeLabel">Einzelne Parts nach erfolgreichem Merge loeschen</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label id="metadataCacheMinutesLabel" for="metadataCacheMinutes">Metadata-Cache (Minuten)</label>
+                            <input type="number" id="metadataCacheMinutes" value="10" min="1" max="120">
+                        </div>
+                        <div class="form-group">
+                            <div class="form-row" style="align-items:center; margin-bottom: 4px;">
+                                <label id="filenameTemplatesTitle">Dateinamen-Templates</label>
+                                <button class="btn-secondary" id="settingsTemplateGuideBtn" type="button" onclick="openTemplateGuide('vod')">Template Guide</button>
+                            </div>
+                            <div class="form-row" style="gap: 8px; margin: 8px 0 6px;">
+                                <button class="btn-secondary" id="templatePresetDefault" type="button" onclick="applyTemplatePreset('default')">Preset: Default</button>
+                                <button class="btn-secondary" id="templatePresetArchive" type="button" onclick="applyTemplatePreset('archive')">Preset: Archive</button>
+                                <button class="btn-secondary" id="templatePresetClipper" type="button" onclick="applyTemplatePreset('clipper')">Preset: Clipper</button>
+                            </div>
+                            <div class="filename-template-grid">
+                                <label id="vodTemplateLabel" for="vodFilenameTemplate">VOD Template</label>
+                                <input type="text" id="vodFilenameTemplate" class="input-monospace" placeholder="{title}.mp4" oninput="validateFilenameTemplates()">
+
+                                <label id="partsTemplateLabel" for="partsFilenameTemplate">VOD Part Template</label>
+                                <input type="text" id="partsFilenameTemplate" class="input-monospace" placeholder="{date}_Part{part_padded}.mp4" oninput="validateFilenameTemplates()">
+
+                                <label id="defaultClipTemplateLabel" for="defaultClipFilenameTemplate">Clip Template</label>
+                                <input type="text" id="defaultClipFilenameTemplate" class="input-monospace" placeholder="{date}_{part}.mp4" oninput="validateFilenameTemplates()">
+                            </div>
+                            <div id="filenameTemplateHint" class="form-note" style="margin-top: 8px;">Platzhalter: {title} {id} {channel} {date} {part} {part_padded} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}</div>
+                            <div id="filenameTemplateLint" class="template-lint ok">Template-Check: OK</div>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="updateTitle">Updates</h3>
+                        <p id="versionInfo" class="card-intro">Version: v1.0.1</p>
+                        <button type="button" class="btn-secondary" id="checkUpdateBtn" onclick="checkUpdate()">Nach Updates suchen</button>
+                    </div>
+
+                    <div class="settings-card">
+                        <div class="form-row section-header">
+                            <h3 id="preflightTitle">System-Check</h3>
+                            <span class="health-badge unknown" id="healthBadge">System: Unbekannt</span>
+                        </div>
+                        <div class="form-row" style="margin-bottom: 10px;">
+                            <button type="button" class="btn-secondary" id="btnPreflightRun" onclick="runPreflight(false)">Check ausfuhren</button>
+                            <button type="button" class="btn-secondary" id="btnPreflightFix" onclick="runPreflight(true)">Auto-Fix Tools</button>
+                        </div>
+                        <pre id="preflightResult" class="log-panel">Noch kein Check ausgefuhrt.</pre>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="debugLogTitle">Live Debug-Log</h3>
+                        <div class="form-row aligned">
+                            <button type="button" class="btn-secondary" id="btnRefreshLog" onclick="refreshDebugLog()">Aktualisieren</button>
+                            <button type="button" class="btn-secondary" id="btnOpenDebugLogFile" onclick="openDebugLogFile()">Log-Datei oeffnen</button>
+                            <label class="inline-toggle">
+                                <input type="checkbox" id="debugAutoRefresh" onchange="toggleDebugAutoRefresh(this.checked)">
+                                <span id="autoRefreshText">Auto-Refresh</span>
+                            </label>
+                        </div>
+                        <pre id="debugLogOutput" class="log-panel">Lade...</pre>
+                    </div>
+
+                    <div class="settings-card">
+                        <div class="form-row section-header">
+                            <h3 id="storageCardTitle">Storage</h3>
+                            <button type="button" class="btn-secondary" id="btnRefreshStorage" onclick="refreshStorageStats()">Aktualisieren</button>
+                        </div>
+                        <p id="storageCardIntro" class="card-intro">Disk-Verbrauch pro Streamer im aktuellen Download-Ordner. Live-Aufnahmen werden separat ausgewiesen.</p>
+                        <div id="storageSummary" class="form-sublabel" style="margin-bottom:8px;" role="status" aria-live="polite"></div>
+                        <div id="storageList"></div>
+
+                        <hr>
+                        <h4 id="cleanupTitle">Auto-Cleanup</h4>
+                        <p id="cleanupIntro" class="card-intro">Aufnahmen aelter als X Tage automatisch archivieren oder loeschen. Schiebt Sidecar-Chat-Dateien (.chat.json/.chat.jsonl) mit der Aufnahme.</p>
+                        <label class="toggle-row" style="margin-bottom: 8px;">
+                            <input type="checkbox" id="autoCleanupEnabledToggle">
+                            <span id="autoCleanupEnabledLabel">Auto-Cleanup aktivieren</span>
+                        </label>
+                        <div class="form-row" style="gap:12px; flex-wrap:wrap; margin-bottom: 8px;">
+                            <label class="form-stack size-sm">
+                                <span id="autoCleanupDaysLabel" class="form-sublabel">Tage-Schwelle</span>
+                                <input type="number" id="autoCleanupDays" min="1" max="3650" value="30">
+                            </label>
+                            <label class="form-stack size-md">
+                                <span id="autoCleanupTargetLabel" class="form-sublabel">Bereich</span>
+                                <select id="autoCleanupTarget">
+                                    <option value="live_only" id="autoCleanupTargetLive">Nur Live-Aufnahmen</option>
+                                    <option value="all" id="autoCleanupTargetAll">Alle Aufnahmen</option>
+                                </select>
+                            </label>
+                            <label class="form-stack size-md">
+                                <span id="autoCleanupActionLabel" class="form-sublabel">Aktion</span>
+                                <select id="autoCleanupAction">
+                                    <option value="archive" id="autoCleanupActionArchive">In Archiv verschieben</option>
+                                    <option value="delete" id="autoCleanupActionDelete">Loeschen</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="form-row" style="margin-bottom: 8px; gap: 8px;">
+                            <button type="button" class="btn-secondary" id="btnCleanupDryRun" onclick="runCleanupDryRun()">Vorschau</button>
+                            <button type="button" class="btn-secondary" id="btnCleanupRunNow" onclick="runCleanupNow()">Jetzt ausfuehren</button>
+                        </div>
+                        <div id="cleanupReport" class="form-note" role="status" aria-live="polite"></div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="discordCardTitle">Discord-Webhook</h3>
+                        <p id="discordCardIntro" class="card-intro">Sende Benachrichtigungen an einen Discord-Channel via Webhook — nuetzlich fuer Multi-Device-Setups oder eine dedizierte Archiv-Maschine.</p>
+                        <div class="form-group">
+                            <label id="discordWebhookUrlLabel" for="discordWebhookUrl">Webhook-URL</label>
+                            <input type="text" id="discordWebhookUrl" placeholder="https://discord.com/api/webhooks/...">
+                        </div>
+                        <div class="form-group">
+                            <label class="toggle-row">
+                                <input type="checkbox" id="discordNotifyLiveStartToggle">
+                                <span id="discordNotifyLiveStartLabel">Bei Live-Aufnahme-Start benachrichtigen</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="discordNotifyLiveEndToggle">
+                                <span id="discordNotifyLiveEndLabel">Bei Live-Aufnahme-Ende benachrichtigen</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="discordNotifyVodCompleteToggle">
+                                <span id="discordNotifyVodCompleteLabel">Bei abgeschlossenem VOD-Download benachrichtigen</span>
+                            </label>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="discordNotifyVodAutoQueuedToggle">
+                                <span id="discordNotifyVodAutoQueuedLabel">Bei automatisch eingereihten VODs benachrichtigen</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="autoVodCardTitle">Auto-VOD-Download</h3>
+                        <p id="autoVodCardIntro" class="card-intro">Streamer mit aktiviertem VOD-Toggle werden in dem hier festgelegten Intervall auf neue Twitch-VODs geprueft. Neue VODs innerhalb des Alters-Fensters werden automatisch zur Download-Queue hinzugefuegt.</p>
+                        <div class="form-row aligned">
+                            <label id="autoVodPollMinutesLabel" class="form-sublabel" for="autoVodPollMinutes">Poll-Intervall (Minuten)</label>
+                            <input type="number" id="autoVodPollMinutes" min="5" max="360" value="15" class="input-narrow">
+                            <label id="autoVodMaxAgeHoursLabel" class="form-sublabel" for="autoVodMaxAgeHours" style="margin-left:12px;">Max. Alter (Stunden)</label>
+                            <input type="number" id="autoVodMaxAgeHours" min="1" max="720" value="24" class="input-narrow">
+                        </div>
+                        <div class="form-row" style="align-items: center; gap: 12px; flex-wrap: wrap;">
+                            <button type="button" class="btn-secondary" id="btnAutoVodScanNow" onclick="triggerManualAutoVodScan()">Jetzt scannen</button>
+                            <button type="button" class="btn-secondary" id="btnAutoRecordScanNow" onclick="triggerManualAutoRecordScan()">Live-Status pruefen</button>
+                            <span id="autoVodStatusLine" class="form-sublabel"></span>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="backupCardTitle">Sicherung &amp; Wartung</h3>
+                        <p id="backupCardIntro" class="card-intro">Konfiguration sichern, auf einem anderen Geraet wiederherstellen, oder die Liste der bereits heruntergeladenen VODs zuruecksetzen.</p>
+                        <div class="form-row" style="margin-bottom: 10px; flex-wrap: wrap;">
+                            <button type="button" class="btn-secondary" id="btnExportConfig" onclick="exportConfigToFile()">Konfiguration exportieren</button>
+                            <button type="button" class="btn-secondary" id="btnImportConfig" onclick="importConfigFromFile()">Konfiguration importieren</button>
+                            <button type="button" class="btn-secondary" id="btnResetDownloadedIds" onclick="resetDownloadedIds()">Downloaded-VODs zuruecksetzen</button>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3 id="runtimeMetricsTitle">Runtime Metrics</h3>
+                        <div class="form-row aligned">
+                            <button type="button" class="btn-secondary" id="btnRefreshMetrics" onclick="refreshRuntimeMetrics()">Aktualisieren</button>
+                            <button type="button" class="btn-secondary" id="btnExportMetrics" onclick="exportRuntimeMetrics()">Export JSON</button>
+                            <label class="inline-toggle">
+                                <input type="checkbox" id="runtimeMetricsAutoRefresh" onchange="toggleRuntimeMetricsAutoRefresh(this.checked)">
+                                <span id="runtimeMetricsAutoRefreshText">Auto-Refresh</span>
+                            </label>
+                        </div>
+                        <pre id="runtimeMetricsOutput" class="log-panel">Lade...</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="status-bar">
+                <div class="status-indicator">
+                    <div class="status-dot" id="statusDot" aria-hidden="true"></div>
+                    <span id="statusText">Nicht verbunden</span>
+                </div>
+                <span id="statusBarQueueSummary" class="status-bar-queue-summary"></span>
+                <span id="versionText" class="status-bar-version"></span>
+            </div>
+        </main>
+    </div>
+
+    <div class="modal-overlay" id="commandPaletteModal" role="dialog" aria-modal="true" aria-labelledby="commandPaletteTitle">
+        <div class="modal command-palette">
+            <h2 id="commandPaletteTitle" class="cp-title">Command Palette</h2>
+            <input
+                type="text"
+                id="commandPaletteInput"
+                class="cp-input"
+                placeholder="Suche Befehl..."
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="Command Palette"
+            />
+            <ul id="commandPaletteList" class="cp-list" role="listbox" aria-label="Command results"></ul>
+            <p class="cp-hint" id="commandPaletteHint">Up/Down zum Navigieren, Enter zum Ausfuehren, Esc zum Schliessen</p>
+        </div>
+    </div>
+
+    <script src="../dist/renderer-locale-de.js"></script>
+    <script src="../dist/renderer-locale-en.js"></script>
+    <script src="../dist/renderer-texts.js"></script>
+    <script src="../dist/renderer-shared.js"></script>
+    <script src="../dist/renderer-settings.js"></script>
+    <script src="../dist/renderer-streamers.js"></script>
+    <script src="../dist/renderer-queue.js"></script>
+    <script src="../dist/renderer-updates.js"></script>
+    <script src="../dist/renderer-stats.js"></script>
+    <script src="../dist/renderer-archive.js"></script>
+    <script src="../dist/renderer-profile.js"></script>
+    <script src="../dist/renderer-vod-hover.js"></script>
+    <script src="../dist/renderer-command-palette.js"></script>
+    <script src="../dist/renderer.js"></script>
+</body>
+</html>

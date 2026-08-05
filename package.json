@@ -1,0 +1,74 @@
+{
+  "name": "twitch-vod-manager",
+  "version": "1.0.1",
+  "description": "Twitch VOD Manager - Download Twitch VODs easily",
+  "main": "dist/main.js",
+  "author": "Sucukdeluxe",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "test:unit": "vitest run --passWithNoTests",
+    "test:unit:watch": "vitest",
+    "test:e2e:update-logic": "node scripts/smoke-test-update-version-logic.js",
+    "test:e2e:public-release": "node scripts/smoke-test-public-release-config.js",
+    "test:e2e": "node scripts/smoke-test.js",
+    "test:e2e:guide": "node scripts/smoke-test-template-guide.js",
+    "test:e2e:full": "node scripts/smoke-test-full.js",
+    "test:e2e:release": "npm run build && npm run test:unit && npm run test:e2e:update-logic && npm run test:e2e:public-release && npm run test:e2e && npm run test:e2e:guide && npm run test:e2e:full",
+    "test:e2e:stress": "npm run test:e2e:release && npm run test:e2e:release && npm run test:e2e:release",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run test:e2e:release && electron-builder --win",
+    "test:merge-split": "node scripts/smoke-test-merge-split-logic.js"
+  },
+  "dependencies": {
+    "axios": "^1.16.1",
+    "better-sqlite3": "^12.10.0",
+    "electron-updater": "^6.8.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.10.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.0",
+    "eslint": "^10.4.0",
+    "eslint-plugin-security": "^4.0.0",
+    "playwright": "^1.60.0",
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^8.59.4",
+    "vitest": "^4.1.6"
+  },
+  "build": {
+    "appId": "io.github.sucukdeluxe.twitch-vod-manager",
+    "productName": "Twitch VOD Manager",
+    "files": [
+      "dist/**/*",
+      "src/index.html",
+      "src/styles.css",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false,
+      "artifactName": "Twitch-VOD-Manager-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Twitch VOD Manager v${version}",
+      "include": "build/installer.nsh"
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/latest/download/"
+    }
+  }
+}
