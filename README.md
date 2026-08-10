@@ -11,7 +11,9 @@ Twitch VOD Manager is a Windows desktop application for finding, downloading, tr
 - Resume interrupted downloads and verify completed files
 - Manage queues, history, profiles and per-streamer automation
 - Capture live streams and Twitch chat
-- Use light and dark themes with German and English localization
+- Navigate a compact workspace with contextual sidebars and dedicated toolbars
+- Use Light, Dark and System themes with German and English localization
+- Search settings and jump directly to individual configuration areas
 - Receive application updates through GitHub Releases
 
 ## Installation

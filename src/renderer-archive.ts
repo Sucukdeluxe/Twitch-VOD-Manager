@@ -56,7 +56,7 @@ async function performArchiveSearch(): Promise<void> {
         const result = await window.api.searchArchive(filter);
         renderArchiveSearchResults(result);
     } catch (e) {
-        if (summaryEl) summaryEl.textContent = `Fehler: ${String(e)}`;
+        if (summaryEl) summaryEl.textContent = `${UI_TEXT.static.errorPrefix}: ${String(e)}`;
         applyHtml(resultsEl, '');
     } finally {
         archiveSearchInFlight = false;
@@ -91,7 +91,7 @@ function renderArchiveSearchResults(result: ArchiveSearchResult): void {
     }
 
     const rows = result.hits.map((hit) => {
-        const date = new Date(hit.mtimeMs).toLocaleString();
+        const date = formatUiDateTime(new Date(hit.mtimeMs));
         const typeBadge = `<span class="archive-type-badge ${hit.type === 'live' ? 'live' : 'vod'}">${hit.type === 'live' ? 'LIVE' : 'VOD'}</span>`;
         const safeFullAttr = hit.fullPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const chatBtn = hit.chatPath

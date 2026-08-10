@@ -17,6 +17,11 @@ function formatUiDate(input: string | Date): string {
     return date.toLocaleDateString(getIntlLocale());
 }
 
+function formatUiDateTime(input: string | Date): string {
+    const date = input instanceof Date ? input : new Date(input);
+    return date.toLocaleString(getIntlLocale());
+}
+
 function formatUiNumber(value: number): string {
     return value.toLocaleString(getIntlLocale());
 }
@@ -62,6 +67,33 @@ function applyLanguageToStaticUI(): void {
     setText('navMergeText', UI_TEXT.static.navMerge);
     setText('navStatsText', UI_TEXT.static.navStats);
     setText('navArchiveText', UI_TEXT.static.navArchive);
+    setAriaLabelAll('.top-nav', UI_TEXT.static.mainNavigationAria);
+    setAriaLabelAll('.context-sidebar', UI_TEXT.static.workspaceContextAria);
+    setAriaLabelAll('[data-context-for="vods"] .context-switcher', UI_TEXT.static.vodWorkspaceAria);
+    setAriaLabelAll('[data-context-for="clips"] .context-list', UI_TEXT.static.clipSectionsAria);
+    setAriaLabelAll('[data-context-for="cutter"] .context-list', UI_TEXT.static.cutterSectionsAria);
+    setAriaLabelAll('[data-context-for="merge"] .context-list', UI_TEXT.static.mergeSectionsAria);
+    setAriaLabelAll('[data-context-for="stats"] .context-list', UI_TEXT.static.statisticsSectionsAria);
+    setAriaLabelAll('[data-context-for="archive"] .context-list', UI_TEXT.static.archiveSectionsAria);
+    setAriaLabelAll('[data-context-for="settings"] .context-list', UI_TEXT.static.settingsSectionsAria);
+    setAriaLabel('toolbarCutBtn', UI_TEXT.static.cutVideoAction);
+    setTitle('toolbarCutBtn', UI_TEXT.static.cutVideoAction);
+    setAriaLabel('toolbarMergeBtn', UI_TEXT.static.mergeVideosAction);
+    setTitle('toolbarMergeBtn', UI_TEXT.static.mergeVideosAction);
+    document.querySelectorAll<HTMLButtonElement>('.top-nav [data-tab]').forEach((button) => {
+        const tab = button.dataset.tab;
+        const titles: Record<string, string> = {
+            vods: UI_TEXT.static.navVods,
+            clips: UI_TEXT.static.navClips,
+            cutter: UI_TEXT.static.navCutter,
+            merge: UI_TEXT.static.navMerge,
+            stats: UI_TEXT.static.navStats,
+            archive: UI_TEXT.static.navArchive,
+            settings: UI_TEXT.static.navSettings
+        };
+        button.title = tab ? titles[tab] || '' : '';
+    });
+    setText('archiveResultsNavText', UI_TEXT.static.archiveResults);
     setText('archiveTitle', UI_TEXT.static.archiveTitle);
     setText('archiveIntro', UI_TEXT.static.archiveIntro);
     setText('btnArchiveSearch', UI_TEXT.static.archiveSearchBtn);
@@ -94,6 +126,8 @@ function applyLanguageToStaticUI(): void {
     setText('statsSizeBucketsTitle', UI_TEXT.static.statsSizeBucketsTitle);
     setText('btnStatsRefresh', UI_TEXT.static.statsRefresh);
     setText('queueTitleText', UI_TEXT.static.queueTitle);
+    setText('streamerWorkspaceSwitch', UI_TEXT.static.streamerSectionTitle);
+    setText('queueWorkspaceSwitch', UI_TEXT.static.queueTitle);
     setText('healthBadge', UI_TEXT.static.healthUnknown);
     setText('btnRetryFailed', UI_TEXT.static.retryFailed);
     setTitle('btnRetryFailed', UI_TEXT.static.retryFailedHint);
@@ -120,6 +154,9 @@ function applyLanguageToStaticUI(): void {
     setText('cutterSelectTitle', UI_TEXT.static.cutterSelectTitle);
     setText('cutterPreviewPlaceholder', UI_TEXT.static.cutterPreviewPlaceholder);
     setText('cutterBrowseBtn', UI_TEXT.static.cutterBrowse);
+    setText('commandPaletteTitle', UI_TEXT.static.commandPaletteTitle);
+    setAriaLabel('commandPaletteInput', UI_TEXT.static.commandPaletteAria);
+    setAriaLabel('commandPaletteList', UI_TEXT.static.commandPaletteResultsAria);
     setPlaceholder('commandPaletteInput', UI_TEXT.static.commandPaletteSearchPlaceholder);
     setText('commandPaletteHint', UI_TEXT.static.commandPaletteHint);
     setText('cutterInfoDurationLabel', UI_TEXT.cutter.infoDuration);
@@ -136,6 +173,8 @@ function applyLanguageToStaticUI(): void {
     setText('designTitle', UI_TEXT.static.designTitle);
     setText('themeLabel', UI_TEXT.static.themeLabel);
     setText('themeLightOption', UI_TEXT.static.themeLight);
+    setText('themeDarkOption', UI_TEXT.static.themeDark);
+    setText('themeSystemOption', UI_TEXT.static.themeSystem);
     setText('languageLabel', UI_TEXT.static.languageLabel);
     setText('languageDeText', UI_TEXT.static.languageDe);
     setText('languageEnText', UI_TEXT.static.languageEn);
@@ -147,6 +186,7 @@ function applyLanguageToStaticUI(): void {
     setText('saveSettingsBtn', UI_TEXT.static.saveSettings);
     setText('downloadSettingsTitle', UI_TEXT.static.downloadSettingsTitle);
     setText('storageLabel', UI_TEXT.static.storageLabel);
+    setText('selectFolderBtn', UI_TEXT.static.selectFolder);
     setText('openFolderBtn', UI_TEXT.static.openFolder);
     setText('modeLabel', UI_TEXT.static.modeLabel);
     setText('modeFullText', UI_TEXT.static.modeFull);
@@ -290,6 +330,10 @@ function applyLanguageToStaticUI(): void {
     setText('runtimeMetricsOutput', UI_TEXT.static.runtimeMetricsLoading);
     setText('updateText', UI_TEXT.static.checkUpdates);
     setText('updateButton', UI_TEXT.updates.downloadNow);
+    setText('workspaceUpdateLater', UI_TEXT.updates.later);
+    setText('workspaceUpdateDismissText', UI_TEXT.updates.dismissAria);
+    setAriaLabel('workspaceUpdateDismiss', UI_TEXT.updates.dismissAria);
+    setTitle('workspaceUpdateDismiss', UI_TEXT.updates.dismissAria);
     setText('updateModalEyebrow', UI_TEXT.static.updateTitle);
     setText('updateModalTitle', UI_TEXT.updates.modalAvailableTitle);
     setText('updateModalDismissBtn', UI_TEXT.updates.modalDismiss);
@@ -306,6 +350,18 @@ function applyLanguageToStaticUI(): void {
     setAriaLabel('vodFilterClearBtn', UI_TEXT.vods.filterClearTitle);
     setPlaceholder('chatViewerFilter', UI_TEXT.queue.chatViewerFilterPlaceholder);
     setAriaLabel('chatViewerFilter', UI_TEXT.queue.chatViewerFilterAria);
+    setPlaceholder('settingsSearchInput', UI_TEXT.static.settingsSearchPlaceholder);
+    setAriaLabel('settingsSearchInput', UI_TEXT.static.settingsSearchPlaceholder);
+    setAriaLabel('systemStatusButton', UI_TEXT.static.systemStatus);
+    setTitle('systemStatusButton', UI_TEXT.static.systemStatus);
+    setAriaLabel('openSettingsButton', UI_TEXT.static.openSettings);
+    setTitle('openSettingsButton', UI_TEXT.static.openSettings);
+    setAriaLabel('toolbarRefreshVodsBtn', UI_TEXT.static.refreshVods);
+    setTitle('toolbarRefreshVodsBtn', UI_TEXT.static.refreshVods);
+    setAriaLabel('toolbarClipDownloadBtn', UI_TEXT.static.downloadClip);
+    setTitle('toolbarClipDownloadBtn', UI_TEXT.static.downloadClip);
+    setAriaLabel('toolbarCheckUpdateBtn', UI_TEXT.static.checkUpdates);
+    setTitle('toolbarCheckUpdateBtn', UI_TEXT.static.checkUpdates);
     setText('vodSortLabel', UI_TEXT.vods.sortLabel);
     if (typeof refreshVodSortSelectLabels === 'function') {
         refreshVodSortSelectLabels();

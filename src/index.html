@@ -212,24 +212,33 @@
         </div>
         <div class="topbar-actions">
             <div class="update-banner workspace-update" id="updateBanner" data-update-state="idle">
-                <button type="button" class="workspace-update-button" id="workspaceUpdateButton" onclick="handleWorkspaceUpdateAction()" aria-describedby="updateText">
+                <button type="button" class="workspace-update-button" id="workspaceUpdateButton" onclick="handleWorkspaceUpdateAction()" aria-describedby="updateText" aria-controls="workspaceUpdatePopover" aria-expanded="false">
                     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m8 11 4 4 4-4"></path><path d="M4 19h16"></path></svg>
                     <span id="workspaceUpdateLabel">Update</span>
                 </button>
-                <div class="workspace-update-popover" role="status" aria-live="polite">
-                    <span id="updateText">Nach Updates suchen.</span>
+                <div class="workspace-update-popover" id="workspaceUpdatePopover">
+                    <div class="workspace-update-popover-header">
+                        <span id="updateText" role="status" aria-live="polite">Nach Updates suchen.</span>
+                        <button type="button" id="workspaceUpdateDismiss" onclick="dismissWorkspaceUpdatePopover()" aria-label="Update notification dismiss">
+                            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"></path></svg>
+                            <span class="sr-only" id="workspaceUpdateDismissText">Close</span>
+                        </button>
+                    </div>
                     <div id="updateProgress" class="update-banner-progress-wrap is-hidden">
                         <div class="update-banner-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Update download" id="updateProgressGauge">
                             <div id="updateProgressBar" class="update-banner-progress-bar"></div>
                         </div>
                     </div>
-                    <button type="button" id="updateButton" onclick="downloadUpdate()">Jetzt herunterladen</button>
+                    <div class="workspace-update-popover-actions">
+                        <button type="button" id="updateButton" onclick="downloadUpdate()">Jetzt herunterladen</button>
+                        <button type="button" id="workspaceUpdateLater" onclick="postponeWorkspaceUpdatePopover()">Spater</button>
+                    </div>
                 </div>
             </div>
-            <button type="button" class="topbar-icon-button" onclick="showTab('settings')" aria-label="System status" title="System status">
+            <button type="button" class="topbar-icon-button" id="systemStatusButton" onclick="showTab('settings')" aria-label="System status" title="System status">
                 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-5 4 10 2-5h6"></path></svg>
             </button>
-            <button type="button" class="topbar-account-button" onclick="showTab('settings')" aria-label="Open settings" title="Open settings">
+            <button type="button" class="topbar-account-button" id="openSettingsButton" onclick="showTab('settings')" aria-label="Open settings" title="Open settings">
                 <span>TV</span>
                 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 10 4 4 4-4"></path></svg>
             </button>
@@ -240,8 +249,8 @@
         <aside class="sidebar context-sidebar" aria-label="Workspace context">
             <section class="context-panel" data-context-for="vods">
                 <div class="context-switcher" role="group" aria-label="VOD workspace">
-                    <button type="button" class="active" onclick="focusWorkspaceTarget('streamerList')">Streamer</button>
-                    <button type="button" onclick="focusWorkspaceTarget('queueList')">Queue</button>
+                    <button type="button" id="streamerWorkspaceSwitch" class="active" aria-pressed="true" onclick="focusWorkspaceTarget('streamerList', this)">Streamer</button>
+                    <button type="button" id="queueWorkspaceSwitch" aria-pressed="false" onclick="focusWorkspaceTarget('queueList', this)">Warteschlange</button>
                 </div>
 
                 <div class="section-title" id="streamerSectionTitle">
@@ -261,10 +270,10 @@
                     </div>
                     <div class="queue-list" id="queueList"></div>
                     <div class="queue-actions">
-                        <button type="button" class="btn btn-start" id="btnStart" onclick="toggleDownload()">Start</button>
+                        <button type="button" class="btn btn-start" id="btnStart" onclick="toggleDownload()" disabled>Start</button>
                         <button type="button" class="btn btn-merge-group is-hidden" id="btnMergeGroup" onclick="createMergeGroupFromSelection()">Merge &amp; Split</button>
                         <button type="button" class="btn btn-retry" id="btnRetryFailed" onclick="retryFailedDownloads()" title="Nur fehlgeschlagene Downloads erneut starten">Wiederholen</button>
-                        <button type="button" class="btn btn-clear" id="btnClear" onclick="clearCompleted()">Leeren</button>
+                        <button type="button" class="btn btn-clear" id="btnClear" onclick="clearCompleted()" disabled>Leeren</button>
                     </div>
                 </div>
                 <div class="stats-bar" id="statsBar"></div>
@@ -273,58 +282,58 @@
             <section class="context-panel" data-context-for="clips" hidden>
                 <div class="context-panel-heading" data-context-heading>Clips</div>
                 <nav class="context-list" aria-label="Clip sections">
-                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('clipUrl')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h11a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4zM17 10l4-2v8l-4-2"></path></svg><span data-label-source="clipsHeading">Clip-Download</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('clipsInfoTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v6M12 7h.01"></path></svg><span data-label-source="clipsInfoTitle">Info</span></button>
+                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('clipUrl', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h11a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4zM17 10l4-2v8l-4-2"></path></svg><span data-label-source="clipsHeading">Clip-Download</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('clipsInfoTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v6M12 7h.01"></path></svg><span data-label-source="clipsInfoTitle">Info</span></button>
                 </nav>
             </section>
 
             <section class="context-panel" data-context-for="cutter" hidden>
                 <div class="context-panel-heading" data-context-heading>Video schneiden</div>
                 <nav class="context-list" aria-label="Cutter sections">
-                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('cutterBrowseBtn')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path></svg><span data-label-source="cutterSelectTitle">Video auswahlen</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('timelineContainer')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12h16M7 8v8M17 8v8"></path></svg><span data-label-source="cutterInfoSelectionLabel">Auswahl</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('btnCut')"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="6" cy="7" r="3"></circle><circle cx="6" cy="17" r="3"></circle><path d="m8.5 8.5 11 7M8.5 15.5 20 8"></path></svg><span data-label-source="btnCut">Schneiden</span></button>
+                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('cutterBrowseBtn', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path></svg><span data-label-source="cutterSelectTitle">Video auswahlen</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('timelineContainer', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12h16M7 8v8M17 8v8"></path></svg><span data-label-source="cutterInfoSelectionLabel">Auswahl</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('btnCut', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="6" cy="7" r="3"></circle><circle cx="6" cy="17" r="3"></circle><path d="m8.5 8.5 11 7M8.5 15.5 20 8"></path></svg><span data-label-source="btnCut">Schneiden</span></button>
                 </nav>
             </section>
 
             <section class="context-panel" data-context-for="merge" hidden>
                 <div class="context-panel-heading" data-context-heading>Zusammenfugen</div>
                 <nav class="context-list" aria-label="Merge sections">
-                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('mergeAddBtn')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16v12H4zM12 9v6M9 12h6"></path></svg><span data-label-source="mergeAddBtn">Videos hinzufugen</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('mergeFileList')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"></path></svg><span data-label-source="mergeTitle">Videos zusammenfugen</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('btnMerge')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h4a3 3 0 0 1 3 3v8a3 3 0 0 0 3 3h4M16 16l3 3-3 3"></path></svg><span data-label-source="btnMerge">Zusammenfugen</span></button>
+                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('mergeAddBtn', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16v12H4zM12 9v6M9 12h6"></path></svg><span data-label-source="mergeAddBtn">Videos hinzufugen</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('mergeFileList', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"></path></svg><span data-label-source="mergeTitle">Videos zusammenfugen</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('btnMerge', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h4a3 3 0 0 1 3 3v8a3 3 0 0 0 3 3h4M16 16l3 3-3 3"></path></svg><span data-label-source="btnMerge">Zusammenfugen</span></button>
                 </nav>
             </section>
 
             <section class="context-panel" data-context-for="stats" hidden>
                 <div class="context-panel-heading" data-context-heading>Statistik</div>
                 <nav class="context-list" aria-label="Statistics sections">
-                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('statsSummaryTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19V3"></path></svg><span data-label-source="statsSummaryTitle">Uebersicht</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('statsTopStreamersTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h12M4 17h8"></path></svg><span data-label-source="statsTopStreamersTitle">Top Streamer</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('statsActivityTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m3 17 5-5 4 3 7-8 2 2"></path></svg><span data-label-source="statsActivityTitle">Aktivitaet</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('statsSizeBucketsTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 3v9h9"></path></svg><span data-label-source="statsSizeBucketsTitle">Groessen-Verteilung</span></button>
+                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('statsSummaryTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19V3"></path></svg><span data-label-source="statsSummaryTitle">Uebersicht</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('statsTopStreamersTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h12M4 17h8"></path></svg><span data-label-source="statsTopStreamersTitle">Top Streamer</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('statsActivityTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m3 17 5-5 4 3 7-8 2 2"></path></svg><span data-label-source="statsActivityTitle">Aktivitaet</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('statsSizeBucketsTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 3v9h9"></path></svg><span data-label-source="statsSizeBucketsTitle">Groessen-Verteilung</span></button>
                 </nav>
             </section>
 
             <section class="context-panel" data-context-for="archive" hidden>
                 <div class="context-panel-heading" data-context-heading>Archiv</div>
                 <nav class="context-list" aria-label="Archive sections">
-                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('archiveSearchQuery')"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"></circle><path d="m15 15 5 5"></path></svg><span data-label-source="archiveTitle">Archiv durchsuchen</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('archiveSearchType')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h16M7 12h10M10 19h4"></path></svg><span data-label-source="archiveSearchType">Filter</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('archiveSearchResults')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5"></path></svg><span>Ergebnisse</span></button>
+                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('archiveSearchQuery', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"></circle><path d="m15 15 5 5"></path></svg><span data-label-source="archiveTitle">Archiv durchsuchen</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('archiveSearchType', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h16M7 12h10M10 19h4"></path></svg><span data-label-source="archiveSearchType">Filter</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('archiveSearchResults', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5"></path></svg><span id="archiveResultsNavText">Ergebnisse</span></button>
                 </nav>
             </section>
 
             <section class="context-panel" data-context-for="settings" hidden>
                 <div class="context-panel-heading" data-context-heading>Einstellungen</div>
                 <nav class="context-list" aria-label="Settings sections">
-                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('designTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"></path></svg><span data-label-source="designTitle">Design</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('apiTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 12h8M12 8v8"></path><circle cx="12" cy="12" r="9"></circle></svg><span data-label-source="apiTitle">Twitch API</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('downloadSettingsTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 20h16"></path></svg><span data-label-source="downloadSettingsTitle">Downloads</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('updateTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 19h16"></path></svg><span data-label-source="updateTitle">Updates</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('preflightTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7z"></path><path d="m9 12 2 2 4-4"></path></svg><span data-label-source="preflightTitle">System-Check</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('debugLogTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h14v14H5zM8 9l2 2-2 2M12 15h4"></path></svg><span data-label-source="debugLogTitle">Debug-Log</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('storageCardTitle')"><svg aria-hidden="true" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"></ellipse><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"></path></svg><span data-label-source="storageCardTitle">Storage</span></button>
+                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('designTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"></path></svg><span data-label-source="designTitle">Design</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('apiTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 12h8M12 8v8"></path><circle cx="12" cy="12" r="9"></circle></svg><span data-label-source="apiTitle">Twitch API</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('downloadSettingsTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 20h16"></path></svg><span data-label-source="downloadSettingsTitle">Downloads</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('updateTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 19h16"></path></svg><span data-label-source="updateTitle">Updates</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('preflightTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7z"></path><path d="m9 12 2 2 4-4"></path></svg><span data-label-source="preflightTitle">System-Check</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('debugLogTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h14v14H5zM8 9l2 2-2 2M12 15h4"></path></svg><span data-label-source="debugLogTitle">Debug-Log</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('storageCardTitle', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"></ellipse><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"></path></svg><span data-label-source="storageCardTitle">Storage</span></button>
                 </nav>
             </section>
         </aside>
@@ -333,34 +342,37 @@
             <header class="header workspace-toolbar">
                 <div class="toolbar-context" data-toolbar-for="vods">
                     <button type="button" class="toolbar-primary" onclick="focusWorkspaceTarget('newStreamer')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg><span>Streamer</span></button>
-                    <button type="button" class="toolbar-icon-button" onclick="refreshVODs()" aria-label="Refresh VODs" title="Refresh VODs"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6 7M5.5 15A7 7 0 0 0 18 17"></path></svg></button>
+                    <button type="button" class="toolbar-icon-button" id="toolbarRefreshVodsBtn" onclick="refreshVODs()" aria-label="Refresh VODs" title="Refresh VODs"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6 7M5.5 15A7 7 0 0 0 18 17"></path></svg></button>
                 </div>
                 <div class="toolbar-context" data-toolbar-for="clips" hidden>
                     <button type="button" class="toolbar-primary" onclick="focusWorkspaceTarget('clipUrl')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg><span data-label-source="clipsHeading">Clip</span></button>
-                    <button type="button" class="toolbar-icon-button" onclick="downloadClip()" aria-label="Download clip" title="Download clip"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 20h16"></path></svg></button>
+                    <button type="button" class="toolbar-icon-button" id="toolbarClipDownloadBtn" onclick="downloadClip()" aria-label="Download clip" title="Download clip"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 20h16"></path></svg></button>
                 </div>
                 <div class="toolbar-context" data-toolbar-for="cutter" hidden>
                     <button type="button" class="toolbar-primary" onclick="selectCutterVideo()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path></svg><span data-label-source="cutterBrowseBtn">Durchsuchen</span></button>
-                    <button type="button" class="toolbar-icon-button" onclick="startCutting()" aria-label="Cut video" title="Cut video"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="6" cy="7" r="3"></circle><circle cx="6" cy="17" r="3"></circle><path d="m8.5 8.5 11 7M8.5 15.5 20 8"></path></svg></button>
+                    <button type="button" class="toolbar-icon-button" id="toolbarCutBtn" onclick="startCutting()" aria-label="Cut video" title="Cut video"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="6" cy="7" r="3"></circle><circle cx="6" cy="17" r="3"></circle><path d="m8.5 8.5 11 7M8.5 15.5 20 8"></path></svg></button>
                 </div>
                 <div class="toolbar-context" data-toolbar-for="merge" hidden>
                     <button type="button" class="toolbar-primary" onclick="addMergeFiles()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg><span data-label-source="mergeAddBtn">Videos hinzufugen</span></button>
-                    <button type="button" class="toolbar-icon-button" onclick="startMerging()" aria-label="Merge videos" title="Merge videos"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h4a3 3 0 0 1 3 3v8a3 3 0 0 0 3 3h4M16 16l3 3-3 3"></path></svg></button>
+                    <button type="button" class="toolbar-icon-button" id="toolbarMergeBtn" onclick="startMerging()" aria-label="Merge videos" title="Merge videos"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h4a3 3 0 0 1 3 3v8a3 3 0 0 0 3 3h4M16 16l3 3-3 3"></path></svg></button>
                 </div>
                 <div class="toolbar-context" data-toolbar-for="stats" hidden>
-                    <button type="button" class="toolbar-primary" onclick="refreshArchiveStats()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6 7M5.5 15A7 7 0 0 0 18 17"></path></svg><span data-label-source="btnStatsRefresh">Aktualisieren</span></button>
+                    <button type="button" class="toolbar-primary" id="toolbarStatsRefreshBtn" onclick="refreshArchiveStats()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6 7M5.5 15A7 7 0 0 0 18 17"></path></svg><span data-label-source="btnStatsRefresh">Aktualisieren</span></button>
                 </div>
                 <div class="toolbar-context" data-toolbar-for="archive" hidden>
                     <button type="button" class="toolbar-primary" onclick="performArchiveSearch()"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"></circle><path d="m15 15 5 5"></path></svg><span data-label-source="btnArchiveSearch">Suchen</span></button>
                 </div>
                 <div class="toolbar-context" data-toolbar-for="settings" hidden>
-                    <button type="button" class="toolbar-primary" onclick="saveSettings()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"></path></svg><span data-label-source="saveSettingsBtn">Speichern</span></button>
-                    <button type="button" class="toolbar-icon-button" onclick="checkUpdate()" aria-label="Check for updates" title="Check for updates"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6 7M5.5 15A7 7 0 0 0 18 17"></path></svg></button>
+                    <label class="workspace-settings-search" for="settingsSearchInput">
+                        <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"></circle><path d="m15 15 5 5"></path></svg>
+                        <input type="search" id="settingsSearchInput" placeholder="Search settings…" oninput="filterSettings(this.value)" autocomplete="off">
+                    </label>
+                    <button type="button" class="toolbar-icon-button" id="toolbarCheckUpdateBtn" onclick="checkUpdate()" aria-label="Check for updates" title="Check for updates"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6 7M5.5 15A7 7 0 0 0 18 17"></path></svg></button>
                 </div>
                 <h1 class="workspace-title" id="pageTitle">VODs</h1>
                 <div class="header-actions workspace-toolbar-actions" data-toolbar-search-for="vods">
                     <div class="header-search workspace-search">
-                        <input type="text" id="newStreamer" placeholder="Streamer hinzufugen..." onkeypress="if(event.key==='Enter')addStreamer()">
+                            <input type="text" id="newStreamer" placeholder="Streamer hinzufugen…" onkeypress="if(event.key==='Enter')addStreamer()">
                         <button id="btnAddStreamer" type="button" onclick="addStreamer()" aria-label="Add streamer" title="Add streamer">+</button>
                     </div>
                     <span id="refreshText" class="sr-only">Aktualisieren</span>
@@ -398,7 +410,7 @@
                     </div>
                     <div class="vod-grid" id="vodGrid">
                         <div class="empty-state">
-                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-4 5-4v8zm2-8l5 4-5 4V9z"/></svg>
+                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h8l4 4v16H6z"></path><path d="M14 2v5h5M10 11l5 3-5 3z"></path></svg>
                             <h3 id="vodGridEmptyTitle">Keine VODs</h3>
                             <p id="vodGridEmptyText">Wahle einen Streamer aus der Liste oder fuge einen neuen hinzu.</p>
                         </div>
@@ -604,11 +616,11 @@
                                 </button>
                                 <button type="button" class="workspace-theme-choice active" data-theme="twitch" aria-pressed="true" onclick="selectWorkspaceTheme('twitch')">
                                     <span class="workspace-theme-preview theme-preview-dark" aria-hidden="true"><span></span><span></span><span></span></span>
-                                    <span>Dark</span>
+                                    <span id="themeDarkOption">Dark</span>
                                 </button>
                                 <button type="button" class="workspace-theme-choice" data-theme="system" aria-pressed="false" onclick="selectWorkspaceTheme('system')">
                                     <span class="workspace-theme-preview theme-preview-system" aria-hidden="true"><span></span><span></span><span></span></span>
-                                    <span>System</span>
+                                    <span id="themeSystemOption">System</span>
                                 </button>
                             </div>
                             <select id="themeSelect" class="theme-select-fallback" onchange="changeTheme(this.value)">
@@ -662,7 +674,7 @@
                             <label id="storageLabel" for="downloadPath">Speicherort</label>
                             <div class="form-row">
                                 <input type="text" id="downloadPath" readonly>
-                                <button type="button" class="btn-secondary" onclick="selectFolder()">Ordner</button>
+                                <button type="button" class="btn-secondary" id="selectFolderBtn" onclick="selectFolder()">Ordner</button>
                                 <button type="button" class="btn-secondary" id="openFolderBtn" onclick="openFolder()">Offnen</button>
                             </div>
                         </div>
@@ -785,7 +797,7 @@
 
                     <div class="settings-card">
                         <h3 id="updateTitle">Updates</h3>
-                        <p id="versionInfo" class="card-intro">Version: v1.0.1</p>
+                        <p id="versionInfo" class="card-intro">Version: v1.0.2</p>
                         <button type="button" class="btn-secondary" id="checkUpdateBtn" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
 
@@ -938,7 +950,7 @@
 
     <div class="modal-overlay" id="commandPaletteModal" role="dialog" aria-modal="true" aria-labelledby="commandPaletteTitle">
         <div class="modal command-palette">
-            <h2 id="commandPaletteTitle" class="cp-title">Command Palette</h2>
+            <h2 id="commandPaletteTitle" class="cp-title">Befehlspalette</h2>
             <input
                 type="text"
                 id="commandPaletteInput"
@@ -946,9 +958,9 @@
                 placeholder="Suche Befehl..."
                 autocomplete="off"
                 spellcheck="false"
-                aria-label="Command Palette"
+                aria-label="Befehlspalette"
             />
-            <ul id="commandPaletteList" class="cp-list" role="listbox" aria-label="Command results"></ul>
+            <ul id="commandPaletteList" class="cp-list" role="listbox" aria-label="Befehlsergebnisse"></ul>
             <p class="cp-hint" id="commandPaletteHint">Up/Down zum Navigieren, Enter zum Ausfuehren, Esc zum Schliessen</p>
         </div>
     </div>

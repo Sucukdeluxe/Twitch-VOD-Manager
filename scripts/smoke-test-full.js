@@ -2,30 +2,13 @@ const { _electron: electron } = require('playwright');
 const path = require('path');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
-
-const APPDATA_DIR = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'Twitch_VOD_Manager');
-const CONFIG_FILE = path.join(APPDATA_DIR, 'config.json');
-const QUEUE_FILE = path.join(APPDATA_DIR, 'download_queue.json');
-const TMP_DIR = path.join(process.cwd(), 'tmp_e2e_full');
-const MEDIA_A = path.join(TMP_DIR, 'in_a.mp4');
-const MEDIA_B = path.join(TMP_DIR, 'in_b.mp4');
-
-function backupFile(filePath) {
-  if (!fs.existsSync(filePath)) return null;
-  return fs.readFileSync(filePath);
-}
-
-function restoreFile(filePath, backup) {
-  if (backup === null) {
-    if (fs.existsSync(filePath)) {
-      fs.rmSync(filePath, { force: true });
-    }
-    return;
-  }
-
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, backup);
-}
+const {
+  createE2eEnvironment,
+  getElectronLaunchOptions,
+  verifyE2eIsolation,
+  installOfflineFixtures,
+  cleanupE2eEnvironment
+} = require('./e2e-test-environment');
 
 function findFileRecursive(rootDir, fileName) {
   if (!fs.existsSync(rootDir)) return null;
@@ -46,11 +29,11 @@ function findFileRecursive(rootDir, fileName) {
   return null;
 }
 
-function resolveFfmpegBinary() {
+function resolveFfmpegBinary(environment) {
   const direct = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore', windowsHide: true });
   if (direct.status === 0) return 'ffmpeg';
 
-  const bundledRoot = path.join(APPDATA_DIR, 'tools', 'ffmpeg');
+  const bundledRoot = path.join(environment.appDataDir, 'tools', 'ffmpeg');
   const bundled = findFileRecursive(bundledRoot, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
   if (bundled) return bundled;
 
@@ -65,9 +48,10 @@ function runFfmpeg(ffmpegPath, args) {
   }
 }
 
-function ensureTestMedia() {
-  fs.mkdirSync(TMP_DIR, { recursive: true });
-  const ffmpeg = resolveFfmpegBinary();
+function ensureTestMedia(environment) {
+  const mediaA = path.join(environment.mediaDir, 'in_a.mp4');
+  const mediaB = path.join(environment.mediaDir, 'in_b.mp4');
+  const ffmpeg = resolveFfmpegBinary(environment);
 
   runFfmpeg(ffmpeg, [
     '-y',
@@ -75,7 +59,7 @@ function ensureTestMedia() {
     '-i', 'testsrc=size=640x360:rate=30',
     '-t', '4',
     '-pix_fmt', 'yuv420p',
-    MEDIA_A
+    mediaA
   ]);
 
   runFfmpeg(ffmpeg, [
@@ -84,26 +68,23 @@ function ensureTestMedia() {
     '-i', 'testsrc=size=640x360:rate=30',
     '-t', '3',
     '-pix_fmt', 'yuv420p',
-    MEDIA_B
+    mediaB
   ]);
+
+  return { mediaA, mediaB };
 }
 
 async function run() {
-  const configBackup = backupFile(CONFIG_FILE);
-  const queueBackup = backupFile(QUEUE_FILE);
-
-  let app;
+  const environment = createE2eEnvironment('full');
+  let app = null;
   try {
-    ensureTestMedia();
+    const { mediaA, mediaB } = ensureTestMedia(environment);
 
-    const electronPath = require('electron');
-    app = await electron.launch({
-      executablePath: electronPath,
-      args: ['.'],
-      cwd: process.cwd()
-    });
+    app = await electron.launch(getElectronLaunchOptions(environment));
 
     const win = await app.firstWindow();
+    const isolation = await verifyE2eIsolation(app, win, environment);
+    const fixtures = await installOfflineFixtures(app);
     const issues = [];
 
     win.on('pageerror', (err) => {
@@ -144,15 +125,9 @@ async function run() {
         }
       };
 
-      const cleanupDownloads = async () => {
-        await window.api.cancelDownload();
-        await sleep(400);
-      };
-
       const initialConfig = await window.api.getConfig();
 
       try {
-        await cleanupDownloads();
         await clearQueue();
 
         const requiredGlobals = [
@@ -227,7 +202,7 @@ async function run() {
 
         await window.api.saveConfig({ client_id: '', client_secret: '', download_path: tmpDir });
         window.showTab('vods');
-        await window.selectStreamer('xrohat');
+        await window.selectStreamer('fixture_streamer');
 
         await waitFor(() => document.querySelectorAll('.vod-card').length > 0, 18000, 300);
         const vodCards = document.querySelectorAll('.vod-card').length;
@@ -250,17 +225,17 @@ async function run() {
 
         await window.api.saveConfig({ prevent_duplicate_downloads: true });
         await window.api.addToQueue({
-          url: 'https://www.twitch.tv/videos/2695851503',
+          url: 'https://www.twitch.tv/videos/999999999999999',
           title: '__E2E_FULL__dup',
           date: '2026-02-01T00:00:00Z',
-          streamer: 'xrohat',
+          streamer: 'fixture_streamer',
           duration_str: '1h0m0s'
         });
         await window.api.addToQueue({
-          url: 'https://www.twitch.tv/videos/2695851503',
+          url: 'https://www.twitch.tv/videos/999999999999999',
           title: '__E2E_FULL__dup',
           date: '2026-02-01T00:00:00Z',
-          streamer: 'xrohat',
+          streamer: 'fixture_streamer',
           duration_str: '1h0m0s'
         });
         let q = await window.api.getQueue();
@@ -290,7 +265,7 @@ async function run() {
         const clipInvalidStatus = (document.getElementById('clipStatus')?.textContent || '').trim();
         assert(clipInvalidStatus.includes('Invalid clip URL') || clipInvalidStatus.includes('Ungueltige Clip-URL'), 'Invalid clip URL localization failed');
 
-        window.openClipDialog('https://www.twitch.tv/videos/2695851503', '__E2E_FULL__clip', '2026-02-01T00:00:00Z', 'xrohat', '1h0m0s');
+        window.openClipDialog('https://www.twitch.tv/videos/999999999999999', '__E2E_FULL__clip', '2026-02-01T00:00:00Z', 'fixture_streamer', '1h0m0s');
         document.getElementById('clipStartTime').value = '00:00:10';
         document.getElementById('clipEndTime').value = '00:00:22';
         window.updateFromInput('start');
@@ -304,86 +279,17 @@ async function run() {
         await clearQueue();
 
         await window.api.addToQueue({
-          url: 'https://www.twitch.tv/videos/2695851503',
-          title: '__E2E_FULL__pause',
-          date: '2026-02-01T00:00:00Z',
-          streamer: 'xrohat',
-          duration_str: '4h0m0s'
-        });
-
-        await window.api.startDownload();
-        await waitFor(async () => {
-          const list = await window.api.getQueue();
-          const it = list.find((x) => x.title === '__E2E_FULL__pause');
-          return it && (it.status === 'downloading' || it.status === 'error');
-        }, 25000, 400);
-
-        await window.api.pauseDownload();
-        await sleep(1400);
-        q = await window.api.getQueue();
-        const paused = q.find((item) => item.title === '__E2E_FULL__pause');
-        checks.pauseResume = {
-          pausedStatus: paused?.status || 'none',
-          buttonText: (document.getElementById('btnStart')?.textContent || '').trim()
-        };
-        assert(paused?.status === 'paused', 'Pause did not set item status to paused');
-
-        await window.api.startDownload();
-        await sleep(900);
-        const resumed = await window.api.isDownloading();
-        checks.pauseResume.resumed = resumed;
-        assert(resumed === true, 'Resume did not restart downloading');
-
-        await cleanupDownloads();
-        await clearQueue();
-
-        await window.api.addToQueue({
-          url: 'not-a-valid-url',
-          title: '__E2E_FULL__retry',
-          date: '2026-02-01T00:00:00Z',
-          streamer: 'xrohat',
-          duration_str: '1h0m0s'
-        });
-        await window.api.startDownload();
-
-        const reachedError = await waitFor(async () => {
-          const list = await window.api.getQueue();
-          const it = list.find((item) => item.title === '__E2E_FULL__retry');
-          return it && it.status === 'error';
-        }, 90000, 1000);
-
-        q = await window.api.getQueue();
-        const failed = q.find((item) => item.title === '__E2E_FULL__retry');
-        checks.retryFlow = {
-          failedStatus: failed?.status || 'none',
-          failedReason: failed?.last_error || ''
-        };
-        assert(reachedError && failed?.status === 'error', 'Retry item did not reach deterministic error state');
-        assert(Boolean(failed?.last_error), 'Retry test item missing error reason');
-
-        await window.api.retryFailedDownloads();
-        await sleep(500);
-        q = await window.api.getQueue();
-        const afterRetry = q.find((item) => item.title === '__E2E_FULL__retry');
-        checks.retryFlow.afterRetryStatus = afterRetry?.status || 'none';
-        const retryAcceptedStatuses = ['pending', 'downloading', 'error'];
-        assert(retryAcceptedStatuses.includes(afterRetry?.status || ''), 'Retry failed action did not update item state');
-
-        await cleanupDownloads();
-        await clearQueue();
-
-        await window.api.addToQueue({
-          url: 'https://www.twitch.tv/videos/does-not-exist',
+          url: 'https://www.twitch.tv/videos/999999999999999',
           title: '__E2E_FULL__orderA',
           date: '2026-02-01T00:00:00Z',
-          streamer: 'xrohat',
+          streamer: 'fixture_streamer',
           duration_str: '1h0m0s'
         });
         await window.api.addToQueue({
-          url: 'https://www.twitch.tv/videos/does-not-exist',
+          url: 'https://www.twitch.tv/videos/999999999999998',
           title: '__E2E_FULL__orderB',
           date: '2026-02-01T00:00:00Z',
-          streamer: 'xrohat',
+          streamer: 'fixture_streamer',
           duration_str: '1h0m0s'
         });
 
@@ -419,7 +325,6 @@ async function run() {
       } catch (e) {
         failures.push(`Unexpected exception: ${String(e)}`);
       } finally {
-        await cleanupDownloads();
         await clearQueue();
         await window.api.saveConfig(initialConfig);
         config = await window.api.getConfig();
@@ -428,15 +333,17 @@ async function run() {
 
       return { checks, failures };
     }, {
-      mediaA: MEDIA_A.replace(/\\/g, '/'),
-      mediaB: MEDIA_B.replace(/\\/g, '/'),
-      tmpDir: TMP_DIR.replace(/\\/g, '/')
+      mediaA: mediaA.replace(/\\/g, '/'),
+      mediaB: mediaB.replace(/\\/g, '/'),
+      tmpDir: environment.mediaDir.replace(/\\/g, '/')
     });
 
     await app.close();
     app = null;
 
     const output = {
+      isolation,
+      fixtures,
       ...summary,
       runtimeIssues: issues
     };
@@ -444,23 +351,20 @@ async function run() {
     console.log(JSON.stringify(output, null, 2));
 
     const failed = output.failures.length > 0 || output.runtimeIssues.length > 0;
-    process.exit(failed ? 1 : 0);
+    return failed ? 1 : 0;
   } finally {
     if (app) {
-      try {
-        await app.close();
-      } catch {
-        // ignore
-      }
+      await app.close().catch(() => undefined);
     }
-
-    restoreFile(CONFIG_FILE, configBackup);
-    restoreFile(QUEUE_FILE, queueBackup);
-    fs.rmSync(TMP_DIR, { recursive: true, force: true });
+    cleanupE2eEnvironment(environment);
   }
 }
 
-run().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+run()
+  .then((exitCode) => {
+    process.exitCode = exitCode;
+  })
+  .catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  });

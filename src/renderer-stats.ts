@@ -1,6 +1,13 @@
+let archiveStatsRefreshInFlight = false;
+
 async function refreshArchiveStats(): Promise<void> {
+    if (archiveStatsRefreshInFlight) return;
+
     const btn = document.getElementById('btnStatsRefresh') as HTMLButtonElement | null;
+    const toolbarBtn = document.getElementById('toolbarStatsRefreshBtn') as HTMLButtonElement | null;
+    archiveStatsRefreshInFlight = true;
     if (btn) btn.disabled = true;
+    if (toolbarBtn) toolbarBtn.disabled = true;
     const lastLabel = document.getElementById('statsLastScannedLabel');
     if (lastLabel) lastLabel.textContent = (UI_TEXT.static.statsScanning as string) || 'Scanning...';
 
@@ -9,9 +16,11 @@ async function refreshArchiveStats(): Promise<void> {
         renderArchiveStats(stats);
     } catch (e) {
         const summary = document.getElementById('statsSummaryGrid');
-        if (summary) summary.textContent = `Fehler: ${String(e)}`;
+        if (summary) summary.textContent = `${UI_TEXT.static.errorPrefix}: ${String(e)}`;
     } finally {
+        archiveStatsRefreshInFlight = false;
         if (btn) btn.disabled = false;
+        if (toolbarBtn) toolbarBtn.disabled = false;
     }
 }
 
@@ -19,7 +28,7 @@ function renderArchiveStats(stats: ArchiveStats): void {
     const lastLabel = document.getElementById('statsLastScannedLabel');
     if (lastLabel) {
         const dt = new Date(stats.scannedAt);
-        lastLabel.textContent = `${UI_TEXT.static.statsScannedAt}: ${dt.toLocaleString()}`;
+        lastLabel.textContent = `${UI_TEXT.static.statsScannedAt}: ${formatUiDateTime(dt)}`;
     }
 
     renderStatsSummary(stats);

@@ -44,26 +44,6 @@ async function init(): Promise<void> {
     renderStreamers();
     renderQueue();
 
-    // Keyboard activation for nav-items (Enter / Space). The items are
-    // div[role="button"][tabindex="0"], so browsers won't synthesise a
-    // click on Enter/Space natively — we wire it here once via event
-    // delegation so the listener doesn't need re-binding per tab switch.
-    const nav = document.querySelector('.nav');
-    if (nav && !nav.hasAttribute('data-keynav-bound')) {
-        nav.setAttribute('data-keynav-bound', '1');
-        nav.addEventListener('keydown', (event) => {
-            const ev = event as KeyboardEvent;
-            if (ev.key !== 'Enter' && ev.key !== ' ') return;
-            const target = ev.target as HTMLElement | null;
-            const item = target?.closest('.nav-item') as HTMLElement | null;
-            if (!item) return;
-            const tab = item.dataset.tab;
-            if (!tab) return;
-            ev.preventDefault();
-            showTab(tab);
-        });
-    }
-
     // Kick off live-status subscription so the sidebar dots populate.
     const liveStatusInit = (window as unknown as { initLiveStatusSubscription?: () => Promise<void> }).initLiveStatusSubscription;
     if (typeof liveStatusInit === 'function') void liveStatusInit();
@@ -807,10 +787,12 @@ function getQueueStateFingerprint(items: QueueItem[]): string {
 }
 
 function updateDownloadButtonState(): void {
-    const btn = byId('btnStart');
+    const btn = byId<HTMLButtonElement>('btnStart');
     const hasPaused = queue.some((item) => item.status === 'paused');
+    const hasRunnable = queue.some((item) => item.status === 'pending' || item.status === 'paused');
     btn.textContent = downloading ? UI_TEXT.queue.stop : (hasPaused ? UI_TEXT.queue.resume : UI_TEXT.queue.start);
     btn.classList.toggle('downloading', downloading);
+    btn.disabled = !downloading && !hasRunnable;
 }
 
 async function syncQueueAndDownloadState(): Promise<void> {
@@ -888,14 +870,49 @@ function syncWorkspaceChrome(tab: string): void {
     const activeContext = document.querySelector<HTMLElement>(`[data-context-for="${tab}"]`);
     const contextHeading = activeContext?.querySelector<HTMLElement>('[data-context-heading]');
     if (contextHeading && navLabel) contextHeading.textContent = navLabel;
+    if (activeContext) syncWorkspaceContextSelection(activeContext);
 
     const workspace = document.querySelector<HTMLElement>('.workspace-shell');
     if (workspace) workspace.dataset.activeWorkspace = tab;
 }
 
-function focusWorkspaceTarget(id: string): void {
+function syncWorkspaceContextSelection(panel: HTMLElement): void {
+    const links = Array.from(panel.querySelectorAll<HTMLButtonElement>('.context-list .context-link'));
+    const activeLink = links.find((link) => link.classList.contains('active')) || links[0];
+    links.forEach((link) => {
+        const active = link === activeLink;
+        link.classList.toggle('active', active);
+        if (active) link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+    });
+
+    const switchers = Array.from(panel.querySelectorAll<HTMLButtonElement>('.context-switcher button'));
+    const activeSwitcher = switchers.find((button) => button.classList.contains('active')) || switchers[0];
+    switchers.forEach((button) => {
+        const active = button === activeSwitcher;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+    });
+}
+
+function focusWorkspaceTarget(id: string, source?: HTMLElement): void {
     const target = document.getElementById(id) as HTMLElement | null;
     if (!target) return;
+
+    const group = source?.closest<HTMLElement>('.context-list, .context-switcher');
+    if (group && source) {
+        const buttons = Array.from(group.querySelectorAll<HTMLButtonElement>('button'));
+        buttons.forEach((button) => {
+            const active = button === source;
+            button.classList.toggle('active', active);
+            if (group.classList.contains('context-list')) {
+                if (active) button.setAttribute('aria-current', 'page');
+                else button.removeAttribute('aria-current');
+            } else {
+                button.setAttribute('aria-pressed', String(active));
+            }
+        });
+    }
 
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     const focusTarget = target.matches('button, input, select, textarea, [tabindex]')
@@ -1487,10 +1504,15 @@ async function confirmClipDialog(): Promise<void> {
     closeClipDialog();
 }
 
+let clipDownloadInFlight = false;
+
 async function downloadClip(): Promise<void> {
+    if (clipDownloadInFlight) return;
+
     const url = byId<HTMLInputElement>('clipUrl').value.trim();
     const status = byId('clipStatus');
-    const btn = byId('btnClip');
+    const btn = byId<HTMLButtonElement>('btnClip');
+    const toolbarBtn = byId<HTMLButtonElement>('toolbarClipDownloadBtn');
 
     if (!url) {
         status.textContent = UI_TEXT.clips.enterUrl;
@@ -1498,27 +1520,33 @@ async function downloadClip(): Promise<void> {
         return;
     }
 
+    clipDownloadInFlight = true;
     btn.disabled = true;
+    toolbarBtn.disabled = true;
     btn.textContent = UI_TEXT.clips.loadingButton;
     status.textContent = UI_TEXT.clips.loadingStatus;
     status.className = 'clip-status loading';
 
-    const result = await window.api.downloadClip(url);
+    try {
+        const result = await window.api.downloadClip(url);
+        if (result.success) {
+            status.textContent = UI_TEXT.clips.success;
+            status.className = 'clip-status success';
+            return;
+        }
 
-    btn.disabled = false;
-    btn.textContent = UI_TEXT.clips.downloadButton;
-
-    if (result.success) {
-        status.textContent = UI_TEXT.clips.success;
-        status.className = 'clip-status success';
-        return;
+        const backendError = (result.error || '').trim();
+        status.textContent = UI_TEXT.clips.errorPrefix + (backendError || UI_TEXT.clips.unknownError);
+        status.className = 'clip-status error';
+    } catch {
+        status.textContent = UI_TEXT.clips.errorPrefix + UI_TEXT.clips.unknownError;
+        status.className = 'clip-status error';
+    } finally {
+        clipDownloadInFlight = false;
+        btn.disabled = false;
+        toolbarBtn.disabled = false;
+        btn.textContent = UI_TEXT.clips.downloadButton;
     }
-
-    // Backend now produces locale-aware error strings via tBackend(),
-    // so we no longer need a renderer-side translation table here.
-    const backendError = (result.error || '').trim();
-    status.textContent = UI_TEXT.clips.errorPrefix + (backendError || UI_TEXT.clips.unknownError);
-    status.className = 'clip-status error';
 }
 
 async function loadCutterFromPath(filePath: string): Promise<void> {

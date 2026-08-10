@@ -1,61 +1,16 @@
 const { _electron: electron } = require('playwright');
-const path = require('path');
-const fs = require('fs');
+const {
+  createE2eEnvironment,
+  writeE2eConfig,
+  readE2eConfig,
+  getElectronLaunchOptions,
+  verifyE2eIsolation,
+  installOfflineFixtures,
+  cleanupE2eEnvironment
+} = require('./e2e-test-environment');
 
-const APPDATA_DIR = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'Twitch_VOD_Manager');
-const CONFIG_FILE = path.join(APPDATA_DIR, 'config.json');
-
-const DEFAULT_CONFIG = {
-  client_id: '',
-  client_secret: '',
-  download_path: path.join(process.env.USERPROFILE || 'C:\\Users\\ploet', 'Desktop', 'Twitch_VODs'),
-  streamers: [],
-  theme: 'twitch',
-  download_mode: 'full',
-  part_minutes: 120,
-  language: 'en',
-  filename_template_vod: '{title}.mp4',
-  filename_template_parts: '{date}_Part{part_padded}.mp4',
-  filename_template_clip: '{date}_{part}.mp4',
-  smart_queue_scheduler: true,
-  performance_mode: 'balanced',
-  prevent_duplicate_downloads: true,
-  metadata_cache_minutes: 10
-};
-
-function backupFile(filePath) {
-  if (!fs.existsSync(filePath)) return null;
-  return fs.readFileSync(filePath);
-}
-
-function restoreFile(filePath, backup) {
-  if (backup === null) {
-    if (fs.existsSync(filePath)) {
-      fs.rmSync(filePath, { force: true });
-    }
-    return;
-  }
-
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, backup);
-}
-
-function writeConfig(config) {
-  fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-}
-
-function readConfig() {
-  return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-}
-
-async function launchApp() {
-  const electronPath = require('electron');
-  return electron.launch({
-    executablePath: electronPath,
-    args: ['.'],
-    cwd: process.cwd()
-  });
+async function launchApp(environment) {
+  return electron.launch(getElectronLaunchOptions(environment));
 }
 
 async function setSettingsAndBlur(win, mode, partMinutes) {
@@ -102,53 +57,54 @@ async function readSettingsFromUi(win) {
 }
 
 async function run() {
-  const configBackup = backupFile(CONFIG_FILE);
-  const baseConfig = configBackup ? { ...DEFAULT_CONFIG, ...JSON.parse(String(configBackup)) } : { ...DEFAULT_CONFIG };
-
+  const environment = createE2eEnvironment('settings-autosave');
   let app = null;
   try {
-    writeConfig({
-      ...baseConfig,
-      client_id: '',
-      client_secret: '',
+    writeE2eConfig(environment, {
       download_mode: 'full',
       part_minutes: 120
     });
 
-    app = await launchApp();
+    const isolations = [];
+    app = await launchApp(environment);
     let win = await app.firstWindow();
+    isolations.push(await verifyE2eIsolation(app, win, environment));
+    await installOfflineFixtures(app);
     await win.waitForTimeout(2200);
     await setSettingsAndBlur(win, 'parts', 60);
     await app.close();
     app = null;
 
-    const afterBlurClose = readConfig();
+    const afterBlurClose = readE2eConfig(environment);
 
-    app = await launchApp();
+    app = await launchApp(environment);
     win = await app.firstWindow();
+    isolations.push(await verifyE2eIsolation(app, win, environment));
+    await installOfflineFixtures(app);
     await win.waitForTimeout(2200);
     const reopenedAfterBlur = await readSettingsFromUi(win);
     await app.close();
     app = null;
 
-    writeConfig({
-      ...baseConfig,
-      client_id: '',
-      client_secret: '',
+    writeE2eConfig(environment, {
       download_mode: 'full',
       part_minutes: 120
     });
 
-    app = await launchApp();
+    app = await launchApp(environment);
     win = await app.firstWindow();
+    isolations.push(await verifyE2eIsolation(app, win, environment));
+    const fixtures = await installOfflineFixtures(app);
     await win.waitForTimeout(2200);
     await setSettingsAndCloseImmediately(win, 'parts', 75);
     await app.close();
     app = null;
 
-    const afterDirectClose = readConfig();
+    const afterDirectClose = readE2eConfig(environment);
 
     const result = {
+      isolation: isolations,
+      fixtures,
       afterBlurClose: {
         config: {
           download_mode: afterBlurClose.download_mode,
@@ -176,21 +132,20 @@ async function run() {
       afterDirectClose.download_mode === 'parts' &&
       afterDirectClose.part_minutes === 75;
 
-    process.exit(blurCaseOk && directCloseOk ? 0 : 1);
+    return blurCaseOk && directCloseOk ? 0 : 1;
   } finally {
     if (app) {
-      try {
-        await app.close();
-      } catch {
-        // ignore
-      }
+      await app.close().catch(() => undefined);
     }
-
-    restoreFile(CONFIG_FILE, configBackup);
+    cleanupE2eEnvironment(environment);
   }
 }
 
-run().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+run()
+  .then((exitCode) => {
+    process.exitCode = exitCode;
+  })
+  .catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  });

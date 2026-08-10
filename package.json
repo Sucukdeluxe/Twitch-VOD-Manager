@@ -1,6 +1,6 @@
 {
   "name": "twitch-vod-manager",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Twitch VOD Manager - Download Twitch VODs easily",
   "main": "dist/main.js",
   "author": "Sucukdeluxe",
@@ -16,7 +16,9 @@
     "test:e2e:guide": "node scripts/smoke-test-template-guide.js",
     "test:e2e:full": "node scripts/smoke-test-full.js",
     "test:e2e:workspace-ui": "npm run build && node scripts/smoke-test-workspace-ui.js",
-    "test:e2e:release": "npm run build && npm run test:unit && npm run test:e2e:update-logic && npm run test:e2e:public-release && npm run test:e2e && npm run test:e2e:guide && npm run test:e2e:full",
+    "test:e2e:isolation": "node scripts/smoke-test-e2e-isolation-contract.js",
+    "test:e2e:settings-autosave": "node scripts/smoke-test-settings-autosave.js",
+    "test:e2e:release": "npm run build && npm run test:unit && npm run test:e2e:update-logic && npm run test:merge-split && npm run test:e2e:public-release && npm run test:e2e:workspace-ui && npm run test:e2e:isolation && npm run test:e2e && npm run test:e2e:guide && npm run test:e2e:full && npm run test:e2e:settings-autosave",
     "test:e2e:stress": "npm run test:e2e:release && npm run test:e2e:release && npm run test:e2e:release",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

@@ -726,13 +726,7 @@ async function removeStreamer(name: string): Promise<void> {
     currentStreamer = null;
     const hide = (window as unknown as { hideStreamerProfileHeader?: () => void }).hideStreamerProfileHeader;
     if (typeof hide === 'function') hide();
-    byId('vodGrid').innerHTML = `
-        <div class="empty-state">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-4 5-4v8zm2-8l5 4-5 4V9z"/></svg>
-            <h3>${UI_TEXT.vods.noneTitle}</h3>
-            <p>${UI_TEXT.vods.noneText}</p>
-        </div>
-    `;
+    setVodGridEmptyState(byId('vodGrid'), UI_TEXT.vods.noneTitle, UI_TEXT.vods.noneText);
 }
 
 async function selectStreamer(name: string, forceRefresh = false): Promise<void> {
@@ -803,6 +797,24 @@ async function selectStreamer(name: string, forceRefresh = false): Promise<void>
     renderVODs(vods, name);
 }
 
+function createVodEmptyStateIcon(): SVGSVGElement {
+    const namespace = 'http://www.w3.org/2000/svg';
+    const icon = document.createElementNS(namespace, 'svg');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('viewBox', '0 0 24 24');
+    icon.setAttribute('fill', 'none');
+    icon.setAttribute('stroke', 'currentColor');
+    icon.setAttribute('stroke-width', '1.5');
+    icon.setAttribute('stroke-linecap', 'round');
+    icon.setAttribute('stroke-linejoin', 'round');
+    const page = document.createElementNS(namespace, 'path');
+    page.setAttribute('d', 'M6 2h8l4 4v16H6zM14 2v5h5');
+    const play = document.createElementNS(namespace, 'path');
+    play.setAttribute('d', 'M10 11l5 3-5 3z');
+    icon.append(page, play);
+    return icon;
+}
+
 function setVodGridEmptyState(grid: HTMLElement, title: string, text: string): void {
     // Build via DOM API so the (locale-only) strings can never escape into HTML.
     const wrap = document.createElement('div');
@@ -811,8 +823,7 @@ function setVodGridEmptyState(grid: HTMLElement, title: string, text: string): v
     h3.textContent = title;
     const p = document.createElement('p');
     p.textContent = text;
-    wrap.appendChild(h3);
-    wrap.appendChild(p);
+    wrap.append(createVodEmptyStateIcon(), h3, p);
     grid.replaceChildren(wrap);
 }
 

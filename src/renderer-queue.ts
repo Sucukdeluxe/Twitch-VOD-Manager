@@ -484,8 +484,12 @@ function renderQueue(): void {
     const list = byId('queueList');
     byId('queueCount').textContent = String(queue.length);
     const retryBtn = byId<HTMLButtonElement>('btnRetryFailed');
+    const clearBtn = byId<HTMLButtonElement>('btnClear');
     const hasFailed = queue.some((item) => item.status === 'error');
+    const hasCompleted = queue.some((item) => item.status === 'completed');
     retryBtn.disabled = !hasFailed;
+    clearBtn.disabled = !hasCompleted;
+    updateDownloadButtonState();
 
     const renderFingerprint = getQueueRenderFingerprint(queue);
     if (renderFingerprint === lastQueueRenderFingerprint) {
@@ -556,7 +560,7 @@ function renderQueue(): void {
                         <div><span class="queue-detail-label">URL:</span> ${escapeHtml(item.url)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailStreamer)}</span> ${escapeHtml(item.streamer)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDuration)}</span> ${escapeHtml(item.duration_str)}</div>
-                        <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDate)}</span> ${escapeHtml(new Date(item.date).toLocaleString())}</div>
+                        <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDate)}</span> ${escapeHtml(formatUiDateTime(item.date))}</div>
                         ${renderQueueItemFileActions(item)}
                     </div>
                 </div>

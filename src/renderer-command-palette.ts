@@ -30,20 +30,22 @@ interface PaletteCommand {
 
         // hint 'Open' statt 'Tab' — 'Tab' las sich wie eine Tastatur-Taste
         // ('druecke Tab') statt 'oeffnet diesen Tab'.
-        const tabs: Array<{ id: string; labels: string[]; hint: string }> = [
-            { id: 'vods', labels: ['VODs', 'videos', 'streams'], hint: 'Open' },
-            { id: 'queue', labels: ['Queue', 'downloads', 'warteschlange'], hint: 'Open' },
-            { id: 'streamers', labels: ['Streamers', 'channels'], hint: 'Open' },
-            { id: 'stats', labels: ['Stats', 'statistiken', 'dashboard'], hint: 'Open' },
-            { id: 'archive', labels: ['Archive', 'archiv'], hint: 'Open' },
-            { id: 'settings', labels: ['Settings', 'einstellungen', 'config'], hint: 'Open' },
+        const commandText = UI_TEXT.static.commandPaletteCommands;
+        const tabs: Array<{ id: string; label: string; keywords: string }> = [
+            { id: 'vods', ...commandText.vods },
+            { id: 'clips', ...commandText.clips },
+            { id: 'cutter', ...commandText.cutter },
+            { id: 'merge', ...commandText.merge },
+            { id: 'stats', ...commandText.stats },
+            { id: 'archive', ...commandText.archive },
+            { id: 'settings', ...commandText.settings },
         ];
 
         const tabCommands: PaletteCommand[] = tabs.map(t => ({
             id: 'tab:' + t.id,
-            label: t.labels[0],
-            hint: t.hint,
-            keywords: t.labels.join(' ').toLowerCase(),
+            label: t.label,
+            hint: UI_TEXT.static.commandPaletteOpenHint,
+            keywords: `${t.label} ${t.keywords}`.toLowerCase(),
             action: () => showTab(t.id),
         }));
 
@@ -58,7 +60,7 @@ interface PaletteCommand {
                 streamerCommands.push({
                     id: 'streamer:' + name.toLowerCase(),
                     label: name,
-                    hint: 'Streamer',
+                    hint: UI_TEXT.static.commandPaletteStreamerHint,
                     keywords: ('@' + name + ' ' + name).toLowerCase(),
                     action: () => {
                         showTab('vods');

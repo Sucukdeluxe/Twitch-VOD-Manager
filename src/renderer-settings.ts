@@ -179,6 +179,14 @@ function updateStatus(text: string, connected: boolean): void {
     dot.classList.add(connected ? 'connected' : 'error');
 }
 
+function filterSettings(query: string): void {
+    const normalizedQuery = query.trim().toLocaleLowerCase(getIntlLocale());
+    document.querySelectorAll<HTMLElement>('#settingsTab .settings-card').forEach((card) => {
+        const searchableText = (card.textContent || '').toLocaleLowerCase(getIntlLocale());
+        card.hidden = normalizedQuery.length > 0 && !searchableText.includes(normalizedQuery);
+    });
+}
+
 function changeLanguage(lang: string): void {
     const normalized = setLanguage(lang);
     byId<HTMLSelectElement>('languageSelect').value = normalized;
@@ -208,6 +216,7 @@ function changeLanguage(lang: string): void {
     void refreshRuntimeMetrics();
     void refreshAutomationStatusLine();
     validateFilenameTemplates();
+    filterSettings(byId<HTMLInputElement>('settingsSearchInput').value);
 }
 
 function updateLanguagePicker(lang: string): void {

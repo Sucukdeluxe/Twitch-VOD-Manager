@@ -2470,8 +2470,8 @@ async function getVodStoryboard(vodId: string): Promise<VodStoryboard | null> {
             return null;
         }
 
-        // The manifest URL points at e.g. .../storyboards/2767872722-info.json
-        // and sprite filenames are relative (e.g. "2767872722-high-0.jpg").
+        // The manifest URL points at e.g. .../storyboards/{vodId}-info.json
+        // and sprite filenames are relative (e.g. "{vodId}-high-0.jpg").
         // Strip the JSON filename to get the base, then append the sprite.
         const baseUrl = manifestUrl.replace(/\/[^/]+$/, '/');
         const firstSpriteUrl = baseUrl + entry.images[0];

@@ -8,6 +8,7 @@ let latestDownloadProgress: UpdateDownloadProgress | null = null;
 let updateBannerState: 'idle' | 'available' | 'downloading' | 'ready' = 'idle';
 let updateChangelogExpanded = false;
 let shouldOpenUpdateModalOnAvailable = false;
+let workspaceUpdatePopoverPostponed = false;
 
 const SKIPPED_UPDATE_VERSION_KEY = 'twitch-vod-manager:skipped-update-version';
 
@@ -98,6 +99,15 @@ function setCheckButtonCheckingState(enabled: boolean): void {
     }
 }
 
+function syncWorkspaceUpdateExpansion(): void {
+    const banner = byId('updateBanner');
+    const expanded = banner.classList.contains('show')
+        && !banner.classList.contains('popover-dismissed')
+        && !workspaceUpdatePopoverPostponed
+        && (banner.matches(':hover') || banner.matches(':focus-within'));
+    byId<HTMLButtonElement>('workspaceUpdateButton').setAttribute('aria-expanded', String(expanded));
+}
+
 function syncWorkspaceUpdateState(state: 'idle' | 'available' | 'downloading' | 'ready'): void {
     const banner = byId('updateBanner');
     const button = byId<HTMLButtonElement>('workspaceUpdateButton');
@@ -106,25 +116,35 @@ function syncWorkspaceUpdateState(state: 'idle' | 'available' | 'downloading' | 
 
     banner.dataset.updateState = state;
     button.dataset.updateState = state;
-    button.disabled = state === 'downloading';
+    button.disabled = false;
+    if (state === 'downloading') {
+        button.setAttribute('aria-disabled', 'true');
+    } else {
+        button.removeAttribute('aria-disabled');
+    }
     label.textContent = state === 'ready' ? UI_TEXT.updates.installNow : 'Update';
     button.title = state === 'idle' ? UI_TEXT.static.checkUpdates : description;
     button.setAttribute('aria-label', button.title);
+    syncWorkspaceUpdateExpansion();
+    byId<HTMLButtonElement>('workspaceUpdateLater').hidden = state === 'idle' || state === 'downloading';
+    byId<HTMLButtonElement>('workspaceUpdateDismiss').hidden = state === 'idle';
 }
 
 function showUpdateBanner(): void {
-    byId('updateBanner').classList.add('show');
+    byId('updateBanner').classList.toggle('show', !workspaceUpdatePopoverPostponed);
     syncWorkspaceUpdateState(updateBannerState);
 }
 
 function hideUpdateBanner(): void {
     updateBannerState = 'idle';
+    workspaceUpdatePopoverPostponed = false;
     const banner = byId('updateBanner');
     const progress = byId('updateProgress');
     const bar = byId('updateProgressBar');
     const action = byId<HTMLButtonElement>('updateButton');
 
     banner.classList.remove('show');
+    banner.classList.remove('popover-dismissed');
     progress.classList.add('is-hidden');
     bar.classList.remove('downloading');
     bar.style.width = '0%';
@@ -133,6 +153,26 @@ function hideUpdateBanner(): void {
     action.textContent = UI_TEXT.updates.downloadNow;
     action.disabled = false;
     syncWorkspaceUpdateState('idle');
+}
+
+function postponeWorkspaceUpdatePopover(): void {
+    workspaceUpdatePopoverPostponed = true;
+    const banner = byId('updateBanner');
+    banner.classList.remove('show');
+    banner.classList.add('popover-dismissed');
+    byId<HTMLButtonElement>('workspaceUpdateButton').setAttribute('aria-expanded', 'false');
+    byId<HTMLButtonElement>('workspaceUpdateButton').focus();
+}
+
+function dismissWorkspaceUpdatePopover(): void {
+    hideUpdateBanner();
+    byId<HTMLButtonElement>('workspaceUpdateButton').focus();
+}
+
+for (const eventName of ['mouseenter', 'mouseleave', 'focusin', 'focusout']) {
+    byId('updateBanner').addEventListener(eventName, () => {
+        window.requestAnimationFrame(syncWorkspaceUpdateExpansion);
+    });
 }
 
 function handleWorkspaceUpdateAction(): void {
@@ -148,12 +188,16 @@ function handleWorkspaceUpdateAction(): void {
     void checkUpdate();
 }
 
-function setUpdateBannerAvailableUi(info: UpdateInfo): void {
+function setUpdateBannerAvailableUi(info: UpdateInfo, reveal = true): void {
     const activeInfo = rememberUpdateInfo(info);
     updateReady = false;
     updateDownloadInProgress = false;
     latestDownloadProgress = null;
     updateBannerState = 'available';
+    if (reveal) {
+        workspaceUpdatePopoverPostponed = false;
+        byId('updateBanner').classList.remove('popover-dismissed');
+    }
 
     showUpdateBanner();
     byId('updateProgress').classList.add('is-hidden');
@@ -172,6 +216,8 @@ function setUpdateBannerAvailableUi(info: UpdateInfo): void {
 function setDownloadPendingUi(): void {
     updateReady = false;
     updateBannerState = 'downloading';
+    workspaceUpdatePopoverPostponed = false;
+    byId('updateBanner').classList.remove('popover-dismissed');
 
     showUpdateBanner();
     const button = byId<HTMLButtonElement>('updateButton');
@@ -193,11 +239,13 @@ function setDownloadPendingUi(): void {
 
 function setDownloadReadyUi(info?: UpdateInfo): void {
     const activeInfo = rememberUpdateInfo(info);
-    showUpdateBanner();
     updateReady = true;
     updateDownloadInProgress = false;
     updateBannerState = 'ready';
+    workspaceUpdatePopoverPostponed = false;
+    byId('updateBanner').classList.remove('popover-dismissed');
     latestDownloadProgress = null;
+    showUpdateBanner();
 
     const bar = byId('updateProgressBar');
     bar.classList.remove('downloading');
@@ -426,7 +474,7 @@ function refreshUpdateUiTexts(): void {
     const bar = byId('updateProgressBar');
 
     if (updateBannerState === 'available' && latestUpdateInfo) {
-        setUpdateBannerAvailableUi(latestUpdateInfo);
+        setUpdateBannerAvailableUi(latestUpdateInfo, false);
     } else if (updateBannerState === 'downloading') {
         button.textContent = UI_TEXT.updates.downloading;
         button.disabled = true;
