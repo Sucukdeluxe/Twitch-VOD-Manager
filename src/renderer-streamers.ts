@@ -1198,7 +1198,7 @@ function updateVodBulkBar(): void {
     const bar = document.getElementById('vodBulkBar');
     if (!bar) return;
     const count = selectedVodUrls.size;
-    bar.classList.toggle('is-hidden', count === 0);
+    bar.classList.toggle('is-visible', count > 0);
     const countEl = document.getElementById('vodBulkCount');
     if (countEl) {
         countEl.textContent = UI_TEXT.vods.bulkSelectedCount.replace('{count}', String(count));

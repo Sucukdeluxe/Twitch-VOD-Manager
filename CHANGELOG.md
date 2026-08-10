@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.4 - 2026-08-11
+
+- Added smooth entrance and exit motion for the VOD selection action dock, including Windows systems with reduced animations enabled.
+- Fixed stale Windows desktop and Start menu icons with version-specific shortcut icon resources and an explicit Shell refresh after installation.
+- Kept icon resources available for pinned and copied shortcuts across upgrades while cleaning them up during a full uninstall.
+- Updated the public product overview with a real Twitch channel example.
+
 ## 1.0.3 - 2026-08-10
 
 - Added animated selection markers across the main navigation, sidebar modes, language control, streamer list and settings pages.

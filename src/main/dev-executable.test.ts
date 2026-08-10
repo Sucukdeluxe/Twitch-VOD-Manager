@@ -25,7 +25,7 @@ describe.runIf(process.platform === 'win32')('prepareWindowsDevExecutable', () =
             sourcePath,
             destinationPath,
             iconPath,
-            version: '1.0.3'
+            version: '1.0.4'
         });
 
         const executable = ResEdit.NtExecutable.from(fs.readFileSync(destinationPath));

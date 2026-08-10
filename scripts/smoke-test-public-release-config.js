@@ -6,6 +6,7 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 
 const packageLock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 const mainSource = fs.readFileSync(path.join(root, 'src', 'main.ts'), 'utf8');
 const indexSource = fs.readFileSync(path.join(root, 'src', 'index.html'), 'utf8');
+const installerSource = fs.readFileSync(path.join(root, 'build', 'installer.nsh'), 'utf8');
 const manifestPath = path.join(root, 'scripts', 'public-release-files.json');
 const failures = [];
 
@@ -13,9 +14,9 @@ function check(condition, message) {
   if (!condition) failures.push(message);
 }
 
-check(packageJson.version === '1.0.3', `package version is ${packageJson.version}`);
-check(packageLock.version === '1.0.3', `lockfile version is ${packageLock.version}`);
-check(packageLock.packages?.['']?.version === '1.0.3', `lockfile root package version is ${packageLock.packages?.['']?.version}`);
+check(packageJson.version === '1.0.4', `package version is ${packageJson.version}`);
+check(packageLock.version === '1.0.4', `lockfile version is ${packageLock.version}`);
+check(packageLock.packages?.['']?.version === '1.0.4', `lockfile root package version is ${packageLock.packages?.['']?.version}`);
 check(packageJson.build?.appId === 'io.github.sucukdeluxe.twitch-vod-manager', `appId is ${packageJson.build?.appId}`);
 check(packageJson.build?.publish?.provider === 'generic', `publish provider is ${packageJson.build?.publish?.provider}`);
 check(packageJson.build?.publish?.url === 'https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/latest/download/', `publish URL is ${packageJson.build?.publish?.url}`);
@@ -23,6 +24,14 @@ check(JSON.stringify(packageJson.build?.files) === JSON.stringify(['dist/**/*', 
 check(packageJson.build?.win?.icon === 'build/icon.ico', `Windows icon is ${packageJson.build?.win?.icon}`);
 check(packageJson.build?.nsis?.installerIcon === 'build/icon.ico', `installer icon is ${packageJson.build?.nsis?.installerIcon}`);
 check(packageJson.build?.nsis?.uninstallerIcon === 'build/icon.ico', `uninstaller icon is ${packageJson.build?.nsis?.uninstallerIcon}`);
+const shortcutIconResource = packageJson.build?.extraResources?.find((entry) => entry?.from === 'build/icon.ico');
+check(shortcutIconResource?.to === 'app-icons/icon-${version}.ico', `versioned shortcut icon resource is ${shortcutIconResource?.to}`);
+check(installerSource.includes('"$LOCALAPPDATA\\Twitch VOD Manager\\Shortcut Icons\\icon-${VERSION}.ico"'), 'installed shortcuts do not use the persistent versioned icon resource');
+check(installerSource.includes('CopyFiles /SILENT "$INSTDIR\\resources\\app-icons\\icon-${VERSION}.ico"'), 'versioned shortcut icon is not copied to persistent storage');
+check(installerSource.includes('CreateShortCut "$newDesktopLink"'), 'desktop shortcut is not refreshed with the versioned icon resource');
+check(installerSource.includes('CreateShortCut "$newStartMenuLink"'), 'start menu shortcut is not refreshed with the versioned icon resource');
+check(installerSource.includes('SHChangeNotify(i 0x08000000, i 0x1000'), 'Windows shell icon cache is not flushed after shortcut refresh');
+check(installerSource.includes('${ifNot} ${isUpdated}') && installerSource.includes('RMDir /r "$LOCALAPPDATA\\Twitch VOD Manager\\Shortcut Icons"'), 'persistent shortcut icons are not cleaned up on a real uninstall');
 check(packageJson.build?.win?.signAndEditExecutable !== false, 'Windows executable resource editing is enabled');
 check(packageJson.build?.win?.signExecutable === false, 'Windows code signing remains disabled without suppressing icon resources');
 check(fs.existsSync(path.join(root, 'build', 'icon.png')), 'application PNG icon is missing');
@@ -36,7 +45,7 @@ check(mainSource.includes('GITHUB_RELEASES_DOWNLOAD_BASE_URL'), 'GitHub releases
 check(mainSource.includes('https://api.github.com/repos/Sucukdeluxe/Twitch-VOD-Manager/releases/latest'), 'GitHub latest release API URL is missing');
 check(mainSource.includes('https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/download'), 'GitHub release download URL is missing');
 check(!/storyboards\/\d{8,12}(?:-|\/)/.test(mainSource), 'numeric Twitch VOD example remains in the public source');
-check(indexSource.includes('Version: v1.0.3'), 'initial version label is not 1.0.3');
+check(indexSource.includes('Version: v1.0.4'), 'initial version label is not 1.0.4');
 check(!indexSource.includes('Version: v4.1.13'), 'legacy version label is still present');
 check(fs.existsSync(manifestPath), 'public release manifest is missing');
 
