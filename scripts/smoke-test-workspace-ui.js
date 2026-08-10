@@ -80,6 +80,66 @@ async function run() {
     check(shell.topNavigationItems === 7, `Expected 7 native primary navigation buttons, found ${shell.topNavigationItems}`);
     check(shell.nonButtonNavigationItems === 0, `Expected only native primary navigation buttons, found ${shell.nonButtonNavigationItems} non-buttons`);
 
+    const cutterDropFixturePath = path.join(environment.mediaDir, 'electron-43-cutter-drop.mp4');
+    fs.writeFileSync(cutterDropFixturePath, 'electron-43-cutter-drop-fixture', 'utf8');
+    await app.evaluate(({ ipcMain }) => {
+      globalThis.__workspaceCutterDropPaths = { videoInfo: '', preview: '' };
+      ipcMain.removeHandler('get-video-info');
+      ipcMain.handle('get-video-info', (_, filePath) => {
+        globalThis.__workspaceCutterDropPaths.videoInfo = filePath;
+        return { duration: 120, width: 1920, height: 1080, fps: 60 };
+      });
+      ipcMain.removeHandler('extract-frame');
+      ipcMain.handle('extract-frame', (_, filePath) => {
+        globalThis.__workspaceCutterDropPaths.preview = filePath;
+        return null;
+      });
+    });
+    await win.evaluate(() => {
+      window.showTab('cutter');
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.id = 'workspaceCutterDropInput';
+      document.body.appendChild(input);
+    });
+    await win.locator('#workspaceCutterDropInput').setInputFiles(cutterDropFixturePath);
+    const cutterFileObject = await win.evaluate(() => {
+      const input = document.getElementById('workspaceCutterDropInput');
+      const file = input instanceof HTMLInputElement ? input.files?.[0] : undefined;
+      if (!file) return { name: '', legacyPathType: 'missing', apiType: typeof window.api.getPathForFile };
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      document.getElementById('cutterTab')?.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer
+      }));
+      return {
+        name: file.name,
+        legacyPathType: typeof file.path,
+        apiType: typeof window.api.getPathForFile
+      };
+    });
+    await win.waitForTimeout(250);
+    const cutterDropPaths = await app.evaluate(() => ({ ...globalThis.__workspaceCutterDropPaths }));
+    const cutterDropUi = await win.evaluate(() => ({
+      filePath: document.getElementById('cutterFilePath')?.value || '',
+      infoVisible: document.getElementById('cutterInfo')?.classList.contains('shown') || false,
+      cutEnabled: document.getElementById('btnCut')?.disabled === false
+    }));
+    checks.cutterDrop = {
+      electronVersion: await app.evaluate(() => process.versions.electron),
+      expectedPath: cutterDropFixturePath,
+      fileObject: cutterFileObject,
+      ipc: cutterDropPaths,
+      ui: cutterDropUi
+    };
+    check(cutterFileObject.legacyPathType === 'undefined', `Electron File.path is unexpectedly ${cutterFileObject.legacyPathType}`);
+    check(cutterDropUi.filePath === cutterDropFixturePath, `Cutter drop resolved "${cutterDropUi.filePath}" instead of the Electron file path`);
+    check(cutterDropPaths.videoInfo === cutterDropFixturePath, `Cutter drop sent "${cutterDropPaths.videoInfo}" to video info instead of the Electron file path`);
+    check(cutterDropPaths.preview === cutterDropFixturePath, `Cutter drop sent "${cutterDropPaths.preview}" to preview instead of the Electron file path`);
+    check(cutterDropUi.infoVisible && cutterDropUi.cutEnabled, 'Cutter drop did not populate the cutter controls');
+
     const queueEmptyActions = await win.evaluate(() => ({
       count: document.getElementById('queueCount')?.textContent?.trim() || '',
       startDisabled: document.getElementById('btnStart')?.disabled === true,

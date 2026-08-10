@@ -8,6 +8,7 @@
 - Added searchable settings, synchronized section navigation and clearer empty, queue and busy states.
 - Improved German and English localization, including locale-aware dates and accessibility labels.
 - Hardened the release test suite with isolated application data, browser profiles, downloads and offline network fixtures.
+- Updated the desktop runtime and Windows packaging stack with current security fixes.
 
 ## 1.0.1 - 2026-08-05
 

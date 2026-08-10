@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { CustomClip, MergeGroupItem, MergeGroup, QueueItem, DownloadProgress } from './types';
 
 // Types
@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('api', {
     selectFolder: () => ipcRenderer.invoke('select-folder'),
     selectVideoFile: () => ipcRenderer.invoke('select-video-file'),
     selectMultipleVideos: () => ipcRenderer.invoke('select-multiple-videos'),
+    getPathForFile: (file: File): string => webUtils.getPathForFile(file),
     saveVideoDialog: (defaultName: string) => ipcRenderer.invoke('save-video-dialog', defaultName),
     openFolder: (path: string) => ipcRenderer.invoke('open-folder', path),
     openFile: (path: string) => ipcRenderer.invoke('open-file', path),

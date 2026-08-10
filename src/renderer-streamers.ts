@@ -402,8 +402,7 @@ function initCutterDragDrop(): void {
         // First video-ish file wins
         const allowed = /\.(mp4|mkv|ts|mov|avi)$/i;
         const file = files.find((f) => allowed.test(f.name)) || files[0];
-        // Electron extends File with .path even with contextIsolation:true
-        const filePath = (file as unknown as { path?: string }).path || '';
+        const filePath = window.api.getPathForFile(file);
         if (!filePath) return;
 
         const loader = (window as unknown as { loadCutterFromPath?: (p: string) => Promise<void> }).loadCutterFromPath;

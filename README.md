@@ -26,7 +26,7 @@ The application stores its settings and local database on the computer where it 
 
 Requirements:
 
-- Node.js 20 or newer
+- Node.js 22.13 or newer
 - Windows for building the NSIS installer
 
 ```powershell

@@ -5,6 +5,9 @@
   "main": "dist/main.js",
   "author": "Sucukdeluxe",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "build": "tsc",
     "start": "npm run build && electron .",
@@ -28,14 +31,14 @@
   "dependencies": {
     "axios": "^1.16.1",
     "better-sqlite3": "^12.10.0",
-    "electron-updater": "^6.8.3"
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.10.0",
-    "electron": "^28.0.0",
-    "electron-builder": "^24.9.0",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.7",
     "eslint": "^10.4.0",
     "eslint-plugin-security": "^4.0.0",
     "playwright": "^1.60.0",

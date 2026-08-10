@@ -336,6 +336,7 @@ interface ApiBridge {
     selectFolder(): Promise<string | null>;
     selectVideoFile(): Promise<string | null>;
     selectMultipleVideos(): Promise<string[] | null>;
+    getPathForFile(file: File): string;
     saveVideoDialog(defaultName: string): Promise<string | null>;
     openFolder(path: string): Promise<void>;
     openFile(path: string): Promise<boolean>;
