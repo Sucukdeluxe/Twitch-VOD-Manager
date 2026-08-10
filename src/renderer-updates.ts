@@ -85,14 +85,67 @@ function setCheckButtonCheckingState(enabled: boolean): void {
     const btn = byId<HTMLButtonElement>('checkUpdateBtn');
     btn.disabled = enabled;
     btn.textContent = enabled ? UI_TEXT.updates.checking : UI_TEXT.static.checkUpdates;
+
+    const workspaceButton = byId<HTMLButtonElement>('workspaceUpdateButton');
+    workspaceButton.disabled = enabled;
+    if (enabled) {
+        byId('updateBanner').dataset.updateState = 'checking';
+        byId('workspaceUpdateLabel').textContent = UI_TEXT.updates.checking;
+        workspaceButton.title = UI_TEXT.updates.checking;
+        workspaceButton.setAttribute('aria-label', UI_TEXT.updates.checking);
+    } else {
+        syncWorkspaceUpdateState(updateBannerState);
+    }
+}
+
+function syncWorkspaceUpdateState(state: 'idle' | 'available' | 'downloading' | 'ready'): void {
+    const banner = byId('updateBanner');
+    const button = byId<HTMLButtonElement>('workspaceUpdateButton');
+    const label = byId('workspaceUpdateLabel');
+    const description = byId('updateText').textContent?.trim() || UI_TEXT.static.checkUpdates;
+
+    banner.dataset.updateState = state;
+    button.dataset.updateState = state;
+    button.disabled = state === 'downloading';
+    label.textContent = state === 'ready' ? UI_TEXT.updates.installNow : 'Update';
+    button.title = state === 'idle' ? UI_TEXT.static.checkUpdates : description;
+    button.setAttribute('aria-label', button.title);
 }
 
 function showUpdateBanner(): void {
     byId('updateBanner').classList.add('show');
+    syncWorkspaceUpdateState(updateBannerState);
 }
 
 function hideUpdateBanner(): void {
-    byId('updateBanner').classList.remove('show');
+    updateBannerState = 'idle';
+    const banner = byId('updateBanner');
+    const progress = byId('updateProgress');
+    const bar = byId('updateProgressBar');
+    const action = byId<HTMLButtonElement>('updateButton');
+
+    banner.classList.remove('show');
+    progress.classList.add('is-hidden');
+    bar.classList.remove('downloading');
+    bar.style.width = '0%';
+    byId('updateProgressGauge').setAttribute('aria-valuenow', '0');
+    byId('updateText').textContent = UI_TEXT.static.checkUpdates;
+    action.textContent = UI_TEXT.updates.downloadNow;
+    action.disabled = false;
+    syncWorkspaceUpdateState('idle');
+}
+
+function handleWorkspaceUpdateAction(): void {
+    if (updateBannerState === 'downloading' || updateCheckInProgress) {
+        return;
+    }
+
+    if (updateBannerState === 'available' || updateBannerState === 'ready') {
+        openUpdateModal(getActiveUpdateInfo());
+        return;
+    }
+
+    void checkUpdate();
 }
 
 function setUpdateBannerAvailableUi(info: UpdateInfo): void {
@@ -113,6 +166,7 @@ function setUpdateBannerAvailableUi(info: UpdateInfo): void {
     const button = byId<HTMLButtonElement>('updateButton');
     button.textContent = UI_TEXT.updates.downloadNow;
     button.disabled = false;
+    syncWorkspaceUpdateState('available');
 }
 
 function setDownloadPendingUi(): void {
@@ -134,6 +188,7 @@ function setDownloadPendingUi(): void {
     if (!latestDownloadProgress) {
         byId('updateText').textContent = `Version ${latestUpdateVersion || '?'} ${UI_TEXT.updates.downloading}`;
     }
+    syncWorkspaceUpdateState('downloading');
 }
 
 function setDownloadReadyUi(info?: UpdateInfo): void {
@@ -154,6 +209,7 @@ function setDownloadReadyUi(info?: UpdateInfo): void {
     const button = byId<HTMLButtonElement>('updateButton');
     button.textContent = UI_TEXT.updates.installNow;
     button.disabled = false;
+    syncWorkspaceUpdateState('ready');
 }
 
 function appendInlineMarkdown(target: HTMLElement, text: string): void {
@@ -391,7 +447,7 @@ function refreshUpdateUiTexts(): void {
         progress.classList.add('is-hidden');
         bar.classList.remove('downloading');
         bar.style.width = '0%';
-        byId('updateText').textContent = UI_TEXT.updates.bannerDefault;
+        byId('updateText').textContent = UI_TEXT.static.checkUpdates;
         button.textContent = UI_TEXT.updates.downloadNow;
         button.disabled = false;
     }
@@ -585,6 +641,7 @@ window.api.onUpdateDownloadProgress((progress: UpdateDownloadProgress) => {
     const mb = (progress.transferred / 1024 / 1024).toFixed(1);
     const totalMb = (progress.total / 1024 / 1024).toFixed(1);
     byId('updateText').textContent = `${UI_TEXT.updates.downloadLabel}: ${mb} / ${totalMb} MB (${progress.percent.toFixed(0)}%)`;
+    syncWorkspaceUpdateState('downloading');
 });
 
 window.api.onUpdateDownloaded((info: UpdateInfo) => {

@@ -4,7 +4,6 @@
     "CHANGELOG.md",
     "LICENSE",
     "README.md",
-    "assets",
     "build",
     "eslint.config.mjs",
     "package-lock.json",

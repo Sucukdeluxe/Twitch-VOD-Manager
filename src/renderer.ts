@@ -853,6 +853,64 @@ function persistActiveTab(tab: string): void {
     safeLocalStorageSet(ACTIVE_TAB_STORAGE_KEY, tab);
 }
 
+function syncWorkspaceLabels(): void {
+    document.querySelectorAll<HTMLElement>('[data-label-source]').forEach((node) => {
+        const sourceId = node.dataset.labelSource;
+        if (!sourceId) return;
+        const source = document.getElementById(sourceId);
+        if (!source) return;
+        const value = source instanceof HTMLSelectElement
+            ? source.selectedOptions[0]?.textContent?.trim()
+            : source.textContent?.trim();
+        if (value) node.textContent = value;
+    });
+
+    document.querySelectorAll<HTMLElement>('.top-nav-item').forEach((item) => {
+        const label = item.querySelector<HTMLElement>('.top-nav-label')?.textContent?.trim();
+        if (label) item.title = label;
+    });
+}
+
+function syncWorkspaceChrome(tab: string): void {
+    syncWorkspaceLabels();
+
+    document.querySelectorAll<HTMLElement>('[data-context-for]').forEach((panel) => {
+        panel.hidden = panel.dataset.contextFor !== tab;
+    });
+    document.querySelectorAll<HTMLElement>('[data-toolbar-for]').forEach((toolbar) => {
+        toolbar.hidden = toolbar.dataset.toolbarFor !== tab;
+    });
+    document.querySelectorAll<HTMLElement>('[data-toolbar-search-for]').forEach((search) => {
+        search.hidden = search.dataset.toolbarSearchFor !== tab;
+    });
+
+    const navLabel = document.querySelector<HTMLElement>(`.top-nav-item[data-tab="${tab}"] .top-nav-label`)?.textContent?.trim();
+    const activeContext = document.querySelector<HTMLElement>(`[data-context-for="${tab}"]`);
+    const contextHeading = activeContext?.querySelector<HTMLElement>('[data-context-heading]');
+    if (contextHeading && navLabel) contextHeading.textContent = navLabel;
+
+    const workspace = document.querySelector<HTMLElement>('.workspace-shell');
+    if (workspace) workspace.dataset.activeWorkspace = tab;
+}
+
+function focusWorkspaceTarget(id: string): void {
+    const target = document.getElementById(id) as HTMLElement | null;
+    if (!target) return;
+
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const focusTarget = target.matches('button, input, select, textarea, [tabindex]')
+        ? target
+        : target.querySelector<HTMLElement>('button, input, select, textarea, [tabindex]');
+
+    if (focusTarget) {
+        focusTarget.focus({ preventScroll: true });
+        return;
+    }
+
+    target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+}
+
 function showTab(tab: string): void {
     queryAll('.nav-item').forEach((i) => {
         i.classList.remove('active');
@@ -869,6 +927,7 @@ function showTab(tab: string): void {
     navItem.classList.add('active');
     navItem.setAttribute('aria-current', 'page');
     byId(tab + 'Tab').classList.add('active');
+    syncWorkspaceChrome(tab);
 
     const titles: Record<string, string> = UI_TEXT.tabs;
 

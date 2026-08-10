@@ -901,9 +901,24 @@ function openFolder(): void {
     void window.api.openFolder(folder);
 }
 
+function syncWorkspaceThemePicker(theme: string): void {
+    const selectedTheme = theme === 'light' || theme === 'system' ? theme : 'twitch';
+    document.querySelectorAll<HTMLButtonElement>('#workspaceThemePicker [data-theme]').forEach((button) => {
+        const active = button.dataset.theme === selectedTheme;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+    });
+}
+
+function selectWorkspaceTheme(theme: string): void {
+    byId<HTMLSelectElement>('themeSelect').value = theme;
+    changeTheme(theme);
+}
+
 function changeTheme(theme: string): void {
     document.body.className = `theme-${theme}`;
     config.theme = theme;
+    syncWorkspaceThemePicker(theme);
     void window.api.saveConfig({ theme });
 }
 

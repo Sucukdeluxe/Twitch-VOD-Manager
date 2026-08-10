@@ -288,7 +288,7 @@ function applyLanguageToStaticUI(): void {
     setText('btnExportMetrics', UI_TEXT.static.runtimeMetricsExport);
     setText('runtimeMetricsAutoRefreshText', UI_TEXT.static.runtimeMetricsAutoRefresh);
     setText('runtimeMetricsOutput', UI_TEXT.static.runtimeMetricsLoading);
-    setText('updateText', UI_TEXT.updates.bannerDefault);
+    setText('updateText', UI_TEXT.static.checkUpdates);
     setText('updateButton', UI_TEXT.updates.downloadNow);
     setText('updateModalEyebrow', UI_TEXT.static.updateTitle);
     setText('updateModalTitle', UI_TEXT.updates.modalAvailableTitle);
@@ -332,6 +332,12 @@ function applyLanguageToStaticUI(): void {
     const updateRefresh = (window as unknown as { refreshUpdateUiTexts?: () => void }).refreshUpdateUiTexts;
     if (typeof updateRefresh === 'function') {
         updateRefresh();
+    }
+
+    const activeTabId = document.querySelector('.tab-content.active')?.id || 'vodsTab';
+    const workspaceSync = (window as unknown as { syncWorkspaceChrome?: (tab: string) => void }).syncWorkspaceChrome;
+    if (typeof workspaceSync === 'function') {
+        workspaceSync(activeTabId.replace(/Tab$/, ''));
     }
 }
 
