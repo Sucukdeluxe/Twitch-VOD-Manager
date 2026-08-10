@@ -29,6 +29,7 @@ async function init(): Promise<void> {
     byId<HTMLSelectElement>('themeSelect').value = config.theme ?? 'twitch';
     byId<HTMLSelectElement>('languageSelect').value = config.language ?? 'en';
     updateLanguagePicker(config.language ?? 'en');
+    setSettingsPane(byId<HTMLElement>('settingsTab').dataset.settingsPane || 'design');
     byId<HTMLSelectElement>('downloadMode').value = config.download_mode ?? 'full';
     byId<HTMLInputElement>('partMinutes').value = String(config.part_minutes ?? 120);
     byId<HTMLSelectElement>('performanceMode').value = (config.performance_mode as string) || 'balanced';
@@ -42,6 +43,7 @@ async function init(): Promise<void> {
 
     changeTheme(config.theme ?? 'twitch');
     renderStreamers();
+    void hydrateStreamerDisplayNames();
     renderQueue();
 
     // Kick off live-status subscription so the sidebar dots populate.
@@ -75,6 +77,8 @@ async function init(): Promise<void> {
     initCutterDragDrop();
 
     // Restore last active tab from previous session (default 'vods')
+    initTopNavActiveIndicator();
+    initSegmentedIndicators();
     showTab(loadPersistedActiveTab());
 
     window.api.onQueueUpdated(async (q: QueueItem[]) => {
@@ -113,7 +117,7 @@ async function init(): Promise<void> {
         }
 
         item.status = 'downloading';
-        item.progress = progress.progress;
+        if (progress.progress > 0) item.progress = Math.max(item.progress, progress.progress);
         item.speed = progress.speed;
         item.eta = progress.eta;
         item.currentPart = progress.currentPart;
@@ -138,6 +142,12 @@ async function init(): Promise<void> {
 
     window.api.onDownloadStarted(() => {
         downloading = true;
+        updateDownloadButtonState();
+        markQueueActivity();
+    });
+
+    window.api.onDownloadPaused(() => {
+        downloading = false;
         updateDownloadButtonState();
         markQueueActivity();
     });
@@ -178,8 +188,13 @@ async function init(): Promise<void> {
     }
 
     if (config.streamers && config.streamers.length > 0) {
+        const preloader = (window as unknown as { preloadConfiguredStreamerData?: (streamers: string[]) => Promise<void> }).preloadConfiguredStreamerData;
+        if (typeof preloader === 'function') void preloader(config.streamers as string[]);
         await selectStreamer(config.streamers[0]);
     }
+
+    const startBackgroundRefresh = (window as unknown as { startStreamerBackgroundRefresh?: () => void }).startStreamerBackgroundRefresh;
+    if (typeof startBackgroundRefresh === 'function') startBackgroundRefresh();
 
     setTimeout(() => {
         void checkUpdateSilent();
@@ -895,6 +910,33 @@ function syncWorkspaceContextSelection(panel: HTMLElement): void {
     });
 }
 
+function setVodsWorkspace(view: 'streamers' | 'queue', source?: HTMLElement): void {
+    const panel = document.querySelector<HTMLElement>('[data-context-for="vods"]');
+    if (!panel) return;
+
+    panel.dataset.vodsWorkspace = view;
+    const buttons = Array.from(panel.querySelectorAll<HTMLButtonElement>('.context-switcher button'));
+    buttons.forEach((button) => {
+        const active = source ? button === source : button.id === `${view === 'queue' ? 'queue' : 'streamer'}WorkspaceSwitch`;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+    });
+    const switcher = panel.querySelector<HTMLElement>('.context-switcher');
+    if (switcher) scheduleSegmentedIndicatorSync(switcher);
+}
+
+function applySidebarLayoutPreference(enabled: boolean): void {
+    const panel = document.querySelector<HTMLElement>('[data-context-for="vods"]');
+    if (!panel) return;
+
+    panel.dataset.vodsLayout = enabled ? 'split' : 'tabs';
+    const toggle = document.getElementById('sidebarSplitViewToggle') as HTMLInputElement | null;
+    if (toggle) toggle.checked = enabled;
+    if (!enabled) {
+        setVodsWorkspace(panel.dataset.vodsWorkspace === 'queue' ? 'queue' : 'streamers');
+    }
+}
+
 function focusWorkspaceTarget(id: string, source?: HTMLElement): void {
     const target = document.getElementById(id) as HTMLElement | null;
     if (!target) return;
@@ -912,6 +954,9 @@ function focusWorkspaceTarget(id: string, source?: HTMLElement): void {
                 button.setAttribute('aria-pressed', String(active));
             }
         });
+        if (group.matches('[data-context-for="settings"] .context-list')) {
+            scheduleSegmentedIndicatorSync(group);
+        }
     }
 
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -943,8 +988,10 @@ function showTab(tab: string): void {
     }
     navItem.classList.add('active');
     navItem.setAttribute('aria-current', 'page');
+    syncTopNavActiveIndicator();
     byId(tab + 'Tab').classList.add('active');
     syncWorkspaceChrome(tab);
+    scheduleSegmentedIndicatorsSync();
 
     const titles: Record<string, string> = UI_TEXT.tabs;
 
@@ -1547,6 +1594,81 @@ async function downloadClip(): Promise<void> {
         toolbarBtn.disabled = false;
         btn.textContent = UI_TEXT.clips.downloadButton;
     }
+}
+
+let topNavIndicatorFrame: number | null = null;
+
+function syncTopNavActiveIndicator(): void {
+    const topNav = document.querySelector<HTMLElement>('.top-nav');
+    const activeItem = topNav?.querySelector<HTMLElement>('.top-nav-item.active');
+    if (!topNav || !activeItem) return;
+    const navRect = topNav.getBoundingClientRect();
+    const itemRect = activeItem.getBoundingClientRect();
+    topNav.style.setProperty('--top-nav-active-x', `${itemRect.left - navRect.left}px`);
+    topNav.style.setProperty('--top-nav-active-y', `${itemRect.top - navRect.top}px`);
+    topNav.style.setProperty('--top-nav-active-width', `${itemRect.width}px`);
+    topNav.style.setProperty('--top-nav-active-height', `${itemRect.height}px`);
+}
+
+function scheduleTopNavActiveIndicatorSync(): void {
+    if (topNavIndicatorFrame !== null) return;
+    topNavIndicatorFrame = requestAnimationFrame(() => {
+        topNavIndicatorFrame = null;
+        syncTopNavActiveIndicator();
+    });
+}
+
+function initTopNavActiveIndicator(): void {
+    const topNav = document.querySelector<HTMLElement>('.top-nav');
+    if (!topNav) return;
+    const observer = new ResizeObserver(scheduleTopNavActiveIndicatorSync);
+    observer.observe(topNav);
+    topNav.querySelectorAll<HTMLElement>('.top-nav-item').forEach((item) => observer.observe(item));
+    window.addEventListener('resize', scheduleTopNavActiveIndicatorSync);
+}
+
+const segmentedIndicatorFrames = new WeakMap<HTMLElement, number>();
+
+function syncSegmentedIndicator(control: HTMLElement): void {
+    const activeButton = control.querySelector<HTMLElement>('button.active');
+    if (!activeButton) {
+        control.classList.remove('segmented-indicator-visible');
+        return;
+    }
+    control.style.setProperty('--segment-active-x', `${activeButton.offsetLeft}px`);
+    control.style.setProperty('--segment-active-y', `${activeButton.offsetTop}px`);
+    control.style.setProperty('--segment-active-width', `${activeButton.offsetWidth}px`);
+    control.style.setProperty('--segment-active-height', `${activeButton.offsetHeight}px`);
+    control.classList.add('segmented-indicator-visible');
+    requestAnimationFrame(() => control.classList.add('segmented-indicator-ready'));
+}
+
+function scheduleSegmentedIndicatorSync(control: HTMLElement): void {
+    if (segmentedIndicatorFrames.has(control)) return;
+    const frame = requestAnimationFrame(() => {
+        segmentedIndicatorFrames.delete(control);
+        syncSegmentedIndicator(control);
+    });
+    segmentedIndicatorFrames.set(control, frame);
+}
+
+function scheduleSegmentedIndicatorsSync(): void {
+    document.querySelectorAll<HTMLElement>('.context-switcher, .language-picker, [data-context-for="settings"] .context-list').forEach(scheduleSegmentedIndicatorSync);
+}
+
+function initSegmentedIndicators(): void {
+    const observer = new ResizeObserver((entries) => {
+        entries.forEach((entry) => {
+            const control = entry.target.closest<HTMLElement>('.context-switcher, .language-picker, [data-context-for="settings"] .context-list');
+            if (control) scheduleSegmentedIndicatorSync(control);
+        });
+    });
+    document.querySelectorAll<HTMLElement>('.context-switcher, .language-picker, [data-context-for="settings"] .context-list').forEach((control) => {
+        observer.observe(control);
+        control.querySelectorAll<HTMLElement>('button').forEach((button) => observer.observe(button));
+        syncSegmentedIndicator(control);
+    });
+    window.addEventListener('resize', scheduleSegmentedIndicatorsSync);
 }
 
 async function loadCutterFromPath(filePath: string): Promise<void> {

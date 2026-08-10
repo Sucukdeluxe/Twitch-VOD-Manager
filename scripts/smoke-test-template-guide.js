@@ -41,6 +41,9 @@ async function run() {
     });
     await win.waitForTimeout(200);
 
+    await win.click('[data-context-for="settings"] [data-settings-pane="downloads"]');
+    await win.waitForTimeout(180);
+
     await win.click('#settingsTemplateGuideBtn');
     await win.waitForTimeout(180);
 

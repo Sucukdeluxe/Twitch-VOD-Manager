@@ -15,6 +15,9 @@ import {
     getMergeGroupPhaseText as getMergeGroupPhaseTextCore,
 } from './main/infra/format-helpers';
 import { tBackend as tBackendCore, type BackendMessageKey } from './main/domain/i18n-backend';
+import { watchRendererChanges } from './main/dev-reload';
+import { createPausableOutput, type PausableOutput } from './main/domain/pausable-output';
+import { PartialDownloadRegistry } from './main/domain/partial-download';
 import type { DbHandle } from './main/infra/db';
 import {
     normalizeLogin,
@@ -31,6 +34,8 @@ import {
     type PerformanceMode,
 } from './main/domain/config-normalize';
 import { CustomClip, MergeGroupItem, MergeGroup, QueueItem, DownloadProgress, DownloadResult } from './types';
+import { buildVodPreviewFrameUrls } from './main/domain/vod-preview';
+import { getWindowsAppIdentity } from './main/domain/app-identity';
 import {
     setDebugLogFn, initToolDirs,
     getStreamlinkPath, getStreamlinkCommand, getFFmpegPath, getFFprobePath,
@@ -45,6 +50,9 @@ import {
 // CONFIG & CONSTANTS
 // ==========================================
 const APP_VERSION = app.getVersion();
+const WINDOWS_APP_IDENTITY = getWindowsAppIdentity(process.env.TWITCH_VOD_MANAGER_DEV === '1');
+app.setName(WINDOWS_APP_IDENTITY.name);
+app.setAppUserModelId(WINDOWS_APP_IDENTITY.appUserModelId);
 const GITHUB_REPO_OWNER = 'Sucukdeluxe';
 const GITHUB_REPO_NAME = 'Twitch-VOD-Manager';
 const GITHUB_RELEASES_API_LATEST_URL = 'https://api.github.com/repos/Sucukdeluxe/Twitch-VOD-Manager/releases/latest';
@@ -55,6 +63,7 @@ const APPDATA_DIR = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'Twi
 const CONFIG_FILE = path.join(APPDATA_DIR, 'config.json');
 const QUEUE_FILE = path.join(APPDATA_DIR, 'download_queue.json');
 const DEBUG_LOG_FILE = path.join(APPDATA_DIR, 'debug.log');
+const PARTIAL_DOWNLOADS_FILE = path.join(APPDATA_DIR, 'partial-downloads.json');
 const TOOLS_DIR = path.join(APPDATA_DIR, 'tools');
 const TOOLS_STREAMLINK_DIR = path.join(TOOLS_DIR, 'streamlink');
 const TOOLS_FFMPEG_DIR = path.join(TOOLS_DIR, 'ffmpeg');
@@ -110,6 +119,7 @@ function tBackend(key: BackendMessageKey, params?: Record<string, string | numbe
 if (!fs.existsSync(APPDATA_DIR)) {
     fs.mkdirSync(APPDATA_DIR, { recursive: true });
 }
+const partialDownloadRegistry = new PartialDownloadRegistry(PARTIAL_DOWNLOADS_FILE);
 
 // ==========================================
 // INTERFACES
@@ -119,10 +129,12 @@ interface Config {
     client_secret: string;
     download_path: string;
     streamers: string[];
+    streamer_display_names: Record<string, string>;
     theme: string;
     download_mode: 'parts' | 'full';
     part_minutes: number;
     language: 'de' | 'en';
+    sidebar_split_view: boolean;
     filename_template_vod: string;
     filename_template_parts: string;
     filename_template_clip: string;
@@ -256,10 +268,12 @@ const defaultConfig: Config = {
     client_secret: '',
     download_path: DEFAULT_DOWNLOAD_PATH,
     streamers: [],
+    streamer_display_names: {},
     theme: 'twitch',
     download_mode: 'full',
     part_minutes: 120,
     language: 'en',
+    sidebar_split_view: true,
     filename_template_vod: DEFAULT_FILENAME_TEMPLATE_VOD,
     filename_template_parts: DEFAULT_FILENAME_TEMPLATE_PARTS,
     filename_template_clip: DEFAULT_FILENAME_TEMPLATE_CLIP,
@@ -314,12 +328,22 @@ function normalizeConfigTemplates(input: Config): Config {
     const trimmedIds = cleanIds.length > DOWNLOADED_IDS_MAX
         ? cleanIds.slice(cleanIds.length - DOWNLOADED_IDS_MAX)
         : cleanIds;
+    const displayNames: Record<string, string> = {};
+    if (isPlainObject(input.streamer_display_names)) {
+        for (const [login, displayName] of Object.entries(input.streamer_display_names)) {
+            const normalizedLogin = normalizeLogin(login);
+            const normalizedDisplayName = typeof displayName === 'string' ? displayName.trim() : '';
+            if (normalizedLogin && normalizedDisplayName) displayNames[normalizedLogin] = normalizedDisplayName;
+        }
+    }
 
     return {
         ...input,
+        streamer_display_names: displayNames,
         filename_template_vod: normalizeFilenameTemplate(input.filename_template_vod, DEFAULT_FILENAME_TEMPLATE_VOD),
         filename_template_parts: normalizeFilenameTemplate(input.filename_template_parts, DEFAULT_FILENAME_TEMPLATE_PARTS),
         filename_template_clip: normalizeFilenameTemplate(input.filename_template_clip, DEFAULT_FILENAME_TEMPLATE_CLIP),
+        sidebar_split_view: input.sidebar_split_view !== false,
         smart_queue_scheduler: input.smart_queue_scheduler !== false,
         performance_mode: normalizePerformanceMode(input.performance_mode),
         prevent_duplicate_downloads: input.prevent_duplicate_downloads !== false,
@@ -505,6 +529,7 @@ function sanitizeQueueItem(raw: unknown): QueueItem | null {
     if (typeof raw.totalParts === 'number' && Number.isFinite(raw.totalParts)) item.totalParts = raw.totalParts;
     if (typeof raw.speed === 'string') item.speed = raw.speed;
     if (typeof raw.eta === 'string') item.eta = raw.eta;
+    if (typeof raw.progressStatus === 'string') item.progressStatus = raw.progressStatus;
     if (typeof raw.last_error === 'string') item.last_error = raw.last_error;
     if (typeof raw.downloadedBytes === 'number' && Number.isFinite(raw.downloadedBytes)) item.downloadedBytes = raw.downloadedBytes;
     if (typeof raw.totalBytes === 'number' && Number.isFinite(raw.totalBytes)) item.totalBytes = raw.totalBytes;
@@ -634,12 +659,27 @@ function flushQueueSave(): void {
 // GLOBAL STATE
 // ==========================================
 let mainWindow: BrowserWindow | null = null;
+let stopDevelopmentReload: (() => void) | null = null;
+
+function startDevelopmentReload(): void {
+    if (process.env.TWITCH_VOD_MANAGER_DEV !== '1' || stopDevelopmentReload) return;
+    stopDevelopmentReload = watchRendererChanges(
+        __dirname,
+        path.join(__dirname, '../src'),
+        () => mainWindow?.webContents.reloadIgnoringCache(),
+    );
+    app.once('before-quit', () => {
+        stopDevelopmentReload?.();
+        stopDevelopmentReload = null;
+    });
+}
 let config = loadConfig();
 let accessToken: string | null = null;
 let downloadQueue: QueueItem[] = loadQueue();
 let queueIdCounter = 0;
 let lastQueueBroadcastFingerprint = '';
 let isDownloading = false;
+let queuePaused = false;
 // Process handle for the standalone video editor pipeline (cutter / merger /
 // splitter). Queue downloads track their own children via activeDownloads,
 // and clip downloads via activeClipProcesses. Keeping these separate
@@ -649,12 +689,19 @@ let currentEditorProcess: ChildProcess | null = null;
 // `currentDownloadCancelled` flag was redundant once pause/cancel/remove
 // started iterating activeDownloads and adding each item to that Set; it
 // was removed in the 4.5.27 cleanup.
-let pauseRequested = false;
 let activeQueueItemId: string | null = null;
 let downloadStartTime = 0;
 let downloadedBytes = 0;
 // Per-item tracking for parallel downloads
-const activeDownloads = new Map<string, { process: ChildProcess | null; cancelled: boolean; startTime: number; bytes: number }>();
+interface ActiveDownloadTracking {
+    process: ChildProcess | null;
+    cancelled: boolean;
+    startTime: number;
+    bytes: number;
+    output: PausableOutput;
+    partialFilename: string;
+}
+const activeDownloads = new Map<string, ActiveDownloadTracking>();
 const cancelledItemIds = new Set<string>();
 // userId -> login reverse map. Bounded via Map insertion-order eviction so
 // a long-running session doesn't grow it unbounded across thousands of
@@ -1337,12 +1384,12 @@ function classifyDownloadError(errorMessage: string): RetryErrorClass {
     const text = (errorMessage || '').toLowerCase();
     if (!text) return 'unknown';
 
-    if (text.includes('ungueltige vod-url') || text.includes('invalid vod url')) return 'validation';
+    if (text.includes('ungültige vod-url') || text.includes('ungueltige vod-url') || text.includes('invalid vod url')) return 'validation';
     if (text.includes('429') || text.includes('rate limit') || text.includes('too many requests')) return 'rate_limit';
     if (text.includes('401') || text.includes('403') || text.includes('unauthorized') || text.includes('forbidden') || text.includes('subscriber only') || text.includes('sub-only') || text.includes('not subscribed')) return 'auth';
     if (text.includes('timed out') || text.includes('timeout') || text.includes('network') || text.includes('connection') || text.includes('dns') || text.includes('http error') || text.includes('connectionerror') || text.includes('readerror')) return 'network';
     if (text.includes('streamlink nicht gefunden') || text.includes('streamlink not found') || text.includes('streamlink is missing') || text.includes('ffmpeg') || text.includes('ffprobe') || text.includes('enoent')) return 'tooling';
-    if (text.includes('integritaet') || text.includes('integrity') || text.includes('kein videostream') || text.includes('no video stream')) return 'integrity';
+    if (text.includes('integrität') || text.includes('integritaet') || text.includes('integrity') || text.includes('kein videostream') || text.includes('no video stream')) return 'integrity';
     if (text.includes('access denied') || text.includes('permission') || text.includes('disk') || text.includes('file') || text.includes('ordner') || text.includes('folder')) return 'io';
     // Twitch-spezifische streamlink errors:
     //   "error: No playable streams found on this URL" — VOD weg / private / sub-only
@@ -1436,6 +1483,17 @@ const activeDownloadProgress = new Map<string, number>();
 
 function recordDownloadProgress(progress: DownloadProgress): void {
     const p = Number(progress.progress);
+    const item = downloadQueue.find((candidate) => candidate.id === progress.id);
+    if (item) {
+        if (Number.isFinite(p) && p > 0 && p <= 100) item.progress = Math.max(item.progress, p);
+        item.speed = progress.speed || '';
+        item.eta = progress.eta || '';
+        item.progressStatus = progress.status;
+        if (typeof progress.currentPart === 'number') item.currentPart = progress.currentPart;
+        if (typeof progress.totalParts === 'number') item.totalParts = progress.totalParts;
+        if (typeof progress.downloadedBytes === 'number') item.downloadedBytes = progress.downloadedBytes;
+        if (typeof progress.totalBytes === 'number') item.totalBytes = progress.totalBytes;
+    }
     const fraction = Number.isFinite(p) && p > 0 && p <= 100 ? p / 100 : 0.3;
     activeDownloadProgress.set(progress.id, fraction);
     updateTaskbarProgress();
@@ -2189,6 +2247,50 @@ interface PublicStreamerProfileResult {
     stream: PublicStreamInfo | null;
 }
 
+interface PublicDisplayNameQueryResult {
+    user: {
+        login: string;
+        displayName: string;
+    } | null;
+}
+
+async function getStreamerDisplayNames(logins: string[]): Promise<Record<string, string>> {
+    const normalizedLogins = [...new Set(logins.map((login) => normalizeLogin(login)).filter(Boolean))];
+    const displayNames = { ...config.streamer_display_names };
+    const missing = normalizedLogins;
+    let changed = false;
+    let nextIndex = 0;
+
+    const resolveNext = async (): Promise<void> => {
+        while (nextIndex < missing.length) {
+            const login = missing[nextIndex++];
+            const data = await fetchPublicTwitchGql<PublicDisplayNameQueryResult>(
+                'query($login: String!) { user(login: $login) { login displayName } }',
+                { login }
+            );
+            const result = data?.user;
+            const resolvedLogin = result?.login ? normalizeLogin(result.login) : login;
+            const displayName = result?.displayName?.trim();
+            if (displayName && displayNames[resolvedLogin] !== displayName) {
+                displayNames[resolvedLogin] = displayName;
+                changed = true;
+            }
+        }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(4, missing.length) }, () => resolveNext()));
+    if (changed) {
+        config.streamer_display_names = displayNames;
+        saveConfig(config);
+    }
+
+    return normalizedLogins.reduce<Record<string, string>>((resolved, login) => {
+        const displayName = displayNames[login];
+        if (displayName) resolved[login] = displayName;
+        return resolved;
+    }, {});
+}
+
 interface PublicStreamInfo {
     previewUrl: string;
     viewers: number | null;
@@ -2392,6 +2494,9 @@ async function getStreamerProfile(login: string, forceRefresh = false): Promise<
 interface VodStoryboard {
     vodId: string;
     spriteDataUrl: string;
+    frameDataUrls: string[];
+    frameWidth: number;
+    frameHeight: number;
     cols: number;
     rows: number;
     cellWidth: number;
@@ -2399,7 +2504,7 @@ interface VodStoryboard {
     framesInSprite: number;
 }
 
-const MAX_VOD_STORYBOARD_CACHE_ENTRIES = 1024;
+const MAX_VOD_STORYBOARD_CACHE_ENTRIES = 12;
 const vodStoryboardCache = new Map<string, CacheEntry<VodStoryboard | null>>();
 const inFlightStoryboardRequests = new Map<string, Promise<VodStoryboard | null>>();
 
@@ -2430,8 +2535,8 @@ async function getVodStoryboard(vodId: string): Promise<VodStoryboard | null> {
         // manifest. The manifest lists sprite images at multiple quality
         // levels; we pick the high-quality first sprite (covers the
         // beginning of the VOD with the most detail).
-        const data = await fetchPublicTwitchGql<{ video: { seekPreviewsURL: string | null } | null }>(
-            `query($id: ID!) { video(id: $id) { seekPreviewsURL } }`,
+        const data = await fetchPublicTwitchGql<{ video: { seekPreviewsURL: string | null; previewThumbnailURL: string | null } | null }>(
+            `query($id: ID!) { video(id: $id) { seekPreviewsURL previewThumbnailURL(width: 1920, height: 1080) } }`,
             { id: vodId }
         );
         const manifestUrl = data?.video?.seekPreviewsURL;
@@ -2474,10 +2579,23 @@ async function getVodStoryboard(vodId: string): Promise<VodStoryboard | null> {
         // and sprite filenames are relative (e.g. "{vodId}-high-0.jpg").
         // Strip the JSON filename to get the base, then append the sprite.
         const baseUrl = manifestUrl.replace(/\/[^/]+$/, '/');
+        const frameUrls = buildVodPreviewFrameUrls(data?.video?.previewThumbnailURL || '');
+        const frameDataUrls = (await Promise.all(frameUrls.map(async (url) => {
+            try {
+                const response = await axios.get<ArrayBuffer>(url, {
+                    responseType: 'arraybuffer',
+                    timeout: 8000,
+                    headers: { 'User-Agent': 'TwitchVODManager/1.0' }
+                });
+                const contentType = String(response.headers['content-type'] || 'image/jpeg').split(';')[0];
+                return `data:${contentType};base64,${Buffer.from(response.data).toString('base64')}`;
+            } catch {
+                return '';
+            }
+        }))).filter((url) => url.length > 0);
         const firstSpriteUrl = baseUrl + entry.images[0];
-
-        const spriteDataUrl = await fetchAvatarAsDataUrl(firstSpriteUrl);
-        if (!spriteDataUrl) {
+        const spriteDataUrl = frameDataUrls.length >= 2 ? '' : await fetchAvatarAsDataUrl(firstSpriteUrl);
+        if (frameDataUrls.length < 2 && !spriteDataUrl) {
             setCachedValue(vodStoryboardCache, vodId, null, MAX_VOD_STORYBOARD_CACHE_ENTRIES);
             return null;
         }
@@ -2485,6 +2603,9 @@ async function getVodStoryboard(vodId: string): Promise<VodStoryboard | null> {
         const storyboard: VodStoryboard = {
             vodId,
             spriteDataUrl,
+            frameDataUrls: frameDataUrls.length >= 2 ? frameDataUrls : [],
+            frameWidth: frameDataUrls.length >= 2 ? 1920 : 0,
+            frameHeight: frameDataUrls.length >= 2 ? 1080 : 0,
             cols: entry.cols,
             rows: entry.rows,
             cellWidth: entry.width,
@@ -3050,7 +3171,7 @@ function downloadVODPart(
 ): Promise<DownloadResult> {
     return new Promise((resolve) => {
         const streamlinkCmd = getStreamlinkCommand();
-        const args = [...streamlinkCmd.prefixArgs, url, getStreamlinkStreamArg(), '-o', filename, '--force'];
+        const args = [...streamlinkCmd.prefixArgs, url, getStreamlinkStreamArg(), '--stdout'];
         if (config.streamlink_disable_ads !== false) {
             // Skips Twitch mid-roll ads which would otherwise be embedded
             // in the VOD output. Off only if the user explicitly disabled it.
@@ -3083,12 +3204,23 @@ function downloadVODPart(
         // for support / forensics — no need to flood stdout too.
         appendDebugLog('download-part-start', { itemId, command: streamlinkCmd.command, filename, args });
 
+        const partialFilename = partialDownloadRegistry.begin(filename);
         const proc = spawn(streamlinkCmd.command, args, { windowsHide: true });
+        const outputStream = fs.createWriteStream(partialFilename, { flags: 'w' });
+        if (!proc.stdout) {
+            outputStream.destroy();
+            partialDownloadRegistry.discard(partialFilename);
+            resolve({ success: false, error: tBackend('unknownDownloadError') });
+            return;
+        }
+        const output = createPausableOutput(proc.stdout, outputStream);
+        const outputFinished = output.finished.then(() => null, (error) => error);
 
         // Register in per-item tracking map for parallel downloads
         // (no longer mirrored on a global — currentEditorProcess is editor-only)
-        const itemTracking = { process: proc, cancelled: false, startTime: Date.now(), bytes: 0 };
+        const itemTracking: ActiveDownloadTracking = { process: proc, cancelled: false, startTime: Date.now(), bytes: 0, output, partialFilename };
         activeDownloads.set(itemId, itemTracking);
+        if (queuePaused) output.pause();
 
         downloadStartTime = itemTracking.startTime;
         downloadedBytes = 0;
@@ -3097,9 +3229,9 @@ function downloadVODPart(
 
         // Monitor file size for progress
         const progressInterval = setInterval(() => {
-            if (fs.existsSync(filename)) {
+            if (fs.existsSync(partialFilename)) {
                 try {
-                    const stats = fs.statSync(filename);
+                    const stats = fs.statSync(partialFilename);
                     downloadedBytes = stats.size;
                     itemTracking.bytes = stats.size;
 
@@ -3167,46 +3299,24 @@ function downloadVODPart(
             }
         }, 1000);
 
-        const stdoutBuffer: string[] = [];
-        proc.stdout?.on('data', (data: Buffer) => {
-            const line = data.toString();
-            // Capture non-progress lines auch fuer Diagnose — streamlink-Windows-
-            // Builds schreiben einige Errors auf stdout statt stderr (z.B. "error:
-            // No playable streams found on this URL"). Wenn stderr leer bleibt,
-            // greift der close-handler auf stdout zurueck.
-            stdoutBuffer.push(line);
-            if (stdoutBuffer.length > 200) stdoutBuffer.shift();
-            const lower = line.toLowerCase();
-            if (lower.includes('error:') || lower.includes('warning:')) {
-                appendDebugLog('download-part-stdout-err', { itemId, message: line.trim() });
-                if (lower.includes('error:')) {
-                    // Letzte echte streamlink-Errorzeile, auch wenn auf stdout
-                    const errLine = line.split('\n').map(l => l.trim()).filter(l => l.toLowerCase().includes('error:')).pop();
-                    if (errLine) lastErrorLine = errLine;
-                }
-            }
-
-            // Parse progress
-            const match = line.match(/(\d+\.\d+)%/);
-            if (match) {
-                const percent = parseFloat(match[1]);
-                lastStreamlinkPercent = percent;
-                onProgress({
-                    id: itemId,
-                    progress: percent,
-                    speed: '',
-                    eta: '',
-                    status: `${percent.toFixed(1)}%`,
-                    currentPart: partNum,
-                    totalParts: totalParts
-                });
-            }
-        });
-
         proc.stderr?.on('data', (data: Buffer) => {
             const message = data.toString();
             if (message.trim()) {
                 stderrBuffer.push(message);
+                const match = message.match(/(\d+\.\d+)%/);
+                if (match) {
+                    const percent = parseFloat(match[1]);
+                    lastStreamlinkPercent = percent;
+                    onProgress({
+                        id: itemId,
+                        progress: percent,
+                        speed: '',
+                        eta: '',
+                        status: `${percent.toFixed(1)}%`,
+                        currentPart: partNum,
+                        totalParts: totalParts
+                    });
+                }
                 // Bounded buffer — wir wollen nicht 100MB stderr in RAM bei einem
                 // streamlink-loop. 200 chunks reichen fuer normale Diagnose.
                 if (stderrBuffer.length > 200) stderrBuffer.shift();
@@ -3230,26 +3340,36 @@ function downloadVODPart(
 
         proc.on('close', async (code) => {
             clearInterval(progressInterval);
+            const outputError = await outputFinished;
             activeDownloads.delete(itemId);
+
+            if (outputError) {
+                partialDownloadRegistry.discard(partialFilename);
+                resolve({ success: false, error: String(outputError) });
+                return;
+            }
 
             if (cancelledItemIds.has(itemId)) {
                 cancelledItemIds.delete(itemId);
+                partialDownloadRegistry.discard(partialFilename);
                 appendDebugLog('download-part-cancelled', { itemId, filename });
                 resolve({ success: false, error: tBackend('downloadCancelled') });
                 return;
             }
 
-            if (code === 0 && fs.existsSync(filename)) {
-                const stats = fs.statSync(filename);
+            if (code === 0 && fs.existsSync(partialFilename)) {
+                const stats = fs.statSync(partialFilename);
                 if (stats.size <= MIN_FILE_BYTES) {
                     const tooSmall = tBackend('fileTooSmall', { bytes: String(stats.size) });
+                    partialDownloadRegistry.discard(partialFilename);
                     appendDebugLog('download-part-failed-small-file', { itemId, filename, bytes: stats.size });
                     resolve({ success: false, error: tooSmall });
                     return;
                 }
 
-                const integrityResult = validateDownloadedFileIntegrity(filename, expectedDurationSeconds);
+                const integrityResult = validateDownloadedFileIntegrity(partialFilename, expectedDurationSeconds);
                 if (!integrityResult.success) {
+                    partialDownloadRegistry.discard(partialFilename);
                     appendDebugLog('download-part-failed-integrity', {
                         itemId,
                         filename,
@@ -3260,6 +3380,13 @@ function downloadVODPart(
                     return;
                 }
 
+                try {
+                    partialDownloadRegistry.commit(partialFilename, filename);
+                } catch (error) {
+                    partialDownloadRegistry.discard(partialFilename);
+                    resolve({ success: false, error: String(error) });
+                    return;
+                }
                 runtimeMetrics.downloadedBytesTotal += stats.size;
                 appendDebugLog('download-part-success', { itemId, filename, bytes: stats.size });
                 resolve({ success: true });
@@ -3272,13 +3399,12 @@ function downloadVODPart(
             // war historisch ein stdout-Error). Wir mergen beide Streams
             // damit immer SICHTBAR ist was passiert.
             const fullStderr = stderrBuffer.join('').trim();
-            const fullStdout = stdoutBuffer.join('').trim();
             // Letzte Error-/Warning-Zeile aus beiden Streams suchen, falls
             // lastErrorLine noch leer ist (z.B. weil streamlink ohne Output
             // mit Code 1 exited — was bei pre-flight-Auth-Fails passiert).
             let userFacingError = lastErrorLine;
             if (!userFacingError) {
-                const combined = (fullStderr + '\n' + fullStdout).split('\n').map(l => l.trim()).filter(Boolean);
+                const combined = fullStderr.split('\n').map(l => l.trim()).filter(Boolean);
                 userFacingError = combined.filter(l => l.toLowerCase().includes('error:')).pop()
                     || combined.filter(l => !l.startsWith('[')).pop()
                     || '';
@@ -3288,14 +3414,16 @@ function downloadVODPart(
             }
             appendDebugLog('download-part-failed', {
                 itemId, filename, code, error: userFacingError,
-                stderrTail: fullStderr.slice(-2000),
-                stdoutTail: fullStdout.slice(-2000),
+                stderrTail: fullStderr.slice(-2000)
             });
+            partialDownloadRegistry.discard(partialFilename);
             resolve({ success: false, error: userFacingError });
         });
 
-        proc.on('error', (err) => {
+        proc.on('error', async (err) => {
             clearInterval(progressInterval);
+            await output.cancel();
+            partialDownloadRegistry.discard(partialFilename);
             console.error('Process error:', err);
             activeDownloads.delete(itemId);
             const rawError = String(err);
@@ -5046,8 +5174,8 @@ async function downloadLiveStream(
             }
 
             // Resume decision tree.
-            if (cancelledItemIds.has(item.id) || !isDownloading || pauseRequested) {
-                appendDebugLog('recording-resume-cancelled', { itemId: item.id, partNumber, reason: pauseRequested ? 'pause' : 'cancel' });
+            if (cancelledItemIds.has(item.id) || !isDownloading) {
+                appendDebugLog('recording-resume-cancelled', { itemId: item.id, partNumber, reason: 'cancel' });
                 break;
             }
             if (!config.auto_resume_live_recording) {
@@ -5721,12 +5849,12 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
 
             const result = item.mergeGroup
                 ? await processDownloadMergeGroup(item, (progress) => {
-                    mainWindow?.webContents.send('download-progress', progress);
                     recordDownloadProgress(progress);
+                    if (!queuePaused) mainWindow?.webContents.send('download-progress', progress);
                 })
                 : await downloadVOD(item, (progress) => {
-                    mainWindow?.webContents.send('download-progress', progress);
                     recordDownloadProgress(progress);
+                    if (!queuePaused) mainWindow?.webContents.send('download-progress', progress);
                 });
 
             if (result.success) {
@@ -5736,8 +5864,8 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
 
             finalResult = result;
 
-            if (!isDownloading || cancelledItemIds.has(item.id) || pauseRequested) {
-                finalResult = { success: false, error: pauseRequested ? tBackend('downloadPaused') : tBackend('downloadCancelled') };
+            if (!isDownloading || cancelledItemIds.has(item.id)) {
+                finalResult = { success: false, error: tBackend('downloadCancelled') };
                 break;
             }
 
@@ -5781,10 +5909,9 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
             return;
         }
 
-        const wasPaused = pauseRequested || (finalResult.error || '').includes('pausiert');
-        item.status = finalResult.success ? 'completed' : (wasPaused ? 'paused' : 'error');
+        item.status = finalResult.success ? 'completed' : 'error';
         item.progress = finalResult.success ? 100 : item.progress;
-        item.last_error = finalResult.success || wasPaused ? '' : (finalResult.error || tBackend('unknownDownloadError'));
+        item.last_error = finalResult.success ? '' : (finalResult.error || tBackend('unknownDownloadError'));
 
         if (finalResult.success && Array.isArray(finalResult.outputFiles) && finalResult.outputFiles.length > 0) {
             // Attach the produced file paths so the renderer can offer
@@ -5818,7 +5945,8 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
                 if (Notification.isSupported()) {
                     const itemNotification = new Notification({
                         title: 'Twitch VOD Manager',
-                        body: `${item.title || item.url}`
+                        body: `${item.title || item.url}`,
+                        icon: path.join(__dirname, '../build/icon.png')
                     });
                     const firstFile = item.outputFiles?.[0];
                     itemNotification.on('click', () => {
@@ -5924,7 +6052,7 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
 
         if (finalResult.success) {
             runtimeMetrics.downloadsCompleted += 1;
-        } else if (!wasPaused) {
+        } else {
             runtimeMetrics.downloadsFailed += 1;
         }
 
@@ -5956,7 +6084,7 @@ async function processQueue(): Promise<void> {
     });
 
     isDownloading = true;
-    pauseRequested = false;
+    queuePaused = false;
     cancelledItemIds.clear();
     mainWindow?.webContents.send('download-started');
     emitQueueUpdated();
@@ -5964,17 +6092,17 @@ async function processQueue(): Promise<void> {
     const maxSlots = Math.min(Math.max(1, config.parallel_downloads || 1), 2);
     const activePromises = new Map<string, Promise<void>>();
 
-    while (isDownloading && !pauseRequested) {
+    while (isDownloading) {
         // Clean up finished promises
         for (const [id] of activePromises) {
             const queueItem = downloadQueue.find(i => i.id === id);
-            if (!queueItem || queueItem.status !== 'downloading') {
+            if (!queueItem || (queueItem.status !== 'downloading' && queueItem.status !== 'paused')) {
                 activePromises.delete(id);
             }
         }
 
         // Fill available slots
-        while (activePromises.size < maxSlots && !pauseRequested) {
+        while (activePromises.size < maxSlots && !queuePaused) {
             const item = pickNextPendingQueueItem();
             if (!item) break;
 
@@ -5994,7 +6122,7 @@ async function processQueue(): Promise<void> {
     }
 
     isDownloading = false;
-    pauseRequested = false;
+    queuePaused = false;
     runtimeMetrics.activeItemId = null;
     runtimeMetrics.activeItemTitle = null;
     activeQueueItemId = null;
@@ -6012,7 +6140,8 @@ async function processQueue(): Promise<void> {
                 title: 'Twitch VOD Manager',
                 body: failed > 0
                     ? `${completed} Downloads fertig, ${failed} fehlgeschlagen`
-                    : `${completed} Downloads abgeschlossen`
+                    : `${completed} Downloads abgeschlossen`,
+                icon: path.join(__dirname, '../build/icon.png')
             });
             // Click brings the app to the foreground AND opens the download
             // folder so the user can immediately see the output files.
@@ -6048,6 +6177,7 @@ function createWindow(): void {
         minHeight: 700,
         title: `Twitch VOD Manager [v${APP_VERSION}]`,
         backgroundColor: '#0e0e10',
+        icon: path.join(__dirname, process.platform === 'win32' ? '../build/icon.ico' : '../build/icon.png'),
         autoHideMenuBar: true,
         webPreferences: {
             nodeIntegration: false,
@@ -6582,7 +6712,7 @@ ipcMain.handle('add-to-queue', (_, item: Omit<QueueItem, 'id' | 'status' | 'prog
     return downloadQueue;
 });
 
-ipcMain.handle('remove-from-queue', (_, id: string) => {
+ipcMain.handle('remove-from-queue', async (_, id: string) => {
     const wasActiveItem = activeQueueItemId === id || activeDownloads.has(id);
 
     if (wasActiveItem) {
@@ -6590,6 +6720,8 @@ ipcMain.handle('remove-from-queue', (_, id: string) => {
         const tracking = activeDownloads.get(id);
         if (tracking?.process) {
             tracking.process.kill();
+            await tracking.output.cancel();
+            partialDownloadRegistry.discard(tracking.partialFilename);
         }
         activeDownloads.delete(id);
         activeQueueItemId = null;
@@ -6762,6 +6894,20 @@ ipcMain.handle('create-merge-group', (_, itemIds: string[]) => {
 });
 
 ipcMain.handle('start-download', async () => {
+    if (isDownloading && queuePaused) {
+        queuePaused = false;
+        for (const item of downloadQueue) {
+            if (item.status === 'paused') item.status = 'downloading';
+        }
+        for (const [id, tracking] of activeDownloads) {
+            tracking.output.resume();
+        }
+        saveQueue(downloadQueue);
+        emitQueueUpdated(true);
+        mainWindow?.webContents.send('download-started');
+        return true;
+    }
+
     downloadQueue = downloadQueue.map((item) => item.status === 'paused' ? { ...item, status: 'pending' } : item);
 
     const hasPendingItems = downloadQueue.some(item => item.status === 'pending');
@@ -6780,31 +6926,37 @@ ipcMain.handle('start-download', async () => {
 });
 
 ipcMain.handle('pause-download', () => {
-    if (!isDownloading) return false;
+    if (!isDownloading || queuePaused) return false;
 
-    pauseRequested = true;
-    // Kill queue downloads only — cutter/merger/splitter use currentEditorProcess
-    // and aren't affected by pause-download. Per-item cancel state lives in
-    // cancelledItemIds — every active item gets added below.
-    for (const [id, tracking] of activeDownloads) {
-        cancelledItemIds.add(id);
-        if (tracking.process) {
-            tracking.process.kill();
+    queuePaused = true;
+    for (const [, tracking] of activeDownloads) {
+        tracking.output.pause();
+    }
+    for (const item of downloadQueue) {
+        if (item.status === 'downloading') {
+            item.status = 'paused';
+            item.speed = '';
+            item.eta = '';
+            item.progressStatus = tBackend('downloadPaused');
         }
     }
+    saveQueue(downloadQueue);
+    emitQueueUpdated(true);
+    mainWindow?.webContents.send('download-paused');
     return true;
 });
 
-ipcMain.handle('cancel-download', () => {
+ipcMain.handle('cancel-download', async () => {
     isDownloading = false;
-    pauseRequested = false;
-    // Kill queue downloads only — see pause-download note above.
-    for (const [id, tracking] of activeDownloads) {
+    queuePaused = false;
+    await Promise.all([...activeDownloads].map(async ([id, tracking]) => {
         cancelledItemIds.add(id);
         if (tracking.process) {
             tracking.process.kill();
+            await tracking.output.cancel();
+            partialDownloadRegistry.discard(tracking.partialFilename);
         }
-    }
+    }));
     return true;
 });
 
@@ -6921,7 +7073,12 @@ ipcMain.handle('open-external', async (_, url: string) => {
 // Tracks active standalone clip downloads so cancel-download / window-all-closed
 // can kill them. Separate from activeDownloads (queue) because clip downloads
 // don't go through the queue scheduler.
-const activeClipProcesses = new Map<string, ChildProcess>();
+interface ActiveClipDownloadTracking {
+    process: ChildProcess;
+    output: PausableOutput;
+    partialFilename: string;
+}
+const activeClipProcesses = new Map<string, ActiveClipDownloadTracking>();
 
 ipcMain.handle('download-clip', async (_, clipUrl: string) => {
     let clipId = '';
@@ -6959,51 +7116,70 @@ ipcMain.handle('download-clip', async (_, clipUrl: string) => {
 
     return new Promise<{ success: boolean; error?: string; filename?: string }>((resolve) => {
         const streamlinkCmd = getStreamlinkCommand();
+        const partialFilename = partialDownloadRegistry.begin(filename);
         const proc = spawn(streamlinkCmd.command, [
             ...streamlinkCmd.prefixArgs,
             `https://clips.twitch.tv/${clipId}`,
             getStreamlinkStreamArg(),
-            '-o', filename,
-            '--force'
+            '--stdout'
         ], { windowsHide: true });
+        if (!proc.stdout) {
+            partialDownloadRegistry.discard(partialFilename);
+            releaseClaimedFilenamesForItem(clipId);
+            resolve({ success: false, error: tBackend('unknownDownloadError') });
+            return;
+        }
+        const output = createPausableOutput(proc.stdout, fs.createWriteStream(partialFilename, { flags: 'w' }));
+        const outputFinished = output.finished.then(() => null, (error) => error);
 
-        activeClipProcesses.set(clipId, proc);
+        activeClipProcesses.set(clipId, { process: proc, output, partialFilename });
         appendDebugLog('clip-download-start', { clipId, broadcaster: safeBroadcaster, filename });
 
-        proc.on('close', (code) => {
+        proc.on('close', async (code) => {
             activeClipProcesses.delete(clipId);
             releaseClaimedFilenamesForItem(clipId);
+            const outputError = await outputFinished;
 
-            if (code !== 0 || !fs.existsSync(filename)) {
+            if (outputError || code !== 0 || !fs.existsSync(partialFilename)) {
+                partialDownloadRegistry.discard(partialFilename);
                 appendDebugLog('clip-download-failed', { clipId, code });
-                resolve({ success: false, error: tBackend('downloadFailedExitCode', { code: String(code ?? -1) }) });
+                resolve({ success: false, error: outputError ? String(outputError) : tBackend('downloadFailedExitCode', { code: String(code ?? -1) }) });
                 return;
             }
 
             // Integrity: clips are short but should still be at least a few KB
             // and parse as a video stream via ffprobe. Empty/zero-byte files
             // were previously reported as "success" because exit code was 0.
-            const stats = fs.statSync(filename);
+            const stats = fs.statSync(partialFilename);
             if (stats.size < 16 * 1024) {
-                try { fs.unlinkSync(filename); } catch { }
+                partialDownloadRegistry.discard(partialFilename);
                 appendDebugLog('clip-download-too-small', { clipId, bytes: stats.size });
                 resolve({ success: false, error: tBackend('clipFileTooSmall', { bytes: String(stats.size) }) });
                 return;
             }
 
-            const integrity = validateDownloadedFileIntegrity(filename, null);
+            const integrity = validateDownloadedFileIntegrity(partialFilename, null);
             if (!integrity.success) {
-                try { fs.unlinkSync(filename); } catch { }
+                partialDownloadRegistry.discard(partialFilename);
                 appendDebugLog('clip-download-integrity-failed', { clipId, error: integrity.error });
                 resolve({ success: false, error: integrity.error || tBackend('integrityFailedGeneric') });
                 return;
             }
 
+            try {
+                partialDownloadRegistry.commit(partialFilename, filename);
+            } catch (error) {
+                partialDownloadRegistry.discard(partialFilename);
+                resolve({ success: false, error: String(error) });
+                return;
+            }
             appendDebugLog('clip-download-success', { clipId, bytes: stats.size, filename });
             resolve({ success: true, filename });
         });
 
-        proc.on('error', () => {
+        proc.on('error', async () => {
+            await output.cancel();
+            partialDownloadRegistry.discard(partialFilename);
             activeClipProcesses.delete(clipId);
             releaseClaimedFilenamesForItem(clipId);
             resolve({ success: false, error: tBackend('streamlinkNotFound') });
@@ -7034,6 +7210,10 @@ ipcMain.handle('get-archive-stats', (): ArchiveStats => {
 
 ipcMain.handle('get-streamer-profile', async (_, login: string, forceRefresh?: boolean): Promise<StreamerProfile | null> => {
     return await getStreamerProfile(login, forceRefresh === true);
+});
+
+ipcMain.handle('get-streamer-display-names', async (_, logins: string[]): Promise<Record<string, string>> => {
+    return await getStreamerDisplayNames(Array.isArray(logins) ? logins : []);
 });
 
 ipcMain.handle('get-vod-storyboard', async (_, vodId: string): Promise<VodStoryboard | null> => {
@@ -7128,7 +7308,7 @@ ipcMain.handle('check-folder-writable', (_, folderPath: string): boolean => {
     return isDownloadPathWritable(folderPath);
 });
 
-ipcMain.handle('is-downloading', () => isDownloading);
+ipcMain.handle('is-downloading', () => isDownloading && !queuePaused);
 
 ipcMain.handle('get-runtime-metrics', () => getRuntimeMetricsSnapshot());
 
@@ -7316,7 +7496,10 @@ let appDb: DbHandle | null = null;
 export function getAppDb(): DbHandle | null { return appDb; }
 
 app.whenReady().then(() => {
-    app.setAppUserModelId('com.twitch.vodmanager');
+    const removedPartialDownloads = partialDownloadRegistry.cleanup();
+    if (removedPartialDownloads.length > 0) {
+        appendDebugLog('partial-downloads-cleaned-on-startup', { count: removedPartialDownloads.length });
+    }
     refreshBundledToolPaths(true);
     startMetadataCacheCleanup();
     startDebugLogFlushTimer();
@@ -7342,6 +7525,7 @@ app.whenReady().then(() => {
     restartLiveStatusPoller();
     restartAutoCleanupTimer();
     createWindow();
+    startDevelopmentReload();
     appendDebugLog('startup-tools-check-skipped', 'Deferred to first use');
 
     app.on('activate', () => {
@@ -7357,8 +7541,10 @@ app.whenReady().then(() => {
 // a single idempotent helper means any future tweak (e.g. flushing a new
 // debug stream) lands once and applies on every quit path.
 let shutdownCleanupDone = false;
+let quitAfterCleanup = false;
+let shutdownPromise: Promise<void> | null = null;
 
-function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): void {
+async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Promise<void> {
     if (shutdownCleanupDone) return;
     shutdownCleanupDone = true;
 
@@ -7376,16 +7562,20 @@ function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): void {
     // and any in-flight cutter/merger/splitter ffmpeg. before-quit used to
     // skip this entirely; window-all-closed did it but only via direct
     // kill() (no try/catch around the queue process kill).
-    for (const [, tracking] of activeDownloads) {
+    await Promise.all([...activeDownloads.values()].map(async (tracking) => {
         if (tracking.process) {
             try { tracking.process.kill(); } catch { /* already exited */ }
         }
-    }
+        try { await tracking.output.cancel(); } catch { }
+        try { partialDownloadRegistry.discard(tracking.partialFilename); } catch { }
+    }));
     activeDownloads.clear();
 
-    for (const [, proc] of activeClipProcesses) {
-        try { proc.kill(); } catch { /* already exited */ }
-    }
+    await Promise.all([...activeClipProcesses.values()].map(async (tracking) => {
+        try { tracking.process.kill(); } catch { }
+        try { await tracking.output.cancel(); } catch { }
+        try { partialDownloadRegistry.discard(tracking.partialFilename); } catch { }
+    }));
     activeClipProcesses.clear();
 
     if (currentEditorProcess) {
@@ -7409,12 +7599,17 @@ function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): void {
 }
 
 app.on('window-all-closed', () => {
-    shutdownCleanup('window-all-closed');
     if (process.platform !== 'darwin') {
         app.quit();
     }
 });
 
-app.on('before-quit', () => {
-    shutdownCleanup('before-quit');
+app.on('before-quit', (event) => {
+    if (quitAfterCleanup) return;
+    event.preventDefault();
+    if (shutdownPromise) return;
+    shutdownPromise = shutdownCleanup('before-quit').finally(() => {
+        quitAfterCleanup = true;
+        app.quit();
+    });
 });

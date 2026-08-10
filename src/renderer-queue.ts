@@ -212,6 +212,18 @@ function showQueueContextMenu(x: number, y: number, item: QueueItem): void {
     const isPending = item.status === 'pending' || item.status === 'paused';
     const isFailed = item.status === 'error';
     const isCompleted = item.status === 'completed';
+    const canSelectForMerge = item.status === 'pending' && !item.mergeGroup && !item.isLive;
+
+    if (canSelectForMerge) {
+        const isSelectedForMerge = selectedQueueIds.includes(item.id);
+        const mergeSelectionItem = makeItem(
+            isSelectedForMerge ? UI_TEXT.queue.ctxRemoveFromMerge : UI_TEXT.queue.ctxSelectForMerge,
+            () => toggleQueueSelection(item.id)
+        );
+        mergeSelectionItem.dataset.queueAction = 'merge-select';
+        menu.appendChild(mergeSelectionItem);
+        menu.appendChild(makeSeparator());
+    }
 
     if (isPending) {
         menu.appendChild(makeItem(UI_TEXT.queue.ctxMoveTop, () => { void moveQueueItemTo(item.id, 'top'); }));
@@ -297,54 +309,30 @@ function getQueueStatusLabel(item: QueueItem): string {
     return UI_TEXT.queue.statusWaiting;
 }
 
-function getQueueProgressText(item: QueueItem): string {
-    if (item.status === 'completed') return '100%';
-    if (item.status === 'error') return UI_TEXT.queue.progressError;
-    if (item.status === 'paused') return UI_TEXT.queue.progressReady;
-    if (item.status === 'pending') return UI_TEXT.queue.progressReady;
-    if (item.progress > 0) return `${Math.max(0, Math.min(100, item.progress)).toFixed(1)}%`;
-    return item.progressStatus || UI_TEXT.queue.progressLoading;
-}
-
-function getQueueMetaText(item: QueueItem): string {
+function getQueueProgressStatusText(item: QueueItem): string {
     if (item.status === 'error' && item.last_error) {
         return item.last_error;
     }
 
-    const parts: string[] = [];
-
     if (item.currentPart && item.totalParts) {
-        parts.push(`${UI_TEXT.queue.part} ${item.currentPart}/${item.totalParts}`);
+        return `${UI_TEXT.queue.part} ${item.currentPart}/${item.totalParts}`;
     }
 
-    if (item.speed) {
-        parts.push(`${UI_TEXT.queue.speed}: ${item.speed}`);
-    }
+    if (item.status === 'pending') return UI_TEXT.queue.readyToDownload;
+    if (item.status === 'paused') return UI_TEXT.queue.statusPaused;
+    if (item.status === 'downloading') return item.progressStatus || UI_TEXT.queue.started;
+    if (item.status === 'completed') return UI_TEXT.queue.done;
+    return UI_TEXT.queue.failed;
+}
 
-    if (item.eta) {
-        parts.push(`${UI_TEXT.queue.eta}: ${item.eta}`);
+function getQueueProgressMetricsText(item: QueueItem): string {
+    const parts: string[] = [];
+    if (item.status === 'completed') parts.push('100%');
+    if (item.status === 'downloading' && item.progress > 0) {
+        parts.push(`${Math.max(0, Math.min(100, item.progress)).toFixed(1)}%`);
     }
-
-    if (!parts.length && item.status === 'pending') {
-        parts.push(UI_TEXT.queue.readyToDownload);
-    }
-
-    if (!parts.length && item.status === 'paused') {
-        parts.push(UI_TEXT.queue.statusPaused);
-    }
-
-    if (!parts.length && item.status === 'downloading') {
-        parts.push(item.progressStatus || UI_TEXT.queue.started);
-    }
-
-    if (!parts.length && item.status === 'completed') {
-        parts.push(UI_TEXT.queue.done);
-    }
-
-    if (!parts.length && item.status === 'error') {
-        parts.push(UI_TEXT.queue.failed);
-    }
-
+    if (item.speed) parts.push(item.speed);
+    if (item.eta) parts.push(item.eta);
     return parts.join(' | ');
 }
 
@@ -400,18 +388,18 @@ function updateQueueItemProgress(progress: DownloadProgress): void {
 
     const bar = el.querySelector('.queue-progress-bar') as HTMLElement | null;
     const wrap = el.querySelector('.queue-progress-wrap') as HTMLElement | null;
-    const text = el.querySelector('.queue-progress-text') as HTMLElement | null;
-    const meta = el.querySelector('.queue-meta') as HTMLElement | null;
+    const status = el.querySelector('.queue-progress-status') as HTMLElement | null;
+    const metrics = el.querySelector('.queue-progress-metrics') as HTMLElement | null;
 
     if (bar) {
-        const isDeterminate = progress.progress > 0 && progress.progress <= 100;
-        const pct = isDeterminate ? Math.min(100, progress.progress) : 0;
+        const isDeterminate = item.progress > 0 && item.progress <= 100;
+        const pct = isDeterminate ? Math.min(100, item.progress) : 0;
         bar.style.width = `${pct}%`;
-        bar.className = `queue-progress-bar${isDeterminate ? '' : ' indeterminate'}`;
+        bar.className = 'queue-progress-bar';
         if (wrap) wrap.setAttribute('aria-valuenow', String(Math.round(pct)));
     }
-    if (text) text.textContent = getQueueProgressText(item);
-    if (meta) meta.textContent = getQueueMetaText(item);
+    if (status) status.textContent = getQueueProgressStatusText(item);
+    if (metrics) metrics.textContent = getQueueProgressMetricsText(item);
 }
 
 function toggleQueueDetails(id: string): void {
@@ -513,19 +501,21 @@ function renderQueue(): void {
     list.innerHTML = queue.map((item: QueueItem) => {
         const safeTitle = escapeHtml(item.title || UI_TEXT.vods.untitled);
         const safeStatusLabel = escapeHtml(getQueueStatusLabel(item));
-        const safeProgressText = escapeHtml(getQueueProgressText(item));
-        const safeMeta = escapeHtml(getQueueMetaText(item));
+        const safeProgressStatus = escapeHtml(getQueueProgressStatusText(item));
+        const safeProgressMetrics = escapeHtml(getQueueProgressMetricsText(item));
+        const safeDate = escapeHtml(formatUiDate(item.date));
+        const progressStatusClass = item.status === 'downloading' && item.progress <= 0 ? ' is-starting' : '';
         const isClip = item.customClip ? '* ' : '';
         const hasDeterminateProgress = item.progress > 0 && item.progress <= 100;
         const progressValue = item.status === 'completed'
             ? 100
             : (hasDeterminateProgress ? Math.max(0, Math.min(100, item.progress)) : 0);
-        const progressClass = item.status === 'downloading' && !hasDeterminateProgress ? ' indeterminate' : '';
 
         const isMergeGroup = !!item.mergeGroup;
-        const showSelector = item.status === 'pending' && !isMergeGroup && !item.isLive;
         const selectionIndex = selectedQueueIds.indexOf(item.id);
         const isSelected = selectionIndex >= 0;
+        const selectionPosition = selectionIndex + 1;
+        const selectionTitle = escapeHtml(UI_TEXT.queue.mergeSelectionPosition.replace('{position}', String(selectionPosition)));
         const mergeIcon = isMergeGroup
             ? '<svg class="merge-group-icon" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z"/></svg> '
             : '';
@@ -540,22 +530,23 @@ function renderQueue(): void {
             : '';
 
         return `
-            <div class="queue-item${isMergeGroup ? ' merge-group' : ''}" draggable="${item.status === 'pending' ? 'true' : 'false'}" data-id="${item.id}">
-                ${showSelector
-                    ? `<div class="queue-selector${isSelected ? ' selected' : ''}" role="checkbox" tabindex="0" aria-checked="${isSelected ? 'true' : 'false'}" onclick="toggleQueueSelection('${item.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleQueueSelection('${item.id}');}">${isSelected ? selectionIndex + 1 : ''}</div>`
-                    : ''
-                }
+            <div class="queue-item${isMergeGroup ? ' merge-group' : ''}${isSelected ? ' merge-selected' : ''}" draggable="${item.status === 'pending' ? 'true' : 'false'}" data-id="${item.id}">
+                ${isSelected ? `<span class="queue-selection-order" title="${selectionTitle}" aria-label="${selectionTitle}">${selectionPosition}</span>` : ''}
                 <div class="status ${item.status}"></div>
                 <div class="queue-main">
                     <div class="queue-title-row">
                         <div class="title" title="${safeTitle}" role="button" tabindex="0" aria-expanded="${expandedQueueIds.has(item.id) ? 'true' : 'false'}" aria-controls="details-${item.id}" onclick="toggleQueueDetails('${item.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleQueueDetails('${item.id}');}">${liveBadge}${healthBadge}${mergeIcon}${isClip}${safeTitle}</div>
                         <div class="queue-status-label">${safeStatusLabel}</div>
+                        <span class="remove" role="button" tabindex="0" aria-label="${escapeHtml(UI_TEXT.streamers.removeAria)}" onclick="removeFromQueue('${item.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();removeFromQueue('${item.id}');}">x</span>
                     </div>
-                    <div class="queue-meta">${safeMeta}${mergeMetaExtra}</div>
+                    <div class="queue-meta"><span class="queue-date">${safeDate}</span>${mergeMetaExtra}</div>
                     <div class="queue-progress-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progressValue)}" aria-label="${escapeHtml(safeStatusLabel)}">
-                        <div class="queue-progress-bar${progressClass}" style="width: ${progressValue}%;"></div>
+                        <div class="queue-progress-bar" style="width: ${progressValue}%;"></div>
                     </div>
-                    <div class="queue-progress-text">${safeProgressText}</div>
+                    <div class="queue-progress-info">
+                        <span class="queue-progress-status${progressStatusClass}">${safeProgressStatus}</span>
+                        <span class="queue-progress-metrics">${safeProgressMetrics}</span>
+                    </div>
                     <div class="queue-details${expandedQueueIds.has(item.id) ? ' expanded' : ''}" id="details-${item.id}">
                         <div><span class="queue-detail-label">URL:</span> ${escapeHtml(item.url)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailStreamer)}</span> ${escapeHtml(item.streamer)}</div>
@@ -565,7 +556,6 @@ function renderQueue(): void {
                     </div>
                 </div>
                 ${item.status === 'error' ? `<button class="queue-retry-btn" type="button" title="${escapeHtml(UI_TEXT.queue.retryItem)}" aria-label="${escapeHtml(UI_TEXT.queue.retryItem)}" onclick="retryQueueItem('${item.id}')">&#x21bb;</button>` : ''}
-                <span class="remove" role="button" tabindex="0" aria-label="${escapeHtml(UI_TEXT.streamers.removeAria)}" onclick="removeFromQueue('${item.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();removeFromQueue('${item.id}');}">x</span>
             </div>
         `;
     }).join('');

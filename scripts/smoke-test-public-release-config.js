@@ -13,19 +13,30 @@ function check(condition, message) {
   if (!condition) failures.push(message);
 }
 
-check(packageJson.version === '1.0.2', `package version is ${packageJson.version}`);
-check(packageLock.version === '1.0.2', `lockfile version is ${packageLock.version}`);
-check(packageLock.packages?.['']?.version === '1.0.2', `lockfile root package version is ${packageLock.packages?.['']?.version}`);
+check(packageJson.version === '1.0.3', `package version is ${packageJson.version}`);
+check(packageLock.version === '1.0.3', `lockfile version is ${packageLock.version}`);
+check(packageLock.packages?.['']?.version === '1.0.3', `lockfile root package version is ${packageLock.packages?.['']?.version}`);
 check(packageJson.build?.appId === 'io.github.sucukdeluxe.twitch-vod-manager', `appId is ${packageJson.build?.appId}`);
 check(packageJson.build?.publish?.provider === 'generic', `publish provider is ${packageJson.build?.publish?.provider}`);
 check(packageJson.build?.publish?.url === 'https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/latest/download/', `publish URL is ${packageJson.build?.publish?.url}`);
-check(JSON.stringify(packageJson.build?.files) === JSON.stringify(['dist/**/*', 'src/index.html', 'src/styles.css', 'src/workspace.css', 'package.json']), 'packaged file list is not restricted');
+check(JSON.stringify(packageJson.build?.files) === JSON.stringify(['dist/**/*', 'src/index.html', 'src/styles.css', 'src/workspace.css', 'build/icon.png', 'package.json']), 'packaged file list is not restricted');
+check(packageJson.build?.win?.icon === 'build/icon.ico', `Windows icon is ${packageJson.build?.win?.icon}`);
+check(packageJson.build?.nsis?.installerIcon === 'build/icon.ico', `installer icon is ${packageJson.build?.nsis?.installerIcon}`);
+check(packageJson.build?.nsis?.uninstallerIcon === 'build/icon.ico', `uninstaller icon is ${packageJson.build?.nsis?.uninstallerIcon}`);
+check(packageJson.build?.win?.signAndEditExecutable !== false, 'Windows executable resource editing is enabled');
+check(packageJson.build?.win?.signExecutable === false, 'Windows code signing remains disabled without suppressing icon resources');
+check(fs.existsSync(path.join(root, 'build', 'icon.png')), 'application PNG icon is missing');
+check(fs.existsSync(path.join(root, 'build', 'icon.ico')), 'application ICO icon is missing');
+check(mainSource.includes('app.setAppUserModelId(WINDOWS_APP_IDENTITY.appUserModelId)'), 'Windows AppUserModelID is not applied from the centralized identity');
+check(mainSource.includes('app.setName(WINDOWS_APP_IDENTITY.name)'), 'Windows application name is not applied before startup');
+check(mainSource.includes("icon: path.join(__dirname, process.platform === 'win32' ? '../build/icon.ico' : '../build/icon.png')"), 'BrowserWindow does not use the platform application icon');
+check(indexSource.includes('class="topbar-brand-mark" src="../build/icon.png"'), 'topbar does not use the application icon');
 check(mainSource.includes('GITHUB_RELEASES_API_LATEST_URL'), 'GitHub releases API constant is missing');
 check(mainSource.includes('GITHUB_RELEASES_DOWNLOAD_BASE_URL'), 'GitHub releases download constant is missing');
 check(mainSource.includes('https://api.github.com/repos/Sucukdeluxe/Twitch-VOD-Manager/releases/latest'), 'GitHub latest release API URL is missing');
 check(mainSource.includes('https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/download'), 'GitHub release download URL is missing');
 check(!/storyboards\/\d{8,12}(?:-|\/)/.test(mainSource), 'numeric Twitch VOD example remains in the public source');
-check(indexSource.includes('Version: v1.0.2'), 'initial version label is not 1.0.2');
+check(indexSource.includes('Version: v1.0.3'), 'initial version label is not 1.0.3');
 check(!indexSource.includes('Version: v4.1.13'), 'legacy version label is still present');
 check(fs.existsSync(manifestPath), 'public release manifest is missing');
 

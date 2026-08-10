@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld('api', {
     getStorageStats: () => ipcRenderer.invoke('get-storage-stats'),
     getArchiveStats: () => ipcRenderer.invoke('get-archive-stats'),
     getStreamerProfile: (login: string, forceRefresh?: boolean) => ipcRenderer.invoke('get-streamer-profile', login, forceRefresh),
+    getStreamerDisplayNames: (logins: string[]) => ipcRenderer.invoke('get-streamer-display-names', logins),
     getVodStoryboard: (vodId: string) => ipcRenderer.invoke('get-vod-storyboard', vodId),
     getLiveStatusSnapshot: () => ipcRenderer.invoke('get-live-status-snapshot'),
     onLiveStatusBatchUpdate: (callback: (info: { changes: Array<{ login: string; isLive: boolean }> }) => void) => {
@@ -150,6 +151,9 @@ contextBridge.exposeInMainWorld('api', {
     },
     onDownloadStarted: (callback: () => void) => {
         ipcRenderer.on('download-started', () => callback());
+    },
+    onDownloadPaused: (callback: () => void) => {
+        ipcRenderer.on('download-paused', () => callback());
     },
     onDownloadFinished: (callback: () => void) => {
         ipcRenderer.on('download-finished', () => callback());

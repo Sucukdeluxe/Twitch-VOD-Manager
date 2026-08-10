@@ -36,7 +36,7 @@ const CONFIG_KV_KEYS = [
     'auto_record_poll_seconds', 'filename_template_vod', 'filename_template_parts',
     'filename_template_clip', 'smart_queue_scheduler', 'prevent_duplicate_downloads',
     'persist_queue_on_restart', 'auto_resume_queue_on_startup',
-    'notify_on_each_completion',
+    'notify_on_each_completion', 'sidebar_split_view',
 ] as const;
 
 function backupOnce(srcPath: string): void {

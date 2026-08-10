@@ -189,6 +189,9 @@ async function run() {
           retry: (document.getElementById('btnRetryFailed')?.textContent || '').trim(),
           enText: (document.getElementById('languageEnText')?.textContent || '').trim(),
           enIcon: !!document.querySelector('#langOptionEn .flag-icon.flag-en'),
+          enIconTag: document.querySelector('#langOptionEn .flag-icon.flag-en')?.tagName || '',
+          enIconOpacity: getComputedStyle(document.querySelector('#langOptionEn .flag-icon.flag-en')).opacity,
+          enIconSize: document.querySelector('#langOptionEn .flag-icon.flag-en')?.getBoundingClientRect().toJSON() || null,
           enActive: !!document.getElementById('langOptionEn')?.classList.contains('active')
         };
 
@@ -197,6 +200,9 @@ async function run() {
         assert(enState.nav.includes('Settings'), 'English language switch failed');
         assert(deState.deIcon, 'German flag icon missing');
         assert(enState.enIcon, 'English flag icon missing');
+        assert(enState.enIconTag === 'svg', 'English flag must use crisp vector geometry');
+        assert(enState.enIconOpacity === '1', 'English flag must render fully opaque');
+        assert(enState.enIconSize?.width === 18 && enState.enIconSize?.height === 12, 'English flag must render at 18x12 pixels');
         assert(deState.deActive, 'German language button did not activate');
         assert(enState.enActive, 'English language button did not activate');
 

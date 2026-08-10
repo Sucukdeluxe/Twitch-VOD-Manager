@@ -8,4 +8,6 @@ tmp_*/
 .env
 .env.*
 !.env.example
+.dev-program-data/
+.dev-user-data/
 .DS_Store

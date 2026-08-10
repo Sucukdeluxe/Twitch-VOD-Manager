@@ -3,10 +3,12 @@ interface AppConfig {
     client_secret?: string;
     download_path?: string;
     streamers?: string[];
+    streamer_display_names?: Record<string, string>;
     theme?: string;
     download_mode?: 'parts' | 'full';
     part_minutes?: number;
     language?: 'de' | 'en';
+    sidebar_split_view?: boolean;
     filename_template_vod?: string;
     filename_template_parts?: string;
     filename_template_clip?: string;
@@ -257,6 +259,9 @@ interface StreamerProfile {
 interface VodStoryboard {
     vodId: string;
     spriteDataUrl: string;
+    frameDataUrls: string[];
+    frameWidth: number;
+    frameHeight: number;
     cols: number;
     rows: number;
     cellWidth: number;
@@ -346,6 +351,7 @@ interface ApiBridge {
     getStorageStats(): Promise<StorageStatsResult>;
     getArchiveStats(): Promise<ArchiveStats>;
     getStreamerProfile(login: string, forceRefresh?: boolean): Promise<StreamerProfile | null>;
+    getStreamerDisplayNames(logins: string[]): Promise<Record<string, string>>;
     getVodStoryboard(vodId: string): Promise<VodStoryboard | null>;
     getLiveStatusSnapshot(): Promise<Record<string, boolean>>;
     onLiveStatusBatchUpdate(callback: (info: { changes: Array<{ login: string; isLive: boolean }> }) => void): void;
@@ -388,6 +394,7 @@ interface ApiBridge {
     onQueueUpdated(callback: (queue: QueueItem[]) => void): void;
     onQueueDuplicateSkipped(callback: (payload: { title: string; streamer: string; url: string }) => void): void;
     onDownloadStarted(callback: () => void): void;
+    onDownloadPaused(callback: () => void): void;
     onDownloadFinished(callback: () => void): void;
     onCutProgress(callback: (percent: number) => void): void;
     onMergeProgress(callback: (percent: number) => void): void;

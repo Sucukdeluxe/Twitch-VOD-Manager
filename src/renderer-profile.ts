@@ -3,6 +3,9 @@
 // full card once profile data is back. Smooth fade-in is in CSS.
 
 let activeProfileRequestId = 0;
+let activeProfileLogin = '';
+const streamerProfileCache = new Map<string, StreamerProfile>();
+const streamerProfileLoads = new Map<string, Promise<StreamerProfile | null>>();
 
 function formatProfileFollowers(count: number | null): string {
     if (count == null) return '–';
@@ -20,14 +23,36 @@ function formatLastStreamAgo(iso: string | null): string {
     const hours = Math.floor(minutes / 60);
     if (hours < 24) return UI_TEXT.profile.agoHours.replace('{n}', String(hours));
     const days = Math.floor(hours / 24);
+    if (days === 1) return UI_TEXT.profile.agoDay;
     if (days < 30) return UI_TEXT.profile.agoDays.replace('{n}', String(days));
     const months = Math.floor(days / 30);
+    if (months === 1) return UI_TEXT.profile.agoMonth;
     if (months < 12) return UI_TEXT.profile.agoMonths.replace('{n}', String(months));
     const years = Math.floor(days / 365);
+    if (years === 1) return UI_TEXT.profile.agoYear;
     return UI_TEXT.profile.agoYears.replace('{n}', String(years));
 }
 
+function streamerProfilesMatch(left: StreamerProfile, right: StreamerProfile): boolean {
+    return left.login === right.login
+        && left.displayName === right.displayName
+        && left.avatarUrl === right.avatarUrl
+        && left.bannerUrl === right.bannerUrl
+        && left.description === right.description
+        && left.broadcasterType === right.broadcasterType
+        && left.followerCount === right.followerCount
+        && left.vodCount === right.vodCount
+        && left.lastStreamAt === right.lastStreamAt
+        && left.isLive === right.isLive
+        && left.currentTitle === right.currentTitle
+        && left.currentGame === right.currentGame
+        && left.currentStreamPreviewUrl === right.currentStreamPreviewUrl
+        && left.currentStreamViewers === right.currentStreamViewers
+        && left.twitchUrl === right.twitchUrl;
+}
+
 function hideStreamerProfileHeader(): void {
+    activeProfileLogin = '';
     const el = document.getElementById('streamerProfileHeader');
     if (!el) return;
     el.classList.add('is-hidden');
@@ -166,10 +191,14 @@ async function loadStreamerProfile(login: string, forceRefresh = false): Promise
         hideStreamerProfileHeader();
         return;
     }
+    const key = login.trim().toLowerCase();
+    activeProfileLogin = key;
     const reqId = ++activeProfileRequestId;
-    renderStreamerProfileSkeleton(login);
+    const cached = streamerProfileCache.get(key);
+    if (cached) renderStreamerProfileCard(cached);
+    else renderStreamerProfileSkeleton(login);
     try {
-        const profile = await window.api.getStreamerProfile(login, forceRefresh);
+        const profile = await fetchStreamerProfile(login, forceRefresh);
         // Stale-request guard — user may have clicked another streamer
         // while we were waiting on the API.
         if (reqId !== activeProfileRequestId) return;
@@ -177,10 +206,42 @@ async function loadStreamerProfile(login: string, forceRefresh = false): Promise
             hideStreamerProfileHeader();
             return;
         }
-        renderStreamerProfileCard(profile);
+        const rememberDisplayName = (window as unknown as { rememberStreamerDisplayName?: (login: string, displayName: string) => void }).rememberStreamerDisplayName;
+        if (typeof rememberDisplayName === 'function') rememberDisplayName(profile.login, profile.displayName);
+        if (!cached || !streamerProfilesMatch(cached, profile)) renderStreamerProfileCard(profile);
     } catch (_) {
         if (reqId === activeProfileRequestId) hideStreamerProfileHeader();
     }
+}
+
+async function fetchStreamerProfile(login: string, forceRefresh = false): Promise<StreamerProfile | null> {
+    const key = login.trim().toLowerCase();
+    const cached = streamerProfileCache.get(key);
+    if (!forceRefresh && cached) return cached;
+    const pending = streamerProfileLoads.get(key);
+    if (pending) return pending;
+    const task = window.api.getStreamerProfile(login, forceRefresh).then((profile) => {
+        if (profile) streamerProfileCache.set(key, profile);
+        return profile;
+    });
+    streamerProfileLoads.set(key, task);
+    try {
+        return await task;
+    } finally {
+        if (streamerProfileLoads.get(key) === task) streamerProfileLoads.delete(key);
+    }
+}
+
+async function preloadStreamerProfiles(logins: string[]): Promise<void> {
+    await Promise.allSettled(logins.map((login) => fetchStreamerProfile(login)));
+}
+
+async function refreshStreamerProfilesInBackground(logins: string[]): Promise<void> {
+    await Promise.allSettled(logins.map(async (login) => {
+        const previous = streamerProfileCache.get(login.trim().toLowerCase());
+        const profile = await fetchStreamerProfile(login, true);
+        if (profile && activeProfileLogin === login.trim().toLowerCase() && (!previous || !streamerProfilesMatch(previous, profile))) renderStreamerProfileCard(profile);
+    }));
 }
 
 function refreshStreamerProfile(login: string): void {
@@ -216,3 +277,5 @@ function onProfileAvatarError(img: HTMLImageElement): void {
 (window as unknown as { onProfileAvatarError: typeof onProfileAvatarError }).onProfileAvatarError = onProfileAvatarError;
 (window as unknown as { onProfileLivePreviewError: typeof onProfileLivePreviewError }).onProfileLivePreviewError = onProfileLivePreviewError;
 (window as unknown as { triggerLiveRecordingFromProfile: typeof triggerLiveRecordingFromProfile }).triggerLiveRecordingFromProfile = triggerLiveRecordingFromProfile;
+(window as unknown as { preloadStreamerProfiles: typeof preloadStreamerProfiles }).preloadStreamerProfiles = preloadStreamerProfiles;
+(window as unknown as { refreshStreamerProfilesInBackground: typeof refreshStreamerProfilesInBackground }).refreshStreamerProfilesInBackground = refreshStreamerProfilesInBackground;

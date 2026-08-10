@@ -32,7 +32,7 @@ const DEFAULT_SUCCESS = `<!doctype html><html><head><meta charset="utf-8"><title
 <style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0e0e10;color:#efeff1;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
 .box{text-align:center;padding:2rem 3rem;background:#1f1f23;border-radius:8px}
 h1{color:#9146FF;margin:0 0 0.5rem}</style></head>
-<body><div class="box"><h1>Login erfolgreich</h1><p>Du kannst dieses Fenster jetzt schliessen.</p></div></body></html>`;
+<body><div class="box"><h1>Login erfolgreich</h1><p>Du kannst dieses Fenster jetzt schließen.</p></div></body></html>`;
 
 const DEFAULT_ERROR = `<!doctype html><html><head><meta charset="utf-8"><title>Fehler</title>
 <style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0e0e10;color:#efeff1;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.3 - 2026-08-10
+
+- Added animated selection markers across the main navigation, sidebar modes, language control, streamer list and settings pages.
+- Reorganized Settings into dedicated pages with a responsive two-column download configuration and clearer public-mode guidance.
+- Added startup preloading and silent five-minute background refreshes for configured streamers and their VOD libraries.
+- Improved VOD cards with stable one-line titles, localized dates, clearer view counts, persistent duration badges and high-resolution hover previews.
+- Added an optional split Streamer and Queue sidebar, compact streamer context actions and space-efficient merge-order selection.
+- Improved queue accuracy with real zero-percent starts, stable progress metadata and pause or continue support without restarting the download.
+- Added safe partial-file handling so incomplete downloads are removed after cancellation, normal shutdown or crash recovery and final names only appear after verification.
+- Replaced Electron branding across the window, taskbar, installer, uninstaller and notifications with the Twitch VOD Manager identity.
+- Improved German localization, date formatting, text-selection behavior, responsive navigation labels and update-dialog layout.
+- Added a Windows hot-reload development workflow for renderer and main-process changes.
+- Updated the public documentation with a complete feature overview, privacy details, setup guidance and an isolated product screenshot.
+
 ## 1.0.2 - 2026-08-10
 
 - Redesigned the desktop workspace with compact top navigation, contextual sidebars and dedicated toolbars for all seven areas.

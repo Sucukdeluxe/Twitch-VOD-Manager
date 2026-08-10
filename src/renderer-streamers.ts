@@ -1,12 +1,90 @@
 let selectStreamerRequestId = 0;
 let vodRenderTaskId = 0;
+let streamerIndicatorFrame: number | null = null;
 const VOD_RENDER_CHUNK_SIZE = 64;
+
+function scheduleStreamerActiveIndicatorSync(): void {
+    if (streamerIndicatorFrame !== null) return;
+    streamerIndicatorFrame = requestAnimationFrame(() => {
+        streamerIndicatorFrame = null;
+        const list = document.getElementById('streamerList');
+        const activeItem = list?.querySelector<HTMLElement>('.streamer-item.active');
+        if (!list || !activeItem) {
+            list?.classList.remove('streamer-indicator-visible');
+            return;
+        }
+        list.style.setProperty('--streamer-active-x', `${activeItem.offsetLeft}px`);
+        list.style.setProperty('--streamer-active-y', `${activeItem.offsetTop}px`);
+        list.style.setProperty('--streamer-active-width', `${activeItem.offsetWidth}px`);
+        list.style.setProperty('--streamer-active-height', `${activeItem.offsetHeight}px`);
+        list.classList.add('streamer-indicator-visible');
+        requestAnimationFrame(() => list.classList.add('streamer-indicator-ready'));
+    });
+}
 
 // Live status snapshot — updated by the main process via the
 // 'live-status-batch-update' IPC event. Keys are lowercase logins so
 // the lookup is case-insensitive regardless of how the streamer's
 // name was added (display-cased vs login-cased).
 const liveStatusByLogin = new Map<string, boolean>();
+const streamerDisplayNames = new Map<string, string>();
+
+function rememberStreamerDisplayName(login: string, displayName: string): void {
+    const normalizedLogin = login.trim().toLowerCase();
+    const normalizedDisplayName = displayName.trim();
+    if (!normalizedLogin || !normalizedDisplayName) return;
+    const changed = streamerDisplayNames.get(normalizedLogin) !== normalizedDisplayName;
+    if (changed) streamerDisplayNames.set(normalizedLogin, normalizedDisplayName);
+    if (currentStreamer?.toLowerCase() === normalizedLogin) {
+        const setTitle = (window as unknown as { setPageTitle?: (text: string) => void }).setPageTitle;
+        if (typeof setTitle === 'function') setTitle(normalizedDisplayName);
+    }
+    if (changed) renderStreamers();
+}
+
+(window as unknown as { rememberStreamerDisplayName: typeof rememberStreamerDisplayName }).rememberStreamerDisplayName = rememberStreamerDisplayName;
+
+async function hydrateStreamerDisplayNames(): Promise<void> {
+    const configuredNames = config.streamer_display_names || {};
+    let changed = false;
+    for (const [login, displayName] of Object.entries(configuredNames)) {
+        const normalizedLogin = login.trim().toLowerCase();
+        const normalizedDisplayName = displayName.trim();
+        if (normalizedLogin && normalizedDisplayName && streamerDisplayNames.get(normalizedLogin) !== normalizedDisplayName) {
+            streamerDisplayNames.set(normalizedLogin, normalizedDisplayName);
+            changed = true;
+        }
+    }
+
+    const streamers = (config.streamers ?? []) as string[];
+    if (streamers.length === 0) {
+        if (changed) renderStreamers();
+        return;
+    }
+
+    try {
+        const resolvedNames = await window.api.getStreamerDisplayNames(streamers);
+        for (const [login, displayName] of Object.entries(resolvedNames)) {
+            const normalizedLogin = login.trim().toLowerCase();
+            const normalizedDisplayName = displayName.trim();
+            if (normalizedLogin && normalizedDisplayName && streamerDisplayNames.get(normalizedLogin) !== normalizedDisplayName) {
+                streamerDisplayNames.set(normalizedLogin, normalizedDisplayName);
+                changed = true;
+            }
+        }
+    } catch { }
+
+    if (changed) {
+        if (currentStreamer) {
+            const displayName = streamerDisplayNames.get(currentStreamer.toLowerCase());
+            const setTitle = (window as unknown as { setPageTitle?: (text: string) => void }).setPageTitle;
+            if (displayName && typeof setTitle === 'function') setTitle(displayName);
+        }
+        renderStreamers();
+    }
+}
+
+(window as unknown as { hydrateStreamerDisplayNames: typeof hydrateStreamerDisplayNames }).hydrateStreamerDisplayNames = hydrateStreamerDisplayNames;
 
 async function initLiveStatusSubscription(): Promise<void> {
     try {
@@ -37,6 +115,15 @@ async function initLiveStatusSubscription(): Promise<void> {
 // the clear button. Shared across streamers (acts like a search bar).
 let lastLoadedVods: VOD[] = [];
 let lastLoadedStreamer: string | null = null;
+interface CachedStreamerVods {
+    userId: string;
+    vods: VOD[];
+    updatedAt: number;
+}
+const streamerVodCache = new Map<string, CachedStreamerVods>();
+const streamerVodLoads = new Map<string, Promise<CachedStreamerVods | null>>();
+let streamerBackgroundRefreshTimer: number | null = null;
+const STREAMER_BACKGROUND_REFRESH_MS = 5 * 60 * 1000;
 let vodFilterQuery = '';
 const VOD_FILTER_STORAGE_KEY = 'twitch-vod-manager:vod-filter';
 
@@ -222,7 +309,7 @@ function focusVodFilter(): void {
 
 function buildVodCardHtml(vod: VOD, streamer: string, downloadedIds?: Set<string>): string {
     const thumb = vod.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180');
-    const date = formatUiDate(vod.created_at);
+    const date = formatVodCardDate(vod.created_at);
     const safeDisplayTitle = escapeHtml(vod.title || UI_TEXT.vods.untitled);
     const safeUrlAttr = escapeHtml(vod.url);
     const safeTitleAttr = escapeHtml(vod.title || '');
@@ -254,15 +341,14 @@ function buildVodCardHtml(vod: VOD, streamer: string, downloadedIds?: Set<string
             <input type="checkbox" class="vod-select-checkbox" data-vod-url="${safeUrlAttr}" ${isChecked ? 'checked' : ''} aria-label="${escapeHtml(UI_TEXT.vods.selectAriaLabel)}">
             ${downloadedBadge}
             <div class="vod-thumb-wrap">
-                <img class="vod-thumbnail" loading="lazy" decoding="async" src="${thumb}" alt="" title="${escapeHtml(UI_TEXT.vods.openOnTwitch)}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 320 180%22><rect fill=%22%23333%22 width=%22320%22 height=%22180%22/></svg>'">
+                <img class="vod-thumbnail" loading="lazy" decoding="async" src="${thumb}" alt="" title="${escapeHtml(UI_TEXT.vods.selectAriaLabel)}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 320 180%22><rect fill=%22%23333%22 width=%22320%22 height=%22180%22/></svg>'">
                 <div class="vod-duration-badge">${escapeHtml(vod.duration)}</div>
             </div>
             <div class="vod-info">
                 <div class="vod-title" title="${escapeHtml(vod.title || '')}">${safeDisplayTitle}</div>
                 <div class="vod-meta">
-                    <span>${date}</span>
-                    <span>${escapeHtml(vod.duration)}</span>
-                    <span>${formatUiNumber(vod.view_count)} ${escapeHtml(UI_TEXT.vods.views)}</span>
+                    <span class="vod-date"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1z"></path></svg>${date}</span>
+                    <span class="vod-views"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>${formatUiNumber(vod.view_count)} ${escapeHtml(UI_TEXT.vods.views)}</span>
                 </div>
             </div>
             <div class="vod-actions">
@@ -412,6 +498,76 @@ function initCutterDragDrop(): void {
     });
 }
 
+let streamerContextMenu: HTMLDivElement | null = null;
+let streamerContextMenuCleanup: (() => void) | null = null;
+
+function dismissStreamerContextMenu(): void {
+    streamerContextMenuCleanup?.();
+    streamerContextMenuCleanup = null;
+    streamerContextMenu = null;
+}
+
+function showStreamerContextMenu(event: MouseEvent, streamer: string): void {
+    event.preventDefault();
+    event.stopPropagation();
+    dismissStreamerContextMenu();
+
+    const autoList = (config.auto_record_streamers as string[] | undefined) || [];
+    const vodList = (config.auto_vod_download_streamers as string[] | undefined) || [];
+    const menu = document.createElement('div');
+    menu.className = 'streamer-context-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', streamerDisplayNames.get(streamer.toLowerCase()) || streamer);
+
+    const appendAction = (action: 'auto' | 'vod' | 'record', label: string, active: boolean, handler: () => void): void => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.streamerAction = action;
+        button.className = `streamer-context-action streamer-context-${action}${active ? ' is-active' : ''}`;
+        button.textContent = label;
+        button.setAttribute('role', 'menuitem');
+        button.setAttribute('aria-label', action === 'auto'
+            ? UI_TEXT.streamers?.autoRecordTitle || 'Auto-record'
+            : action === 'vod'
+                ? UI_TEXT.streamers?.autoVodTitle || 'Auto-download VODs'
+                : UI_TEXT.streamers?.recordLiveTitle || 'Record live now');
+        button.addEventListener('click', () => {
+            dismissStreamerContextMenu();
+            handler();
+        });
+        menu.appendChild(button);
+    };
+
+    appendAction('auto', 'AUTO', autoList.includes(streamer), () => { void toggleAutoRecord(streamer); });
+    appendAction('vod', 'VOD', vodList.includes(streamer), () => { void toggleAutoVodDownload(streamer); });
+    appendAction('record', 'REC', false, () => { void triggerLiveRecording(streamer); });
+    document.body.appendChild(menu);
+
+    const bounds = menu.getBoundingClientRect();
+    const margin = 8;
+    menu.style.left = `${Math.max(margin, Math.min(event.clientX, window.innerWidth - bounds.width - margin))}px`;
+    menu.style.top = `${Math.max(margin, Math.min(event.clientY, window.innerHeight - bounds.height - margin))}px`;
+
+    const onPointerDown = (pointerEvent: PointerEvent): void => {
+        if (!menu.contains(pointerEvent.target as Node)) dismissStreamerContextMenu();
+    };
+    const onKeyDown = (keyEvent: KeyboardEvent): void => {
+        if (keyEvent.key === 'Escape') dismissStreamerContextMenu();
+    };
+    const onResize = (): void => dismissStreamerContextMenu();
+    streamerContextMenu = menu;
+    streamerContextMenuCleanup = () => {
+        document.removeEventListener('pointerdown', onPointerDown, true);
+        document.removeEventListener('keydown', onKeyDown, true);
+        window.removeEventListener('resize', onResize);
+        menu.remove();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('resize', onResize);
+    menu.querySelector<HTMLButtonElement>('button')?.focus();
+}
+
 function renderStreamers(): void {
     const list = byId('streamerList');
     list.replaceChildren();
@@ -436,6 +592,7 @@ function renderStreamers(): void {
         if (counter) counter.textContent = '';
         const bulkBtn = document.getElementById('btnStreamerBulkRemove') as HTMLButtonElement | null;
         if (bulkBtn) bulkBtn.classList.add('is-hidden');
+        scheduleStreamerActiveIndicatorSync();
         return;
     }
 
@@ -443,14 +600,7 @@ function renderStreamers(): void {
     // stays accurate after add/remove/live-status changes.
     const counter = document.getElementById('streamerSectionCounter');
     if (counter) {
-        const liveCount = all.reduce((n, s) => n + (liveStatusByLogin.get(s.toLowerCase()) === true ? 1 : 0), 0);
-        if (all.length === 0) {
-            counter.textContent = '';
-        } else if (liveCount > 0) {
-            counter.innerHTML = `${all.length} <span class="streamer-section-counter-divider" aria-hidden="true">·</span> <span class="streamer-section-counter-live">${liveCount} live</span>`;
-        } else {
-            counter.textContent = String(all.length);
-        }
+        counter.textContent = all.length === 0 ? '' : String(all.length);
     }
 
     const q = (streamerListFilterQuery || '').trim().toLowerCase();
@@ -487,75 +637,7 @@ function renderStreamers(): void {
 
         const nameSpan = document.createElement('span');
         nameSpan.className = 'streamer-name' + (isLive ? ' is-live' : '');
-        nameSpan.textContent = streamer;
-
-        // Three streamer-row action chips (AUTO toggle / VOD toggle / REC
-        // one-shot). All share the same accessibility wiring:
-        // role="button", tabindex="0", aria-pressed for the toggles +
-        // aria-label for screen readers, plus Enter/Space keydown
-        // activation. wireChipButton centralises that so each chip only
-        // declares its own visual class + label + handler.
-        const wireChipButton = (el: HTMLElement, opts: {
-            handler: () => void;
-            ariaLabel: string;
-            pressed?: boolean;
-        }): void => {
-            el.setAttribute('role', 'button');
-            el.setAttribute('tabindex', '0');
-            el.setAttribute('aria-label', opts.ariaLabel);
-            if (opts.pressed !== undefined) el.setAttribute('aria-pressed', String(opts.pressed));
-            el.addEventListener('click', (e) => {
-                e.stopPropagation();
-                opts.handler();
-            });
-            el.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    opts.handler();
-                }
-            });
-        };
-
-        // AUTO toggle — when enabled, the main-process auto-record poller
-        // watches this channel for offline->live transitions and queues a
-        // live recording automatically.
-        const autoList = (config.auto_record_streamers as string[] | undefined) || [];
-        const isAutoOn = autoList.includes(streamer);
-        const autoBtn = document.createElement('span');
-        autoBtn.className = 'streamer-auto' + (isAutoOn ? ' active' : '');
-        autoBtn.textContent = 'AUTO';
-        autoBtn.title = UI_TEXT.streamers?.autoRecordTitle || 'Auto-record when this streamer goes live';
-        wireChipButton(autoBtn, {
-            handler: () => { void toggleAutoRecord(streamer); },
-            ariaLabel: UI_TEXT.streamers?.autoRecordTitle || 'Auto-record',
-            pressed: isAutoOn
-        });
-
-        // VOD-auto-download toggle — periodic scan of this streamer's
-        // VOD list, auto-queues anything new within the age window.
-        const vodList = (config.auto_vod_download_streamers as string[] | undefined) || [];
-        const isVodOn = vodList.includes(streamer);
-        const vodBtn = document.createElement('span');
-        vodBtn.className = 'streamer-vod' + (isVodOn ? ' active' : '');
-        vodBtn.textContent = 'VOD';
-        vodBtn.title = UI_TEXT.streamers?.autoVodTitle || 'Auto-download new VODs';
-        wireChipButton(vodBtn, {
-            handler: () => { void toggleAutoVodDownload(streamer); },
-            ariaLabel: UI_TEXT.streamers?.autoVodTitle || 'Auto-download new VODs',
-            pressed: isVodOn
-        });
-
-        // Live-record one-shot — triggers a recording immediately (server
-        // verifies the streamer is online before honoring the request).
-        const recBtn = document.createElement('span');
-        recBtn.className = 'streamer-rec';
-        recBtn.textContent = 'REC';
-        recBtn.title = UI_TEXT.streamers?.recordLiveTitle || 'Record live now';
-        wireChipButton(recBtn, {
-            handler: () => { void triggerLiveRecording(streamer); },
-            ariaLabel: UI_TEXT.streamers?.recordLiveTitle || 'Record live now'
-        });
+        nameSpan.textContent = streamerDisplayNames.get(streamer.toLowerCase()) || streamer;
         const removeSpan = document.createElement('span');
         removeSpan.className = 'remove';
         removeSpan.textContent = 'x';
@@ -573,7 +655,22 @@ function renderStreamers(): void {
                 void removeStreamer(streamer);
             }
         });
-        item.append(nameSpan, autoBtn, vodBtn, recBtn, removeSpan);
+        item.append(nameSpan, removeSpan);
+
+        item.addEventListener('contextmenu', (contextEvent) => {
+            showStreamerContextMenu(contextEvent, streamer);
+        });
+        item.addEventListener('keydown', (keyEvent) => {
+            if (keyEvent.key !== 'ContextMenu' && !(keyEvent.shiftKey && keyEvent.key === 'F10')) return;
+            keyEvent.preventDefault();
+            const rect = item.getBoundingClientRect();
+            showStreamerContextMenu(new MouseEvent('contextmenu', {
+                bubbles: true,
+                cancelable: true,
+                clientX: rect.left + 12,
+                clientY: rect.top + 12
+            }), streamer);
+        });
 
         item.addEventListener('click', () => {
             // Skip click if drag was just released — drop fires after dragend
@@ -598,6 +695,7 @@ function renderStreamers(): void {
     if (bulkBtn) bulkBtn.classList.toggle('is-hidden', all.length < STREAMER_FILTER_THRESHOLD);
 
     initStreamerDragDrop();
+    scheduleStreamerActiveIndicatorSync();
 }
 
 function onStreamerListFilterChange(): void {
@@ -710,6 +808,7 @@ async function addStreamer(): Promise<void> {
     config = await window.api.saveConfig({ streamers: config.streamers });
     input.value = '';
     renderStreamers();
+    void hydrateStreamerDisplayNames();
     await selectStreamer(name);
 }
 
@@ -728,6 +827,77 @@ async function removeStreamer(name: string): Promise<void> {
     setVodGridEmptyState(byId('vodGrid'), UI_TEXT.vods.noneTitle, UI_TEXT.vods.noneText);
 }
 
+function normalizeStreamerCacheKey(name: string): string {
+    return name.trim().toLowerCase();
+}
+
+function vodCollectionsMatch(left: VOD[], right: VOD[]): boolean {
+    if (left.length !== right.length) return false;
+    return left.every((vod, index) => {
+        const other = right[index];
+        return Boolean(other)
+            && vod.id === other.id
+            && vod.title === other.title
+            && vod.created_at === other.created_at
+            && vod.duration === other.duration
+            && vod.thumbnail_url === other.thumbnail_url
+            && vod.url === other.url
+            && vod.view_count === other.view_count;
+    });
+}
+
+async function loadStreamerVods(name: string, forceRefresh = false): Promise<CachedStreamerVods | null> {
+    const key = normalizeStreamerCacheKey(name);
+    const cached = streamerVodCache.get(key);
+    if (!forceRefresh && cached) return cached;
+    const pending = streamerVodLoads.get(key);
+    if (pending) return pending;
+
+    const task = (async () => {
+        const userId = await window.api.getUserId(name);
+        if (!userId) return null;
+        const vods = await window.api.getVODs(userId, forceRefresh);
+        const entry = { userId, vods: Array.isArray(vods) ? vods : [], updatedAt: Date.now() };
+        streamerVodCache.set(key, entry);
+        return entry;
+    })();
+    streamerVodLoads.set(key, task);
+    try {
+        return await task;
+    } finally {
+        if (streamerVodLoads.get(key) === task) streamerVodLoads.delete(key);
+    }
+}
+
+async function preloadConfiguredStreamerData(streamers: string[] = (config.streamers ?? []) as string[]): Promise<void> {
+    const profilePreloader = (window as unknown as { preloadStreamerProfiles?: (logins: string[]) => Promise<void> }).preloadStreamerProfiles;
+    const jobs: Promise<unknown>[] = streamers.map((name) => loadStreamerVods(name));
+    if (typeof profilePreloader === 'function') jobs.push(profilePreloader(streamers));
+    await Promise.allSettled(jobs);
+}
+
+async function refreshConfiguredStreamersInBackground(): Promise<void> {
+    const streamers = [...((config.streamers ?? []) as string[])];
+    const profileRefresher = (window as unknown as { refreshStreamerProfilesInBackground?: (logins: string[]) => Promise<void> }).refreshStreamerProfilesInBackground;
+    const activeKey = currentStreamer ? normalizeStreamerCacheKey(currentStreamer) : '';
+    const previousActiveVods = activeKey ? streamerVodCache.get(activeKey)?.vods ?? [] : [];
+    const jobs = streamers.map((name) => loadStreamerVods(name, true));
+    await Promise.allSettled([
+        ...jobs,
+        ...(typeof profileRefresher === 'function' ? [profileRefresher(streamers)] : [])
+    ]);
+    if (!currentStreamer || normalizeStreamerCacheKey(currentStreamer) !== activeKey) return;
+    const updated = streamerVodCache.get(activeKey)?.vods;
+    if (updated && !vodCollectionsMatch(previousActiveVods, updated)) renderVODs(updated, currentStreamer, true);
+}
+
+function startStreamerBackgroundRefresh(): void {
+    if (streamerBackgroundRefreshTimer !== null) window.clearInterval(streamerBackgroundRefreshTimer);
+    streamerBackgroundRefreshTimer = window.setInterval(() => {
+        void refreshConfiguredStreamersInBackground();
+    }, STREAMER_BACKGROUND_REFRESH_MS);
+}
+
 async function selectStreamer(name: string, forceRefresh = false): Promise<void> {
     // Save where we were on the OLD streamer before navigating away.
     rememberCurrentVodScroll();
@@ -742,15 +912,16 @@ async function selectStreamer(name: string, forceRefresh = false): Promise<void>
     pendingScrollRestore = (typeof savedY === 'number' && savedY > 0) ? { streamer: name, y: savedY } : null;
     renderStreamers();
     const setTitle = (window as unknown as { setPageTitle?: (text: string) => void }).setPageTitle;
-    if (typeof setTitle === 'function') setTitle(name);
-    else byId('pageTitle').textContent = name;
+    const displayName = streamerDisplayNames.get(name.toLowerCase()) || name;
+    if (typeof setTitle === 'function') setTitle(displayName);
+    else byId('pageTitle').textContent = displayName;
 
     // Kick off the profile header load in parallel with VOD fetching.
     // It's a separate request stream and not strictly needed for the VOD
     // grid, so we don't await it here — the skeleton appears immediately.
-    const profileLoader = (window as unknown as { loadStreamerProfile?: (login: string) => Promise<void> }).loadStreamerProfile;
+    const profileLoader = (window as unknown as { loadStreamerProfile?: (login: string, forceRefresh?: boolean) => Promise<void> }).loadStreamerProfile;
     if (typeof profileLoader === 'function') {
-        void profileLoader(name);
+        void profileLoader(name, forceRefresh);
     }
 
     if (!isConnected) {
@@ -764,36 +935,32 @@ async function selectStreamer(name: string, forceRefresh = false): Promise<void>
         updateStatus(UI_TEXT.status.noLogin, false);
     }
 
-    // Skeleton loader — six placeholder cards while VODs come in. Much
-    // less jarring than a "Loading..." text block in an otherwise blank
-    // grid. Shimmer animation is in CSS.
-    byId('vodGrid').innerHTML = Array.from({ length: 6 }, () => `
-        <div class="vod-card vod-card-skeleton">
-            <div class="vod-skel-thumb"></div>
-            <div class="vod-info">
-                <div class="vod-skel-line title"></div>
-                <div class="vod-skel-line meta-1"></div>
-                <div class="vod-skel-line meta-2"></div>
+    const key = normalizeStreamerCacheKey(name);
+    const cached = streamerVodCache.get(key);
+    if (cached) {
+        renderVODs(cached.vods, name);
+    } else {
+        byId('vodGrid').innerHTML = Array.from({ length: 6 }, () => `
+            <div class="vod-card vod-card-skeleton">
+                <div class="vod-skel-thumb"></div>
+                <div class="vod-info">
+                    <div class="vod-skel-line title"></div>
+                    <div class="vod-skel-line meta-1"></div>
+                    <div class="vod-skel-line meta-2"></div>
+                </div>
             </div>
-        </div>
-    `).join('');
-
-    const userId = await window.api.getUserId(name);
-    if (isStaleRequest()) {
-        return;
+        `).join('');
     }
 
-    if (!userId) {
+    const loaded = await loadStreamerVods(name, forceRefresh);
+    if (isStaleRequest()) return;
+
+    if (!loaded) {
         byId('vodGrid').innerHTML = `<div class="empty-state"><h3>${UI_TEXT.vods.notFound}</h3></div>`;
         return;
     }
 
-    const vods = await window.api.getVODs(userId, forceRefresh);
-    if (isStaleRequest()) {
-        return;
-    }
-
-    renderVODs(vods, name);
+    if (!cached || !vodCollectionsMatch(cached.vods, loaded.vods)) renderVODs(loaded.vods, name, Boolean(cached));
 }
 
 function createVodEmptyStateIcon(): SVGSVGElement {
@@ -826,16 +993,17 @@ function setVodGridEmptyState(grid: HTMLElement, title: string, text: string): v
     grid.replaceChildren(wrap);
 }
 
-function renderVODs(vods: VOD[] | null | undefined, streamer: string): void {
+function renderVODs(vods: VOD[] | null | undefined, streamer: string, animateChanges = false): void {
     // Clear bulk-selection on streamer switch — selection is per-streamer
     if (lastLoadedStreamer && lastLoadedStreamer !== streamer && selectedVodUrls.size > 0) {
         selectedVodUrls.clear();
         updateVodBulkBar();
     }
+    const motion = animateChanges ? captureVodGridMotion() : undefined;
     lastLoadedVods = Array.isArray(vods) ? vods : [];
     lastLoadedStreamer = streamer;
     initVodGridSelectionDelegation();
-    renderVodGridFromCurrentState();
+    renderVodGridFromCurrentState(motion);
 
     // After the first chunk lands the grid has size, so scroll-restore can
     // succeed. Use a small delay to let chunked rendering paint.
@@ -862,13 +1030,8 @@ function initVodGridSelectionDelegation(): void {
         const target = e.target as HTMLElement;
         // 1) Checkbox toggles (bulk-select)
         if (target instanceof HTMLInputElement && target.classList.contains('vod-select-checkbox')) {
-            const url = target.dataset.vodUrl || '';
-            if (!url) return;
-            if (target.checked) selectedVodUrls.add(url);
-            else selectedVodUrls.delete(url);
             const card = target.closest('.vod-card') as HTMLElement | null;
-            if (card) card.classList.toggle('selected', target.checked);
-            updateVodBulkBar();
+            if (card) setVodCardSelection(card, target.checked);
             return;
         }
 
@@ -886,14 +1049,10 @@ function initVodGridSelectionDelegation(): void {
             return;
         }
 
-        // 3) Click on thumbnail / title / meta -> open VOD on Twitch in the
-        // OS default browser. Convenient + non-destructive.
         const card = target.closest('.vod-card') as HTMLElement | null;
         if (!card) return;
         if (target.closest('.vod-actions') || target.classList.contains('vod-select-checkbox')) return;
-        const ctx = readVodCardContext(card);
-        if (!ctx) return;
-        void window.api.openExternal(ctx.url);
+        toggleVodCardSelection(card);
     });
 
     grid.addEventListener('contextmenu', (e) => {
@@ -905,21 +1064,32 @@ function initVodGridSelectionDelegation(): void {
         showVodContextMenu(e.clientX, e.clientY, ctx);
     });
 
-    // Enter / Space on a focused VOD card opens the VOD on Twitch — same
-    // outcome as a mouse click on the thumbnail. Skip when focus is on a
-    // child (action button, checkbox) because those have their own
-    // keyboard handlers (native button + checkbox semantics).
     grid.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
         const target = e.target as HTMLElement | null;
         if (!target) return;
         const card = target.closest('.vod-card') as HTMLElement | null;
         if (!card || card !== target) return;
-        const ctx = readVodCardContext(card);
-        if (!ctx) return;
         e.preventDefault();
-        void window.api.openExternal(ctx.url);
+        toggleVodCardSelection(card);
     });
+}
+
+function setVodCardSelection(card: HTMLElement, selected: boolean): void {
+    const checkbox = card.querySelector<HTMLInputElement>('.vod-select-checkbox');
+    const url = checkbox?.dataset.vodUrl || '';
+    if (!checkbox || !url) return;
+    checkbox.checked = selected;
+    card.classList.toggle('selected', selected);
+    if (selected) selectedVodUrls.add(url);
+    else selectedVodUrls.delete(url);
+    updateVodBulkBar();
+}
+
+function toggleVodCardSelection(card: HTMLElement): void {
+    const checkbox = card.querySelector<HTMLInputElement>('.vod-select-checkbox');
+    if (!checkbox) return;
+    setVodCardSelection(card, !checkbox.checked);
 }
 
 let activeVodContextMenu: HTMLElement | null = null;
@@ -1175,7 +1345,48 @@ async function bulkAddSelectedVodsToQueue(): Promise<void> {
     }
 }
 
-function renderVodGridFromCurrentState(): void {
+interface VodGridMotion {
+    rects: Map<string, { left: number; top: number }>;
+    ids: Set<string>;
+}
+
+function captureVodGridMotion(): VodGridMotion {
+    const rects = new Map<string, { left: number; top: number }>();
+    const ids = new Set<string>();
+    document.querySelectorAll<HTMLElement>('#vodGrid .vod-card[data-vod-id]').forEach((card) => {
+        const id = card.dataset.vodId;
+        if (!id) return;
+        const rect = card.getBoundingClientRect();
+        rects.set(id, { left: rect.left, top: rect.top });
+        ids.add(id);
+    });
+    return { rects, ids };
+}
+
+function animateVodGridMotion(motion: VodGridMotion): void {
+    document.querySelectorAll<HTMLElement>('#vodGrid .vod-card[data-vod-id]').forEach((card, index) => {
+        const id = card.dataset.vodId || '';
+        const previous = motion.rects.get(id);
+        if (previous) {
+            const rect = card.getBoundingClientRect();
+            const x = previous.left - rect.left;
+            const y = previous.top - rect.top;
+            if (Math.abs(x) > 0.5 || Math.abs(y) > 0.5) {
+                card.animate([
+                    { transform: `translate(${x}px, ${y}px)` },
+                    { transform: 'translate(0, 0)' }
+                ], { duration: 420, easing: 'cubic-bezier(.22, 1, .36, 1)' });
+            }
+            return;
+        }
+        card.animate([
+            { opacity: 0, transform: 'translateY(16px) scale(.98)' },
+            { opacity: 1, transform: 'translateY(0) scale(1)' }
+        ], { duration: 360, delay: Math.min(index * 24, 144), easing: 'cubic-bezier(.22, 1, .36, 1)', fill: 'backwards' });
+    });
+}
+
+function renderVodGridFromCurrentState(motion?: VodGridMotion): void {
     if (!lastLoadedStreamer) return;
 
     const grid = byId('vodGrid');
@@ -1237,6 +1448,8 @@ function renderVodGridFromCurrentState(): void {
 
         if (startIndex + chunk.length < filtered.length) {
             scheduleNextChunk(startIndex + chunk.length);
+        } else if (motion) {
+            requestAnimationFrame(() => animateVodGridMotion(motion));
         }
     };
 
@@ -1250,3 +1463,11 @@ async function refreshVODs(): Promise<void> {
 
     await selectStreamer(currentStreamer, true);
 }
+
+(window as unknown as {
+    preloadConfiguredStreamerData: typeof preloadConfiguredStreamerData;
+    refreshConfiguredStreamersInBackground: typeof refreshConfiguredStreamersInBackground;
+    startStreamerBackgroundRefresh: typeof startStreamerBackgroundRefresh;
+}).preloadConfiguredStreamerData = preloadConfiguredStreamerData;
+(window as unknown as { refreshConfiguredStreamersInBackground: typeof refreshConfiguredStreamersInBackground }).refreshConfiguredStreamersInBackground = refreshConfiguredStreamersInBackground;
+(window as unknown as { startStreamerBackgroundRefresh: typeof startStreamerBackgroundRefresh }).startStreamerBackgroundRefresh = startStreamerBackgroundRefresh;

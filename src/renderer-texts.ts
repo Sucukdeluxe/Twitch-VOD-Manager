@@ -13,13 +13,26 @@ function getIntlLocale(): string {
 }
 
 function formatUiDate(input: string | Date): string {
+    return formatVodCardDate(input);
+}
+
+function formatVodCardDate(input: string | Date): string {
     const date = input instanceof Date ? input : new Date(input);
-    return date.toLocaleDateString(getIntlLocale());
+    if (Number.isNaN(date.getTime())) return '';
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${day}.${month}.${date.getFullYear()}`;
 }
 
 function formatUiDateTime(input: string | Date): string {
     const date = input instanceof Date ? input : new Date(input);
-    return date.toLocaleString(getIntlLocale());
+    if (Number.isNaN(date.getTime())) return '';
+    const time = date.toLocaleTimeString(getIntlLocale(), {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    return `${formatVodCardDate(date)}, ${time}`;
 }
 
 function formatUiNumber(value: number): string {
@@ -185,6 +198,11 @@ function applyLanguageToStaticUI(): void {
     setText('clientSecretLabel', UI_TEXT.static.clientSecretLabel);
     setText('saveSettingsBtn', UI_TEXT.static.saveSettings);
     setText('downloadSettingsTitle', UI_TEXT.static.downloadSettingsTitle);
+    setText('downloadBasicsTitle', UI_TEXT.static.downloadBasicsTitle);
+    setText('queueAutomationTitle', UI_TEXT.static.queueAutomationTitle);
+    setText('recordingMetadataTitle', UI_TEXT.static.recordingMetadataTitle);
+    setText('sidebarSplitViewLabel', UI_TEXT.static.sidebarSplitViewLabel);
+    setText('sidebarSplitViewHint', UI_TEXT.static.sidebarSplitViewHint);
     setText('storageLabel', UI_TEXT.static.storageLabel);
     setText('selectFolderBtn', UI_TEXT.static.selectFolder);
     setText('openFolderBtn', UI_TEXT.static.openFolder);

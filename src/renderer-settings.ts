@@ -19,14 +19,14 @@ async function connect(): Promise<void> {
     const hasCredentials = Boolean((config.client_id ?? '').toString().trim() && (config.client_secret ?? '').toString().trim());
     if (!hasCredentials) {
         isConnected = false;
-        updateStatus(UI_TEXT.status.noLogin, false);
+        updateStatus(UI_TEXT.status.noLogin, false, 'public');
         return;
     }
 
-    updateStatus(UI_TEXT.status.connecting, false);
+    updateStatus(UI_TEXT.status.connecting, false, 'pending');
     const success = await window.api.login();
     isConnected = success;
-    updateStatus(success ? UI_TEXT.status.connected : UI_TEXT.status.connectFailedPublic, success);
+    updateStatus(success ? UI_TEXT.status.connected : UI_TEXT.status.connectFailedPublic, success, success ? 'connected' : 'public');
 }
 
 function formatBytesForMetrics(bytes: number): string {
@@ -172,19 +172,58 @@ function toggleRuntimeMetricsAutoRefresh(enabled: boolean): void {
     }
 }
 
-function updateStatus(text: string, connected: boolean): void {
-    byId('statusText').textContent = text;
+type ConnectionStatusTone = 'connected' | 'public' | 'pending';
+
+function updateStatus(text: string, connected: boolean, tone: ConnectionStatusTone = connected ? 'connected' : 'public'): void {
+    const statusText = byId('statusText');
+    statusText.textContent = text;
+    statusText.title = tone === 'connected'
+        ? UI_TEXT.status.connectedHint
+        : tone === 'public'
+            ? UI_TEXT.status.publicHint
+            : '';
     const dot = byId('statusDot');
-    dot.classList.remove('connected', 'error');
-    dot.classList.add(connected ? 'connected' : 'error');
+    dot.classList.remove('connected', 'error', 'public');
+    if (tone === 'connected') dot.classList.add('connected');
+    if (tone === 'public') dot.classList.add('public');
 }
 
 function filterSettings(query: string): void {
     const normalizedQuery = query.trim().toLocaleLowerCase(getIntlLocale());
-    document.querySelectorAll<HTMLElement>('#settingsTab .settings-card').forEach((card) => {
+    if (!normalizedQuery) return;
+    const match = Array.from(document.querySelectorAll<HTMLElement>('#settingsTab .settings-card[data-settings-pane]')).find((card) => {
         const searchableText = (card.textContent || '').toLocaleLowerCase(getIntlLocale());
-        card.hidden = normalizedQuery.length > 0 && !searchableText.includes(normalizedQuery);
+        return searchableText.includes(normalizedQuery);
     });
+    const pane = match?.dataset.settingsPane;
+    if (pane) setSettingsPane(pane);
+}
+
+function setSettingsPane(pane: string, source?: HTMLElement): void {
+    const tab = byId<HTMLElement>('settingsTab');
+    const cards = Array.from(tab.querySelectorAll<HTMLElement>('.settings-card[data-settings-pane]'));
+    const targetCard = cards.find((card) => card.dataset.settingsPane === pane);
+    if (!targetCard) return;
+
+    tab.dataset.settingsPane = pane;
+    cards.forEach((card) => {
+        card.hidden = card !== targetCard;
+    });
+
+    const panel = document.querySelector<HTMLElement>('[data-context-for="settings"]');
+    const buttons = Array.from(panel?.querySelectorAll<HTMLButtonElement>('.context-link[data-settings-pane]') || []);
+    const targetButton = source || buttons.find((button) => button.dataset.settingsPane === pane);
+    buttons.forEach((button) => {
+        const active = button === targetButton;
+        button.classList.toggle('active', active);
+        if (active) button.setAttribute('aria-current', 'page');
+        else button.removeAttribute('aria-current');
+    });
+
+    if (source) byId<HTMLInputElement>('settingsSearchInput').value = '';
+    tab.scrollTop = 0;
+    const list = panel?.querySelector<HTMLElement>('.context-list');
+    if (list) scheduleSegmentedIndicatorSync(list);
 }
 
 function changeLanguage(lang: string): void {
@@ -195,7 +234,12 @@ function changeLanguage(lang: string): void {
     void window.api.saveConfig({ language: normalized });
 
     const currentStatus = byId('statusText').textContent?.trim() || '';
-    updateStatus(localizeCurrentStatusText(currentStatus), isConnected);
+    const statusTone: ConnectionStatusTone = isConnected
+        ? 'connected'
+        : byId('statusDot').classList.contains('public')
+            ? 'public'
+            : 'pending';
+    updateStatus(localizeCurrentStatusText(currentStatus), isConnected, statusTone);
 
     renderQueue();
     renderStreamers();
@@ -228,6 +272,7 @@ function updateLanguagePicker(lang: string): void {
     en.classList.toggle('active', !isDe);
     de.setAttribute('aria-pressed', String(isDe));
     en.setAttribute('aria-pressed', String(!isDe));
+    scheduleSegmentedIndicatorSync(byId<HTMLElement>('languagePicker'));
 }
 
 function selectLanguageOption(lang: string): void {
@@ -549,6 +594,7 @@ function syncPartMinutesFieldState(): void {
 
 function collectDownloadSettingsPayload(): Partial<AppConfig> {
     return {
+        sidebar_split_view: byId<HTMLInputElement>('sidebarSplitViewToggle').checked,
         download_mode: byId<HTMLSelectElement>('downloadMode').value as 'parts' | 'full',
         part_minutes: parseInt(byId<HTMLInputElement>('partMinutes').value, 10) || 120,
         parallel_downloads: parseInt(byId<HTMLSelectElement>('parallelDownloads').value, 10) || 1,
@@ -596,7 +642,8 @@ function collectFilenameTemplatePayload(showAlert = false): Partial<AppConfig> |
 function collectAutoSavePayload(): Partial<AppConfig> {
     const payload: Partial<AppConfig> = {
         ...collectCredentialsPayload(),
-        ...collectDownloadSettingsPayload()
+        ...collectDownloadSettingsPayload(),
+        sidebar_split_view: byId<HTMLInputElement>('sidebarSplitViewToggle').checked
     };
 
     const templatePayload = collectFilenameTemplatePayload(false);
@@ -612,6 +659,7 @@ function getSettingsFingerprint(payload: Partial<AppConfig>): string {
     return JSON.stringify([
         effective.client_id ?? '',
         effective.client_secret ?? '',
+        effective.sidebar_split_view !== false,
         effective.download_mode ?? 'full',
         effective.part_minutes ?? 120,
         effective.parallel_downloads ?? 1,
@@ -650,6 +698,8 @@ function getSettingsFingerprint(payload: Partial<AppConfig>): string {
 function syncSettingsFormFromConfig(): void {
     byId<HTMLInputElement>('clientId').value = config.client_id ?? '';
     byId<HTMLInputElement>('clientSecret').value = config.client_secret ?? '';
+    byId<HTMLInputElement>('sidebarSplitViewToggle').checked = config.sidebar_split_view !== false;
+    applySidebarLayoutPreference(config.sidebar_split_view !== false);
     byId<HTMLSelectElement>('downloadMode').value = (config.download_mode as 'parts' | 'full') ?? 'full';
     byId<HTMLInputElement>('partMinutes').value = String((config.part_minutes as number) || 120);
     byId<HTMLSelectElement>('parallelDownloads').value = String((config.parallel_downloads as number) || 1);
@@ -784,6 +834,7 @@ function initSettingsAutoSave(): void {
 
     const immediateSaveIds = [
         'downloadMode',
+        'sidebarSplitViewToggle',
         'parallelDownloads',
         'performanceMode',
         'smartSchedulerToggle',

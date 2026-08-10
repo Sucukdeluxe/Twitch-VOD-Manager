@@ -115,6 +115,7 @@ function syncWorkspaceUpdateState(state: 'idle' | 'available' | 'downloading' | 
     const description = byId('updateText').textContent?.trim() || UI_TEXT.static.checkUpdates;
 
     banner.dataset.updateState = state;
+    banner.hidden = state === 'idle';
     button.dataset.updateState = state;
     button.disabled = false;
     if (state === 'downloading') {
@@ -671,6 +672,9 @@ window.api.onUpdateNotAvailable(() => {
 
     shouldOpenUpdateModalOnAvailable = false;
     manualUpdateCheckPending = false;
+    if (!updateReady) {
+        hideUpdateBanner();
+    }
 });
 
 window.api.onUpdateDownloadProgress((progress: UpdateDownloadProgress) => {

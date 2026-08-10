@@ -1,10 +1,10 @@
 // Backend-Messages (User-visible aus main.ts produziert). Pure: Sprache wird
-// als Parameter uebergeben statt aus globalem config geholt.
+// als Parameter übergeben statt aus globalem config geholt.
 
 export const BACKEND_MESSAGES = {
     de: {
-        invalidVodUrl: 'Ungueltige VOD-URL',
-        invalidClipUrl: 'Ungueltige Clip-URL',
+        invalidVodUrl: 'Ungültige VOD-URL',
+        invalidClipUrl: 'Ungültige Clip-URL',
         clipNotFound: 'Clip nicht gefunden',
         streamlinkAutoInstallFailed: 'Streamlink fehlt und konnte nicht automatisch installiert werden. Siehe debug.log.',
         streamlinkMissing: 'Streamlink fehlt.',
@@ -15,10 +15,10 @@ export const BACKEND_MESSAGES = {
         ffmpegSplitFailed: 'FFmpeg Split fehlgeschlagen.',
         fileTooSmall: 'Datei zu klein ({bytes} Bytes)',
         clipFileTooSmall: 'Clip-Datei zu klein ({bytes} Bytes) - Twitch hat den Stream evtl. nicht ausgeliefert.',
-        integrityNoVideo: 'Integritaetspruefung fehlgeschlagen: Kein Videostream gefunden.',
-        integrityTooShort: 'Integritaetspruefung fehlgeschlagen: Dauer zu kurz ({duration}s).',
-        integrityDurationMismatch: 'Integritaetspruefung fehlgeschlagen: {actual}s statt erwarteter ~{expected}s.',
-        integrityFailedGeneric: 'Integritaetspruefung fehlgeschlagen.',
+        integrityNoVideo: 'Integritätsprüfung fehlgeschlagen: Kein Videostream gefunden.',
+        integrityTooShort: 'Integritätsprüfung fehlgeschlagen: Dauer zu kurz ({duration}s).',
+        integrityDurationMismatch: 'Integritätsprüfung fehlgeschlagen: {actual}s statt erwarteter ~{expected}s.',
+        integrityFailedGeneric: 'Integritätsprüfung fehlgeschlagen.',
         downloadCancelled: 'Download wurde abgebrochen.',
         downloadPaused: 'Download wurde pausiert.',
         downloadFailedExitCode: 'Download fehlgeschlagen (Exit-Code {code})',
@@ -26,12 +26,12 @@ export const BACKEND_MESSAGES = {
         notAllClipPartsDownloaded: 'Nicht alle Clip-Teile konnten heruntergeladen werden.',
         notAllPartsDownloaded: 'Nicht alle Teile konnten heruntergeladen werden.',
         mergeGroupFileMissing: 'Heruntergeladene Datei {index} fehlt.',
-        diskSpaceShortFor: 'Zu wenig Speicherplatz fur {context}: frei {free}, benoetigt ~{required}.',
+        diskSpaceShortFor: 'Zu wenig Speicherplatz für {context}: frei {free}, benötigt ~{required}.',
         diskSpaceShortGeneric: 'Zu wenig Speicherplatz.',
         attemptFailed: 'Versuch {attempt}/{max} fehlgeschlagen ({errorClass}): {error}',
         retryingIn: 'Neuer Versuch in {seconds}s ({errorClass})...',
-        statusCheckingTools: 'Prufe Download-Tools...',
-        statusDownloadStarted: 'Download gestartet',
+        statusCheckingTools: 'Prüfe Download-Tools...',
+        statusDownloadStarted: 'Download wird gestartet …',
         statusBytesDownloaded: '{bytes} heruntergeladen',
         statusFetchingChatReplay: 'Chat-Replay wird heruntergeladen...',
         statusChatMessagesFetched: 'Chat-Nachrichten geladen: {count}',
@@ -70,7 +70,7 @@ export const BACKEND_MESSAGES = {
         attemptFailed: 'Attempt {attempt}/{max} failed ({errorClass}): {error}',
         retryingIn: 'Retrying in {seconds}s ({errorClass})...',
         statusCheckingTools: 'Checking download tools...',
-        statusDownloadStarted: 'Download started',
+        statusDownloadStarted: 'Starting download …',
         statusBytesDownloaded: '{bytes} downloaded',
         statusFetchingChatReplay: 'Fetching chat replay...',
         statusChatMessagesFetched: 'Chat messages fetched: {count}',

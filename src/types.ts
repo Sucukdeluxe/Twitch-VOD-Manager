@@ -39,6 +39,7 @@ export interface QueueItem {
     eta?: string;
     downloadedBytes?: number;
     totalBytes?: number;
+    progressStatus?: string;
     last_error?: string;
     customClip?: CustomClip;
     mergeGroup?: MergeGroup;

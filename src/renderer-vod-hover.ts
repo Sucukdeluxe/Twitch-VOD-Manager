@@ -26,7 +26,7 @@ const FRAMES_TO_CYCLE = 4;
 // unbounded cache could balloon to hundreds of MB on a long browsing
 // session through a streamer with thousands of VODs. FIFO eviction
 // keeps the working set fresh without manual cleanup.
-const MAX_CLIENT_STORYBOARD_CACHE = 100;
+const MAX_CLIENT_STORYBOARD_CACHE = 12;
 
 function rememberStoryboard(vodId: string, sb: VodStoryboard | null): void {
     vodStoryboardClientCache.set(vodId, sb);
@@ -133,7 +133,8 @@ async function activateHoverPreview(card: HTMLElement, vodId: string): Promise<v
     const height = hostRect.height;
 
     if (width <= 0 || height <= 0) return;
-    if (storyboard.cellWidth <= 0 || storyboard.cellHeight <= 0) return;
+    const frameDataUrls = Array.isArray(storyboard.frameDataUrls) ? storyboard.frameDataUrls.filter((url) => typeof url === 'string' && url.length > 0) : [];
+    if (frameDataUrls.length === 0 && (storyboard.cellWidth <= 0 || storyboard.cellHeight <= 0)) return;
 
     // Position + Size voll inline gesetzt — kein CSS aspect-ratio mehr, das
     // sich mit JS-Dimensionen streiten koennte (siehe styles.css, die Klasse
@@ -145,13 +146,26 @@ async function activateHoverPreview(card: HTMLElement, vodId: string): Promise<v
 
     // Skaliere X und Y unabhaengig, damit eine Cell die Overlay-Box exakt
     // fuellt — Twitch-Cell-Aspect kann von 16:9 minimal abweichen.
-    const scaleX = width / storyboard.cellWidth;
-    const scaleY = height / storyboard.cellHeight;
-    overlay.style.backgroundImage = `url("${storyboard.spriteDataUrl.replace(/"/g, '%22')}")`;
-    overlay.style.backgroundSize = `${storyboard.cols * storyboard.cellWidth * scaleX}px ${storyboard.rows * storyboard.cellHeight * scaleY}px`;
     overlay.style.backgroundRepeat = 'no-repeat';
-    const first = cellsToShow[0];
-    overlay.style.backgroundPosition = `-${first.col * storyboard.cellWidth * scaleX}px -${first.row * storyboard.cellHeight * scaleY}px`;
+    let advanceFrame: (index: number) => void;
+    if (frameDataUrls.length > 0) {
+        overlay.style.backgroundSize = 'cover';
+        overlay.style.backgroundPosition = 'center';
+        advanceFrame = (index) => {
+            const frameUrl = frameDataUrls[index % frameDataUrls.length];
+            overlay.style.backgroundImage = `url("${frameUrl.replace(/"/g, '%22')}")`;
+        };
+    } else {
+        const scaleX = width / storyboard.cellWidth;
+        const scaleY = height / storyboard.cellHeight;
+        overlay.style.backgroundImage = `url("${storyboard.spriteDataUrl.replace(/"/g, '%22')}")`;
+        overlay.style.backgroundSize = `${storyboard.cols * storyboard.cellWidth * scaleX}px ${storyboard.rows * storyboard.cellHeight * scaleY}px`;
+        advanceFrame = (index) => {
+            const cell = cellsToShow[index % cellsToShow.length];
+            overlay.style.backgroundPosition = `-${cell.col * storyboard.cellWidth * scaleX}px -${cell.row * storyboard.cellHeight * scaleY}px`;
+        };
+    }
+    advanceFrame(0);
 
     host.appendChild(overlay);
     // Trigger CSS transition to opacity:1 on the next frame.
@@ -159,8 +173,7 @@ async function activateHoverPreview(card: HTMLElement, vodId: string): Promise<v
 
     let frameIdx = 1;
     const intervalId = window.setInterval(() => {
-        const cell = cellsToShow[frameIdx % cellsToShow.length];
-        overlay.style.backgroundPosition = `-${cell.col * storyboard.cellWidth * scaleX}px -${cell.row * storyboard.cellHeight * scaleY}px`;
+        advanceFrame(frameIdx);
         frameIdx++;
     }, FRAME_INTERVAL_MS);
 

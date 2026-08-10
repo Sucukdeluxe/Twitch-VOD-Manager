@@ -41,6 +41,14 @@ describe('tBackend', () => {
         }
     });
 
+    test('German backend messages use native umlauts', () => {
+        const text = Object.values(BACKEND_MESSAGES.de).join('\n').toLocaleLowerCase('de-DE');
+        const forbidden = ['ungueltig', 'integritaetspruefung', 'fur ', 'benoetigt', 'prufe '];
+        for (const token of forbidden) {
+            expect(text).not.toContain(token);
+        }
+    });
+
     test('no template literal left after substitution for typical params', () => {
         // attemptFailed has {attempt}, {max}, {errorClass}, {error}
         const result = tBackend('attemptFailed', { attempt: 1, max: 3, errorClass: 'network', error: 'ETIMEDOUT' }, 'en');

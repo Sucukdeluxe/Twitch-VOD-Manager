@@ -1,6 +1,6 @@
 {
   "name": "twitch-vod-manager",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Twitch VOD Manager - Download Twitch VODs easily",
   "main": "dist/main.js",
   "author": "Sucukdeluxe",
@@ -11,6 +11,7 @@
   "scripts": {
     "build": "tsc",
     "start": "npm run build && electron .",
+    "dev": "node scripts/dev.mjs",
     "test:unit": "vitest run --passWithNoTests",
     "test:unit:watch": "vitest",
     "test:e2e:update-logic": "node scripts/smoke-test-update-version-logic.js",
@@ -54,6 +55,7 @@
       "src/index.html",
       "src/styles.css",
       "src/workspace.css",
+      "build/icon.png",
       "package.json"
     ],
     "directories": {
@@ -61,7 +63,8 @@
     },
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false,
+      "icon": "build/icon.ico",
+      "signExecutable": false,
       "artifactName": "Twitch-VOD-Manager-Setup-${version}.${ext}"
     },
     "nsis": {
@@ -71,6 +74,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Twitch VOD Manager v${version}",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
       "include": "build/installer.nsh"
     },
     "publish": {
