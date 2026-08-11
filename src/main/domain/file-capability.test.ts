@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+    CUTTER_SESSION_CAPABILITY_TTL_MS,
     FileCapabilityStore,
     isTrustedFileIpcSender,
     publishCapabilityOutput,
@@ -48,6 +49,31 @@ describe('file capability boundary', () => {
         const expired = store.issue({ ownerId: 7, purpose: 'chat-input', path: fixture.chat, kind: 'input-file', extensions: ['.chat.jsonl'] });
         now = 1_500;
         expect(() => store.resolve(expired.token, 7, 'chat-input')).toThrow('Expired file capability');
+    });
+
+    it('keeps a purpose-bound cutter session usable after fifteen minutes without weakening owner or purpose checks', () => {
+        const fixture = createFixture();
+        let now = 10_000;
+        const store = new FileCapabilityStore({ now: () => now, defaultTtlMs: 500 });
+        const cutter = store.issue({
+            ownerId: 7,
+            purpose: 'cutter-input',
+            path: fixture.video,
+            kind: 'input-file',
+            extensions: ['mp4'],
+            ttlMs: CUTTER_SESSION_CAPABILITY_TTL_MS,
+        });
+
+        now += 16 * 60 * 1000;
+        const assetInput = store.resolve(cutter.token, 7, 'cutter-input');
+        const exportInput = store.resolve(cutter.token, 7, 'cutter-input');
+        expect(assetInput).toBe(realpathSync.native(fixture.video));
+        expect(exportInput).toBe(realpathSync.native(fixture.video));
+        expect(() => store.resolve(cutter.token, 8, 'cutter-input')).toThrow('Invalid file capability owner');
+        expect(() => store.resolve(cutter.token, 7, 'merge-input')).toThrow('Invalid file capability purpose');
+
+        now = 10_000 + 8 * 60 * 60 * 1000;
+        expect(() => store.resolve(cutter.token, 7, 'cutter-input')).toThrow('Expired file capability');
     });
 
     it('binds canonical input and output paths to the allowed extension and semantics', () => {

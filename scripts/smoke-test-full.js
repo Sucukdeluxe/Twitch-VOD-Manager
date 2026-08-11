@@ -86,6 +86,14 @@ async function run() {
     const isolation = await verifyE2eIsolation(app, win, environment);
     const fixtures = await installOfflineFixtures(app);
     const issues = [];
+    const mergedOutputFile = path.join(environment.mediaDir, 'merged_full.mp4');
+    await app.evaluate(({ dialog }, files) => {
+      dialog.showOpenDialog = async (_window, options) => ({
+        canceled: false,
+        filePaths: options?.properties?.includes('multiSelections') ? [files.mediaA, files.mediaB] : [files.mediaA]
+      });
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath: files.mergedOutputFile });
+    }, { mediaA, mediaB, mergedOutputFile });
 
     win.on('pageerror', (err) => {
       issues.push(`pageerror: ${String(err)}`);
@@ -206,7 +214,7 @@ async function run() {
         assert(deState.deActive, 'German language button did not activate');
         assert(enState.enActive, 'English language button did not activate');
 
-        await window.api.saveConfig({ client_id: '', client_secret: '', download_path: tmpDir });
+        await window.api.saveConfig({ client_id: '', client_secret: '' });
         window.showTab('vods');
         await window.selectStreamer('fixture_streamer');
 
@@ -310,16 +318,27 @@ async function run() {
 
         await clearQueue();
 
-        const info = await window.api.getVideoInfo(mediaA);
-        const frame = await window.api.extractFrame(mediaA, 1);
-        const cut = await window.api.cutVideo(mediaA, 0.5, 1.7);
-        const merge = await window.api.mergeVideos([mediaA, mediaB], `${tmpDir.replace(/\\/g, '/')}/merged_full.mp4`);
+        const cutterInput = await window.api.selectVideoFile();
+        const mergeInputs = await window.api.selectMultipleVideos();
+        const mergeOutput = await window.api.saveVideoDialog('merged_full.mp4');
+        const capabilityContract = Boolean(
+          cutterInput?.token
+          && mergeInputs?.length === 2
+          && mergeInputs.every((file) => typeof file.token === 'string' && file.token)
+          && mergeOutput?.token
+        );
+        const info = capabilityContract ? await window.api.getVideoInfo(cutterInput.token) : null;
+        const frame = capabilityContract ? await window.api.extractFrame(cutterInput.token, 1) : null;
+        const cut = capabilityContract ? await window.api.cutVideo(cutterInput.token, 0.5, 1.7) : { success: false };
+        const merge = capabilityContract ? await window.api.mergeVideos(mergeInputs.map((file) => file.token), mergeOutput.token) : { success: false };
         checks.media = {
+          capabilityContract,
           infoOk: !!info && info.duration > 0,
           frameOk: typeof frame === 'string' && frame.length > 100,
           cutOk: cut.success,
           mergeOk: merge.success
         };
+        assert(checks.media.capabilityContract, 'File dialogs did not issue capability references');
         assert(checks.media.infoOk, 'getVideoInfo failed for test media');
         assert(checks.media.frameOk, 'extractFrame failed for test media');
         assert(checks.media.cutOk, 'cutVideo failed for test media');

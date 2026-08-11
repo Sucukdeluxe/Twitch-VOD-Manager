@@ -112,7 +112,7 @@ contextBridge.exposeInMainWorld('api', {
 
     // Queue
     getQueue: () => ipcRenderer.invoke('get-queue'),
-    addToQueue: (item: Omit<QueueItem, 'id' | 'status' | 'progress'>) => ipcRenderer.invoke('add-to-queue', item),
+    addToQueue: (item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip'>) => ipcRenderer.invoke('add-to-queue', item),
     startLiveRecording: (streamerName: string) => ipcRenderer.invoke('start-live-recording', streamerName),
     removeFromQueue: (id: string) => ipcRenderer.invoke('remove-from-queue', id),
     reorderQueue: (orderIds: string[]) => ipcRenderer.invoke('reorder-queue', orderIds),

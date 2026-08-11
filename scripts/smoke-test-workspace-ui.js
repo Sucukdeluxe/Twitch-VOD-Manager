@@ -176,19 +176,19 @@ async function run() {
 
     const cutterDropFixturePath = path.join(environment.mediaDir, 'electron-43-cutter-drop.mp4');
     fs.writeFileSync(cutterDropFixturePath, 'electron-43-cutter-drop-fixture', 'utf8');
-    await app.evaluate(({ ipcMain }) => {
-      globalThis.__workspaceCutterDropPaths = { media: '' };
+    await app.evaluate(({ ipcMain }, expectedPath) => {
+      globalThis.__workspaceCutterDropPaths = { mediaCapability: '', expectedPath };
       ipcMain.removeHandler('prepare-video-editor-media');
-      ipcMain.handle('prepare-video-editor-media', (_, filePath) => {
-        globalThis.__workspaceCutterDropPaths.media = filePath;
+      ipcMain.handle('prepare-video-editor-media', (_, capability) => {
+        globalThis.__workspaceCutterDropPaths.mediaCapability = capability;
         return {
-          sourceUrl: encodeURI(`file:///${filePath.replace(/\\/g, '/')}`),
+          sourceUrl: encodeURI(`file:///${expectedPath.replace(/\\/g, '/')}`),
           info: { duration: 120, width: 1920, height: 1080, fps: 60, hasAudio: false },
           thumbnails: ['data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='],
           waveform: null
         };
       });
-    });
+    }, cutterDropFixturePath);
     await win.evaluate(() => {
       window.showTab('cutter');
       const input = document.createElement('input');
@@ -200,7 +200,7 @@ async function run() {
     const cutterFileObject = await win.evaluate(() => {
       const input = document.getElementById('workspaceCutterDropInput');
       const file = input instanceof HTMLInputElement ? input.files?.[0] : undefined;
-      if (!file) return { name: '', legacyPathType: 'missing', apiType: typeof window.api.getPathForFile };
+      if (!file) return { name: '', legacyPathType: 'missing', apiType: typeof window.api.selectDroppedVideo };
       const transfer = new DataTransfer();
       transfer.items.add(file);
       document.getElementById('cutterTab')?.dispatchEvent(new DragEvent('drop', {
@@ -211,7 +211,7 @@ async function run() {
       return {
         name: file.name,
         legacyPathType: typeof file.path,
-        apiType: typeof window.api.getPathForFile
+        apiType: typeof window.api.selectDroppedVideo
       };
     });
     await win.waitForTimeout(250);
@@ -229,8 +229,9 @@ async function run() {
       ui: cutterDropUi
     };
     check(cutterFileObject.legacyPathType === 'undefined', `Electron File.path is unexpectedly ${cutterFileObject.legacyPathType}`);
-    check(cutterDropUi.filePath === cutterDropFixturePath, `Cutter drop resolved "${cutterDropUi.filePath}" instead of the Electron file path`);
-    check(cutterDropPaths.media === cutterDropFixturePath, `Cutter drop sent "${cutterDropPaths.media}" to media preparation instead of the Electron file path`);
+    check(cutterFileObject.apiType === 'function', `Cutter capability API is ${cutterFileObject.apiType}`);
+    check(cutterDropUi.filePath === path.basename(cutterDropFixturePath), `Cutter drop displayed "${cutterDropUi.filePath}" instead of the safe file name`);
+    check(typeof cutterDropPaths.mediaCapability === 'string' && cutterDropPaths.mediaCapability.length >= 32 && cutterDropPaths.mediaCapability !== cutterDropFixturePath, `Cutter drop did not send an opaque capability to media preparation: ${JSON.stringify(cutterDropPaths)}`);
     check(cutterDropUi.infoVisible && cutterDropUi.cutEnabled, 'Cutter drop did not populate the cutter controls');
 
     const queueEmptyActions = await win.evaluate(() => ({

@@ -374,7 +374,7 @@ interface ApiBridge {
     getUserId(username: string): Promise<string | null>;
     getVODs(userId: string, forceRefresh?: boolean): Promise<VOD[]>;
     getQueue(): Promise<QueueItem[]>;
-    addToQueue(item: Omit<QueueItem, 'id' | 'status' | 'progress'>): Promise<QueueItem[]>;
+    addToQueue(item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip'>): Promise<QueueItem[]>;
     startLiveRecording(streamerName: string): Promise<{ success: boolean; error?: string; streamer?: string; title?: string }>;
     removeFromQueue(id: string): Promise<QueueItem[]>;
     reorderQueue(orderIds: string[]): Promise<QueueItem[]>;

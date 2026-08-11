@@ -17,6 +17,8 @@ export type FileCapabilityPurpose =
 
 export type FileCapabilityKind = 'input-file' | 'output-file' | 'directory';
 
+export const CUTTER_SESSION_CAPABILITY_TTL_MS = 8 * 60 * 60 * 1000;
+
 export interface FileCapabilityReference {
     token: string;
     name: string;

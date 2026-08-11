@@ -41,12 +41,15 @@ import { getWindowsAppIdentity } from './main/domain/app-identity';
 import { addCutAt, createVideoEditorState, getPlayableSegments, setTrimRange, type EditorCut } from './main/domain/video-editor';
 import { calculateCutterExportProgress, createCutterExportPlan } from './main/domain/cutter-export';
 import {
+    CUTTER_SESSION_CAPABILITY_TTL_MS,
     FileCapabilityStore,
     isTrustedFileIpcSender,
     publishCapabilityOutput,
     type FileCapabilityPurpose,
     type FileCapabilityReference,
 } from './main/domain/file-capability';
+import { registerTrustedIpcHandler } from './main/domain/privileged-ipc';
+import { createRendererQueueItem, getMergeGroupCleanupPaths } from './main/domain/renderer-queue-input';
 import {
     setDebugLogFn, initToolDirs,
     getStreamlinkPath, getStreamlinkCommand, getFFmpegPath, getFFprobePath,
@@ -7222,12 +7225,14 @@ ipcMain.handle('get-automation-status', () => ({
     }
 }));
 
-ipcMain.handle('trigger-auto-record-scan', async () => {
+ipcMain.handle('trigger-auto-record-scan', async (event) => {
+    if (!isTrustedRendererEvent(event)) return { triggered: 0 };
     const triggered = await runAutoRecordPoll();
     return { triggered };
 });
 
-ipcMain.handle('trigger-auto-vod-scan', async () => {
+ipcMain.handle('trigger-auto-vod-scan', async (event) => {
+    if (!isTrustedRendererEvent(event)) return { queuedCount: 0 };
     const queuedCount = await runAutoVodPoll();
     return { queuedCount };
 });
@@ -7317,7 +7322,8 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
     return config;
 });
 
-ipcMain.handle('login', async () => {
+ipcMain.handle('login', async (event) => {
+    if (!isTrustedRendererEvent(event)) return false;
     return await twitchLogin();
 });
 
@@ -7335,7 +7341,8 @@ ipcMain.handle('get-queue', (event) => {
     return downloadQueue;
 });
 
-ipcMain.handle('start-live-recording', async (_, streamerName: string) => {
+ipcMain.handle('start-live-recording', async (event, streamerName: string) => {
+    if (!isTrustedRendererEvent(event)) return { success: false, error: 'Access denied' };
     if (typeof streamerName !== 'string' || !streamerName) {
         return { success: false, error: 'Invalid streamer name' };
     }
@@ -7379,7 +7386,9 @@ ipcMain.handle('start-live-recording', async (_, streamerName: string) => {
     return { success: true, streamer: login, title: liveInfo.title || login };
 });
 
-ipcMain.handle('add-to-queue', (_, item: Omit<QueueItem, 'id' | 'status' | 'progress'>) => {
+registerTrustedIpcHandler(ipcMain, 'add-to-queue', isTrustedRendererEvent, () => downloadQueue, (_, input: unknown) => {
+    const item = createRendererQueueItem(input, generateQueueItemId());
+    if (!item) return downloadQueue;
     if (config.prevent_duplicate_downloads && hasActiveDuplicate(item)) {
         runtimeMetrics.duplicateSkips += 1;
         mainWindow?.webContents.send('queue-duplicate-skipped', {
@@ -7395,19 +7404,14 @@ ipcMain.handle('add-to-queue', (_, item: Omit<QueueItem, 'id' | 'status' | 'prog
         return downloadQueue;
     }
 
-    const queueItem: QueueItem = {
-        ...item,
-        id: generateQueueItemId(),
-        status: 'pending',
-        progress: 0
-    };
-    downloadQueue.push(queueItem);
+    downloadQueue.push(item);
     saveQueue(downloadQueue);
     emitQueueUpdated();
     return downloadQueue;
 });
 
-ipcMain.handle('remove-from-queue', async (_, id: string) => {
+registerTrustedIpcHandler(ipcMain, 'remove-from-queue', isTrustedRendererEvent, () => Promise.resolve(downloadQueue), async (_, id: string) => {
+    if (typeof id !== 'string' || !id) return downloadQueue;
     const wasActiveItem = activeQueueItemId === id || activeDownloads.has(id) || queueProcessRegistry.activeItemIds().includes(id);
 
     if (wasActiveItem) {
@@ -7423,14 +7427,8 @@ ipcMain.handle('remove-from-queue', async (_, id: string) => {
 
     // Clean up merge-group temp files (must run for any merge group, not just active)
     const removedItem = downloadQueue.find(item => item.id === id);
-    if (removedItem?.mergeGroup) {
-        const mg = removedItem.mergeGroup;
-        for (const key of Object.keys(mg.downloadedFiles)) {
-            try { if (fs.existsSync(mg.downloadedFiles[Number(key)])) fs.unlinkSync(mg.downloadedFiles[Number(key)]); } catch { }
-        }
-        if (mg.mergedFile) {
-            try { if (fs.existsSync(mg.mergedFile)) fs.unlinkSync(mg.mergedFile); } catch { }
-        }
+    for (const cleanupPath of getMergeGroupCleanupPaths(removedItem)) {
+        try { if (fs.existsSync(cleanupPath)) fs.unlinkSync(cleanupPath); } catch { }
     }
 
     downloadQueue = downloadQueue.filter(item => item.id !== id);
@@ -7439,14 +7437,16 @@ ipcMain.handle('remove-from-queue', async (_, id: string) => {
     return downloadQueue;
 });
 
-ipcMain.handle('clear-completed', () => {
+ipcMain.handle('clear-completed', (event) => {
+    if (!isTrustedRendererEvent(event)) return downloadQueue;
     downloadQueue = downloadQueue.filter(item => item.status !== 'completed');
     saveQueue(downloadQueue);
     emitQueueUpdated();
     return downloadQueue;
 });
 
-ipcMain.handle('reorder-queue', (_, orderIds: string[]) => {
+ipcMain.handle('reorder-queue', (event, orderIds: string[]) => {
+    if (!isTrustedRendererEvent(event) || !Array.isArray(orderIds)) return downloadQueue;
     const order = new Map(orderIds.map((id, idx) => [id, idx]));
     const withOrder = [...downloadQueue].sort((a, b) => {
         const ai = order.has(a.id) ? (order.get(a.id) as number) : Number.MAX_SAFE_INTEGER;
@@ -7460,7 +7460,8 @@ ipcMain.handle('reorder-queue', (_, orderIds: string[]) => {
     return downloadQueue;
 });
 
-ipcMain.handle('retry-failed-downloads', async () => {
+ipcMain.handle('retry-failed-downloads', async (event) => {
+    if (!isTrustedRendererEvent(event)) return downloadQueue;
     const failedIds = downloadQueue.filter((item) => item.status === 'error').map((item) => item.id);
     await Promise.all(failedIds.map((id) => queueProcessRegistry.cancelItem(id)));
     for (const id of failedIds) queueProcessRegistry.resetItem(id);
@@ -7485,7 +7486,8 @@ ipcMain.handle('retry-failed-downloads', async () => {
     return downloadQueue;
 });
 
-ipcMain.handle('retry-queue-item', async (_, id: string) => {
+ipcMain.handle('retry-queue-item', async (event, id: string) => {
+    if (!isTrustedRendererEvent(event)) return downloadQueue;
     if (typeof id !== 'string' || !id) return downloadQueue;
     const idx = downloadQueue.findIndex((it) => it.id === id);
     if (idx < 0) return downloadQueue;
@@ -7513,7 +7515,8 @@ ipcMain.handle('retry-queue-item', async (_, id: string) => {
     return downloadQueue;
 });
 
-ipcMain.handle('create-merge-group', (_, itemIds: string[]) => {
+ipcMain.handle('create-merge-group', (event, itemIds: string[]) => {
+    if (!isTrustedRendererEvent(event) || !Array.isArray(itemIds)) return downloadQueue;
     const selectedItems = downloadQueue.filter(item => itemIds.includes(item.id));
 
     if (selectedItems.length < 2) {
@@ -7590,7 +7593,8 @@ ipcMain.handle('create-merge-group', (_, itemIds: string[]) => {
     return downloadQueue;
 });
 
-ipcMain.handle('start-download', async () => {
+ipcMain.handle('start-download', async (event) => {
+    if (!isTrustedRendererEvent(event)) return false;
     if (isDownloading && queuePaused) {
         queuePaused = false;
         for (const item of downloadQueue) {
@@ -7620,7 +7624,8 @@ ipcMain.handle('start-download', async () => {
     return true;
 });
 
-ipcMain.handle('pause-download', async () => {
+ipcMain.handle('pause-download', async (event) => {
+    if (!isTrustedRendererEvent(event)) return false;
     if (!isDownloading || queuePaused) return false;
 
     queuePaused = true;
@@ -7639,7 +7644,8 @@ ipcMain.handle('pause-download', async () => {
     return true;
 });
 
-ipcMain.handle('cancel-download', async () => {
+ipcMain.handle('cancel-download', async (event) => {
+    if (!isTrustedRendererEvent(event)) return false;
     isDownloading = false;
     queuePaused = false;
     const activeItemIds = queueProcessRegistry.activeItemIds();
@@ -7652,8 +7658,8 @@ const fileCapabilities = new FileCapabilityStore();
 const VIDEO_FILE_EXTENSIONS = ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'ts', 'avi'];
 const knownRendererPaths = new Map<FileCapabilityPurpose, Set<string>>();
 
-function issueFileCapability(event: IpcMainInvokeEvent, purpose: FileCapabilityPurpose, filePath: string, kind: 'input-file' | 'output-file' | 'directory', extensions: string[] = []): FileCapabilityReference {
-    return fileCapabilities.issue({ ownerId: event.sender.id, purpose, path: filePath, kind, extensions });
+function issueFileCapability(event: IpcMainInvokeEvent, purpose: FileCapabilityPurpose, filePath: string, kind: 'input-file' | 'output-file' | 'directory', extensions: string[] = [], ttlMs?: number): FileCapabilityReference {
+    return fileCapabilities.issue({ ownerId: event.sender.id, purpose, path: filePath, kind, extensions, ttlMs });
 }
 
 function resolveFileCapability(event: IpcMainInvokeEvent, token: string, purpose: FileCapabilityPurpose, consume = false, protectedPaths: string[] = []): string | null {
@@ -7715,14 +7721,14 @@ ipcMain.handle('select-video-file', async (event) => {
         ]
     });
     return result.filePaths[0]
-        ? issueFileCapability(event, 'cutter-input', result.filePaths[0], 'input-file', VIDEO_FILE_EXTENSIONS)
+        ? issueFileCapability(event, 'cutter-input', result.filePaths[0], 'input-file', VIDEO_FILE_EXTENSIONS, CUTTER_SESSION_CAPABILITY_TTL_MS)
         : null;
 });
 
 ipcMain.handle('grant-dropped-video', (event, filePath: string): FileCapabilityReference | null => {
     if (!isTrustedRendererEvent(event)) return null;
     try {
-        return issueFileCapability(event, 'cutter-input', filePath, 'input-file', VIDEO_FILE_EXTENSIONS);
+        return issueFileCapability(event, 'cutter-input', filePath, 'input-file', VIDEO_FILE_EXTENSIONS, CUTTER_SESSION_CAPABILITY_TTL_MS);
     } catch {
         return null;
     }
@@ -7780,7 +7786,8 @@ ipcMain.handle('show-in-folder', (event, capability: string): boolean => {
 
 ipcMain.handle('get-version', () => APP_VERSION);
 
-ipcMain.handle('check-update', async () => {
+ipcMain.handle('check-update', async (event) => {
+    if (!isTrustedRendererEvent(event)) return { error: true };
     try {
         setupAutoUpdater();
         const result = await requestUpdateCheck('manual', true);
@@ -7797,7 +7804,8 @@ ipcMain.handle('check-update', async () => {
     }
 });
 
-ipcMain.handle('download-update', async () => {
+ipcMain.handle('download-update', async (event) => {
+    if (!isTrustedRendererEvent(event)) return { error: true };
     try {
         setupAutoUpdater();
         const result = await requestUpdateDownload('manual');
@@ -7814,11 +7822,13 @@ ipcMain.handle('download-update', async () => {
     }
 });
 
-ipcMain.handle('install-update', () => {
+ipcMain.handle('install-update', (event) => {
+    if (!isTrustedRendererEvent(event)) return;
     autoUpdater.quitAndInstall(true, true);
 });
 
-ipcMain.handle('open-external', async (_, url: string) => {
+ipcMain.handle('open-external', async (event, url: string) => {
+    if (!isTrustedRendererEvent(event)) return;
     // Only allow https / http URLs — never let the renderer push a
     // file://, javascript:, or shell:-style URL through to the OS
     // shell.openExternal handler. The renderer is contextIsolated +
@@ -7845,7 +7855,7 @@ interface ActiveClipDownloadTracking {
 }
 const activeClipProcesses = new Map<string, ActiveClipDownloadTracking>();
 
-ipcMain.handle('download-clip', async (_, clipUrl: string) => {
+registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () => Promise.resolve({ success: false, error: 'File access denied' }), async (_, clipUrl: string) => {
     let clipId = '';
     const match1 = clipUrl.match(/clips\.twitch\.tv\/([A-Za-z0-9_-]+)/);
     const match2 = clipUrl.match(/twitch\.tv\/[^/]+\/clip\/([A-Za-z0-9_-]+)/);
@@ -7952,11 +7962,11 @@ ipcMain.handle('download-clip', async (_, clipUrl: string) => {
     });
 });
 
-ipcMain.handle('run-preflight', async (_, autoFix: boolean = false) => {
+registerTrustedIpcHandler(ipcMain, 'run-preflight', isTrustedRendererEvent, () => Promise.resolve(null), async (_, autoFix: boolean = false) => {
     return await runPreflight(autoFix);
 });
 
-ipcMain.handle('get-debug-log', async (_, lines: number = 200) => {
+registerTrustedIpcHandler(ipcMain, 'get-debug-log', isTrustedRendererEvent, () => Promise.resolve(''), async (_, lines: number = 200) => {
     // Cap so a misbehaving renderer (or future feature) cannot ask the
     // main process to slice millions of lines from a multi-MB log.
     const safeLines = Number.isFinite(lines) ? Math.max(1, Math.min(5000, Math.floor(lines))) : 200;
@@ -8127,7 +8137,8 @@ ipcMain.handle('export-runtime-metrics', async (event) => {
     }
 });
 
-ipcMain.handle('mark-vod-downloaded', (_, vodId: string, mark: boolean): { success: boolean } => {
+ipcMain.handle('mark-vod-downloaded', (event, vodId: string, mark: boolean): { success: boolean } => {
+    if (!isTrustedRendererEvent(event)) return { success: false };
     if (typeof vodId !== 'string' || !vodId) return { success: false };
     if (!Array.isArray(config.downloaded_vod_ids)) config.downloaded_vod_ids = [];
     const has = config.downloaded_vod_ids.includes(vodId);
@@ -8143,7 +8154,8 @@ ipcMain.handle('mark-vod-downloaded', (_, vodId: string, mark: boolean): { succe
     return { success: true };
 });
 
-ipcMain.handle('reset-downloaded-vod-ids', () => {
+ipcMain.handle('reset-downloaded-vod-ids', (event) => {
+    if (!isTrustedRendererEvent(event)) return { success: false, removedCount: 0 };
     const count = Array.isArray(config.downloaded_vod_ids) ? config.downloaded_vod_ids.length : 0;
     config.downloaded_vod_ids = [];
     saveConfig(config);

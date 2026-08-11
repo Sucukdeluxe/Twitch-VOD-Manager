@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { spawnSync } = require('child_process');
+const { requireFileCapability } = require('./file-capability-contract');
 const {
   createE2eEnvironment,
   getElectronLaunchOptions,
@@ -46,6 +47,32 @@ function getProcessTreeMemoryMb(rootPid) {
   const result = spawnSync('powershell.exe', ['-NoProfile', '-Command', script], { windowsHide: true, encoding: 'utf8' });
   const value = Number(String(result.stdout || '').trim().replace(',', '.'));
   return Number.isFinite(value) ? value : 0;
+}
+
+async function createCutterCapability(win, filePath) {
+  const inputId = `cutter-capability-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  await win.evaluate((id) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.id = id;
+    document.body.appendChild(input);
+  }, inputId);
+  await win.locator(`#${inputId}`).setInputFiles(filePath);
+  const capability = await win.evaluate(async (id) => {
+    const input = document.getElementById(id);
+    const file = input instanceof HTMLInputElement ? input.files?.[0] : null;
+    const capability = file ? await window.api.selectDroppedVideo(file) : null;
+    input?.remove();
+    if (!capability || typeof capability.token !== 'string' || !capability.token) throw new Error('Cutter capability was not issued');
+    return capability;
+  }, inputId);
+  return requireFileCapability(capability);
+}
+
+async function loadCutterCapability(win, filePath) {
+  const capability = await createCutterCapability(win, filePath);
+  await win.evaluate((selection) => window.loadCutterFromPath(selection), capability);
+  return capability;
 }
 
 function createTestVideo(environment) {
@@ -173,6 +200,11 @@ async function run() {
     await win.setViewportSize({ width: 1440, height: 900 });
     await win.emulateMedia({ reducedMotion: 'reduce' });
     await win.evaluate(() => window.showTab('cutter'));
+    const additionalContainerCapabilities = await Promise.all(Object.entries(additionalContainerFiles).map(async ([extension, filePath]) => ({
+      extension,
+      capability: await createCutterCapability(win, filePath),
+      sourceUrl: pathToFileURL(filePath).href
+    })));
     const additionalContainerSupport = await win.evaluate(async (entries) => {
       const probe = (sourceUrl) => new Promise((resolve) => {
         const video = document.createElement('video');
@@ -197,7 +229,7 @@ async function run() {
       const results = [];
       for (const entry of entries) {
         const nativePlayable = await probe(entry.sourceUrl);
-        const media = await window.api.prepareVideoEditorMedia(entry.filePath);
+        const media = await window.api.prepareVideoEditorMedia(entry.capability.token);
         results.push({
           extension: entry.extension,
           nativePlayable,
@@ -206,7 +238,7 @@ async function run() {
         });
       }
       return results;
-    }, Object.entries(additionalContainerFiles).map(([extension, filePath]) => ({ extension, filePath, sourceUrl: pathToFileURL(filePath).href })));
+    }, additionalContainerCapabilities);
     check(additionalContainerSupport.every((entry) => entry.prepared && entry.editorPlayable), `Additional video containers are not usable in the editor: ${JSON.stringify(additionalContainerSupport)}`);
     const cutterArtifactDir = path.join(process.cwd(), 'artifacts', 'ui-overhaul', 'cutter');
     fs.mkdirSync(cutterArtifactDir, { recursive: true });
@@ -289,7 +321,8 @@ async function run() {
       return;
     }
     const firstAssetsStartedAt = Date.now();
-    const initialOriginalDevicePixelRatio = await win.evaluate((filePath) => {
+    const inputCapability = await createCutterCapability(win, inputFile);
+    const initialOriginalDevicePixelRatio = await win.evaluate((fileCapability) => {
       const originalDevicePixelRatio = window.devicePixelRatio;
       Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 });
       const workspace = document.getElementById('cutterWorkspace');
@@ -347,9 +380,9 @@ async function run() {
         if (window.__cutterAssetAudit.waveformLoads.at(-1)?.signature === signature) return;
         window.__cutterAssetAudit.waveformLoads.push({ signature, width: image.naturalWidth, height: image.naturalHeight });
       });
-      window.__cutterLoadPromise = window.loadCutterFromPath(filePath);
+      window.__cutterLoadPromise = window.loadCutterFromPath(fileCapability);
       return originalDevicePixelRatio;
-    }, inputFile);
+    }, inputCapability);
     await win.waitForFunction(() => document.getElementById('cutterWorkspace').classList.contains('shown'), null, { timeout: 15000 });
     await win.evaluate(() => window.__cutterLoadPromise);
     await win.waitForFunction(() => {
@@ -640,10 +673,11 @@ async function run() {
         && cutterInfoAlignment.valueLineHeights.every(Number.isFinite),
       `Cutter information labels and values are not aligned to common rows: ${JSON.stringify(cutterInfoAlignment)}`
     );
+    const replacementCapability = await createCutterCapability(win, scrubStressInputFile);
     await app.evaluate(({ ipcMain }, nextFile) => {
       ipcMain.removeHandler('select-video-file');
       ipcMain.handle('select-video-file', () => nextFile);
-    }, scrubStressInputFile);
+    }, replacementCapability);
     await win.evaluate(() => {
       cutterEditorState.trimStart = 1;
       renderCutterEditor();
@@ -718,7 +752,7 @@ async function run() {
       check(replacementPlaybackState.paused && !replacementPlaybackState.playingClass && replacementPlaybackState.playIconVisible && !replacementPlaybackState.pauseIconVisible, `Replacing a playing video leaves stale playback UI: ${JSON.stringify(replacementPlaybackState)}`);
     }
     const scrubFirstAssetsStartedAt = Date.now();
-    await win.evaluate((filePath) => window.loadCutterFromPath(filePath), scrubStressInputFile);
+    await loadCutterCapability(win, scrubStressInputFile);
     await win.waitForFunction(() => {
       const video = document.getElementById('cutterVideo');
       return video.readyState >= HTMLMediaElement.HAVE_METADATA && video.duration >= 8 && video.duration <= 10;
@@ -945,7 +979,7 @@ async function run() {
       `Trim handles are not as immediate and frame-synchronized as the playhead: ${JSON.stringify(trimScrubProbe)}`
     );
     const mediumLoadStarted = Date.now();
-    await win.evaluate((filePath) => window.loadCutterFromPath(filePath), mediumInputFile);
+    await loadCutterCapability(win, mediumInputFile);
     await win.waitForFunction(() => {
       const video = document.getElementById('cutterVideo');
       const waveform = document.getElementById('cutterWaveform');
@@ -1010,7 +1044,7 @@ async function run() {
     );
     const memoryBeforeStressMb = getProcessTreeMemoryMb(app.process().pid);
     const longLoadStarted = Date.now();
-    await win.evaluate((filePath) => window.loadCutterFromPath(filePath), longInputFile);
+    const longCapability = await loadCutterCapability(win, longInputFile);
     await win.waitForFunction(() => {
       const video = document.getElementById('cutterVideo');
       return video.readyState >= HTMLMediaElement.HAVE_METADATA && Math.abs(video.duration - 1800) < 1;
@@ -1020,9 +1054,10 @@ async function run() {
     await win.evaluate(() => window.showTab('vods'));
     await win.waitForTimeout(80);
     await win.evaluate(() => window.showTab('cutter'));
-    await win.evaluate((filePath) => window.loadCutterFromPath(filePath), unsupportedInputFile);
+    const unsupportedCapability = { token: 'forged-unsupported-capability', name: path.basename(unsupportedInputFile) };
+    await win.evaluate((capability) => window.loadCutterFromPath(capability), unsupportedCapability);
     await win.waitForFunction(() => !document.getElementById('cutterWorkspace').classList.contains('loading'));
-    const longPreservedAfterAssetInterruptions = await win.evaluate((expectedFile) => cutterFile === expectedFile, longInputFile);
+    const longPreservedAfterAssetInterruptions = await win.evaluate((expectedToken) => cutterFile?.token === expectedToken, longCapability.token);
     check(longPreservedAfterAssetInterruptions, 'Long editor was replaced after an interrupted asset load and unsupported file selection');
     await win.waitForFunction(() => Number(document.getElementById('cutterThumbnailStrip').dataset.thumbnailCount || document.querySelectorAll('#cutterThumbnailStrip img').length) >= 30, null, { timeout: 90000 });
     const longAssetsReadyMs = Date.now() - longLoadStarted;
@@ -1082,28 +1117,30 @@ async function run() {
       longScrubPresentation.frames >= 12 && longScrubPresentation.maximumGap !== null && longScrubPresentation.maximumGap <= 0.75,
       `Long-video scrubbing skips too much visible media: ${JSON.stringify(longScrubPresentation)}`
     );
+    const rapidSwitchCapabilities = await Promise.all([inputFile, longInputFile, silentInputFile, longInputFile, inputFile, silentInputFile, longInputFile, silentInputFile].map((filePath) => createCutterCapability(win, filePath)));
     const rapidSwitch = await win.evaluate(async (files) => {
-      await Promise.allSettled(files.map((filePath) => window.loadCutterFromPath(filePath)));
-      return cutterFile;
-    }, [inputFile, longInputFile, silentInputFile, longInputFile, inputFile, silentInputFile, longInputFile, silentInputFile]);
-    await win.waitForFunction((expectedFile) => cutterFile === expectedFile && document.getElementById('cutterVideo').readyState >= HTMLMediaElement.HAVE_METADATA, silentInputFile, { timeout: 15000 });
-    check(rapidSwitch === silentInputFile, `Rapid file switching committed stale media: ${rapidSwitch}`);
-    await win.evaluate((filePath) => window.loadCutterFromPath(filePath), inputFile);
+      await Promise.allSettled(files.map((file) => window.loadCutterFromPath(file)));
+      return cutterFile?.token || null;
+    }, rapidSwitchCapabilities);
+    const expectedRapidSwitchToken = rapidSwitchCapabilities.at(-1).token;
+    await win.waitForFunction((expectedToken) => cutterFile?.token === expectedToken && document.getElementById('cutterVideo').readyState >= HTMLMediaElement.HAVE_METADATA, expectedRapidSwitchToken, { timeout: 15000 });
+    check(rapidSwitch === expectedRapidSwitchToken, `Rapid file switching committed stale media: ${rapidSwitch}`);
+    await win.evaluate((capability) => window.loadCutterFromPath(capability), inputCapability);
     await win.waitForFunction(() => document.getElementById('cutterVideo').readyState >= HTMLMediaElement.HAVE_METADATA && Number(document.getElementById('cutterThumbnailStrip').dataset.thumbnailCount || document.querySelectorAll('#cutterThumbnailStrip img').length) >= 30, null, { timeout: 90000 });
     const memoryAfterStressMb = getProcessTreeMemoryMb(app.process().pid);
     const stressMemoryDeltaMb = memoryBeforeStressMb && memoryAfterStressMb ? memoryAfterStressMb - memoryBeforeStressMb : 0;
     check(stressMemoryDeltaMb < 350, `Rapid media switching retained too much process memory: ${stressMemoryDeltaMb.toFixed(1)} MB`);
-    const probedMedia = await win.evaluate((filePath) => window.api.getVideoInfo(filePath), inputFile);
+    const probedMedia = await win.evaluate((capability) => window.api.getVideoInfo(capability.token), inputCapability);
     check(probedMedia?.videoCodec === 'h264' && probedMedia?.audioCodec === 'aac' && probedMedia?.previewCompatible && !probedMedia?.variableFrameRate, `Media capability probe is inconsistent: ${JSON.stringify(probedMedia)}`);
-    await win.evaluate((filePath) => window.loadCutterFromPath(filePath), unsupportedInputFile);
+    await win.evaluate((capability) => window.loadCutterFromPath(capability), unsupportedCapability);
     await win.waitForFunction(() => !document.getElementById('cutterWorkspace').classList.contains('loading'));
     const preservedAfterUnsupported = await win.evaluate((expectedFile) => ({
-      filePreserved: cutterFile === expectedFile,
+      filePreserved: cutterFile?.token === expectedFile,
       statePreserved: Boolean(cutterEditorState) && cutterEditorState.duration === 10,
       playerPreserved: document.getElementById('cutterVideo').readyState >= HTMLMediaElement.HAVE_METADATA,
       waveformPreserved: !document.getElementById('cutterWaveform').hidden && document.getElementById('cutterWaveform').naturalWidth === 32000,
       exportEnabled: !document.getElementById('btnCut').disabled
-    }), inputFile);
+    }), inputCapability.token);
     check(Object.values(preservedAfterUnsupported).every(Boolean), `Unsupported replacement corrupted the loaded editor: ${JSON.stringify(preservedAfterUnsupported)}`);
     await win.locator('#timelineContainer').scrollIntoViewIfNeeded();
     const timeline = await win.locator('#timeline').boundingBox();
@@ -1815,28 +1852,28 @@ async function run() {
       trimEnd: cutterEditorState.trimEnd,
       cuts: cutterEditorState.cuts.map((cut) => ({ ...cut }))
     }));
-    const sourceProtection = await win.evaluate(({ inputFile, editorState }) => window.api.exportVideoEdit({
-      inputFile,
-      outputFile: inputFile.toUpperCase(),
+    const sourceProtection = await win.evaluate(({ outputName, editorState }) => window.api.exportVideoEdit({
+      inputCapability: cutterFile.token,
+      outputName,
       trimStart: editorState.trimStart,
       trimEnd: editorState.trimEnd,
       cuts: editorState.cuts
-    }), { inputFile, editorState });
+    }), { outputName: path.basename(inputFile).toUpperCase(), editorState });
     check(!sourceProtection.success && fs.existsSync(inputFile) && fs.statSync(inputFile).size > 256, `Source overwrite protection failed: ${JSON.stringify(sourceProtection)}`);
     const invalidOutputFile = path.join(environment.mediaDir, 'Invalid request.mp4');
-    const invalidRequest = await win.evaluate(({ inputFile, outputFile, editorState }) => window.api.exportVideoEdit({
-      inputFile,
-      outputFile,
+    const invalidRequest = await win.evaluate(({ outputName, editorState }) => window.api.exportVideoEdit({
+      inputCapability: cutterFile.token,
+      outputName,
       trimStart: Number.NaN,
       trimEnd: editorState.trimEnd,
       cuts: editorState.cuts
-    }), { inputFile, outputFile: invalidOutputFile, editorState });
+    }), { outputName: path.basename(invalidOutputFile), editorState });
     check(!invalidRequest.success && !fs.existsSync(invalidOutputFile), `Invalid numeric request was accepted: ${JSON.stringify(invalidRequest)}`);
     const cancelledOutputFile = path.join(environment.mediaDir, 'Cancelled export.mp4');
-    const cancelledExport = await win.evaluate(async ({ inputFile, outputFile, editorState }) => {
+    const cancelledExport = await win.evaluate(async ({ outputName, editorState }) => {
       const exportPromise = window.api.exportVideoEdit({
-        inputFile,
-        outputFile,
+        inputCapability: cutterFile.token,
+        outputName,
         trimStart: editorState.trimStart,
         trimEnd: editorState.trimEnd,
         cuts: editorState.cuts
@@ -1844,16 +1881,16 @@ async function run() {
       await new Promise((resolve) => setTimeout(resolve, 120));
       const cancelAccepted = await window.api.cancelVideoEdit();
       return { cancelAccepted, result: await exportPromise };
-    }, { inputFile, outputFile: cancelledOutputFile, editorState });
+    }, { outputName: path.basename(cancelledOutputFile), editorState });
     check(cancelledExport.cancelAccepted && !cancelledExport.result.success && cancelledExport.result.cancelled === true && !fs.existsSync(cancelledOutputFile), `Export cancellation did not return a clean cancelled result or published a file: ${JSON.stringify(cancelledExport)}`);
     fs.writeFileSync(outputFile, 'previous-output', 'utf8');
-    const exportResult = await win.evaluate(({ inputFile, outputFile, editorState }) => window.api.exportVideoEdit({
-      inputFile,
-      outputFile,
+    const exportResult = await win.evaluate(({ outputName, editorState }) => window.api.exportVideoEdit({
+      inputCapability: cutterFile.token,
+      outputName,
       trimStart: editorState.trimStart,
       trimEnd: editorState.trimEnd,
       cuts: editorState.cuts
-    }), { inputFile, outputFile, editorState });
+    }), { outputName: path.basename(outputFile), editorState });
     check(exportResult.success && fs.existsSync(outputFile), `Export failed: ${JSON.stringify(exportResult)}`);
     if (fs.existsSync(outputFile)) {
       const probe = JSON.parse(runBinary(resolveBinary(environment, 'ffprobe'), ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', outputFile]));
@@ -1869,24 +1906,24 @@ async function run() {
       start: 1.2 + index * 0.2,
       end: 1.28 + index * 0.2
     }));
-    const manyCutsExport = await win.evaluate(({ inputFile, outputFile, cuts }) => window.api.exportVideoEdit({
-      inputFile,
-      outputFile,
+    const manyCutsExport = await win.evaluate(({ outputName, cuts }) => window.api.exportVideoEdit({
+      inputCapability: cutterFile.token,
+      outputName,
       trimStart: 1,
       trimEnd: 9.5,
       cuts
-    }), { inputFile, outputFile: manyCutsOutputFile, cuts: manyCuts });
+    }), { outputName: path.basename(manyCutsOutputFile), cuts: manyCuts });
     check(manyCutsExport.success && fs.existsSync(manyCutsOutputFile) && fs.statSync(manyCutsOutputFile).size > 256, `Many-cut export failed: ${JSON.stringify(manyCutsExport)}`);
     const sourceStatBeforeMutation = fs.statSync(inputFile);
     fs.utimesSync(inputFile, sourceStatBeforeMutation.atime, new Date(sourceStatBeforeMutation.mtimeMs + 5000));
     const changedSourceOutputFile = path.join(environment.mediaDir, 'Changed source rejected.mp4');
-    const changedSourceExport = await win.evaluate(({ inputFile, outputFile }) => window.api.exportVideoEdit({
-      inputFile,
-      outputFile,
+    const changedSourceExport = await win.evaluate(({ outputName }) => window.api.exportVideoEdit({
+      inputCapability: cutterFile.token,
+      outputName,
       trimStart: 0,
       trimEnd: 10,
       cuts: []
-    }), { inputFile, outputFile: changedSourceOutputFile });
+    }), { outputName: path.basename(changedSourceOutputFile) });
     check(!changedSourceExport.success && !fs.existsSync(changedSourceOutputFile), `Changed source identity was accepted: ${JSON.stringify(changedSourceExport)}`);
     await win.evaluate(() => {
       window.updateCutterZoom(1);
@@ -1894,7 +1931,7 @@ async function run() {
     });
     await win.waitForTimeout(250);
     await win.screenshot({ path: path.join(cutterArtifactDir, 'editor.png'), fullPage: true });
-    await win.evaluate((filePath) => window.loadCutterFromPath(filePath), silentInputFile);
+    await loadCutterCapability(win, silentInputFile);
     await win.waitForFunction(() => {
       const video = document.getElementById('cutterVideo');
       return video.readyState >= HTMLMediaElement.HAVE_METADATA && video.videoWidth === 360;
@@ -1907,13 +1944,13 @@ async function run() {
       emptyVisible: !document.getElementById('cutterAudioEmpty').hidden
     }));
     check(silentState.waveformHidden && silentState.emptyVisible, `Silent video does not show the no-audio state: ${JSON.stringify(silentState)}`);
-    const silentExportResult = await win.evaluate(({ inputFile, outputFile, state }) => window.api.exportVideoEdit({
-      inputFile,
-      outputFile,
+    const silentExportResult = await win.evaluate(({ outputName, state }) => window.api.exportVideoEdit({
+      inputCapability: cutterFile.token,
+      outputName,
       trimStart: state.trimStart,
       trimEnd: state.trimEnd,
       cuts: state.cuts
-    }), { inputFile: silentInputFile, outputFile: silentOutputFile, state: silentState });
+    }), { outputName: path.basename(silentOutputFile), state: silentState });
     check(silentExportResult.success && fs.existsSync(silentOutputFile), `Silent export failed: ${JSON.stringify(silentExportResult)}`);
     if (fs.existsSync(silentOutputFile)) {
       const silentProbe = JSON.parse(runBinary(resolveBinary(environment, 'ffprobe'), ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', silentOutputFile]));
@@ -1925,11 +1962,11 @@ async function run() {
     check(runtimeIssues.length === 0, runtimeIssues.join('\n'));
     const cutterTempDirectoriesBeforeShutdown = new Set(fs.readdirSync(os.tmpdir()).filter((name) => /^tvm-editor-(?:media|waveform|preview)-/.test(name)));
     const shutdownOutputFile = path.join(environment.mediaDir, 'Shutdown export.mp4');
-    await win.evaluate((filePath) => window.loadCutterFromPath(filePath), longInputFile);
+    await loadCutterCapability(win, longInputFile);
     await win.waitForFunction(() => document.getElementById('cutterVideo').readyState >= HTMLMediaElement.HAVE_METADATA, null, { timeout: 15000 });
-    await win.evaluate(({ inputFile, outputFile }) => {
-      void window.api.exportVideoEdit({ inputFile, outputFile, trimStart: 0, trimEnd: 1800, cuts: [] });
-    }, { inputFile: longInputFile, outputFile: shutdownOutputFile });
+    await win.evaluate(({ outputName }) => {
+      void window.api.exportVideoEdit({ inputCapability: cutterFile.token, outputName, trimStart: 0, trimEnd: 1800, cuts: [] });
+    }, { outputName: path.basename(shutdownOutputFile) });
     await win.waitForTimeout(150);
     const appClosed = app.waitForEvent('close', { timeout: 15000 });
     try { await app.evaluate(({ app: electronApp }) => electronApp.quit()); } catch { }
