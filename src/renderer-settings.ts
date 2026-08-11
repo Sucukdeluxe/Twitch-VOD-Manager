@@ -6,6 +6,7 @@ let pendingSettingsAutoSave = false;
 let settingsAutoSaveTimer: number | null = null;
 let pendingCredentialsReconnect = false;
 let lastPersistedSettingsFingerprint = '';
+let settingsInputGeneration = 0;
 const SECRET_INPUT_MASK = '••••••••';
 let secretStatus: SecretStatus = {
     encryptionAvailable: false,
@@ -24,6 +25,10 @@ function canRunSettingsAutoRefresh(): boolean {
     }
 
     return document.querySelector('.tab-content.active')?.id === 'settingsTab';
+}
+
+function markSettingsInputChanged(): void {
+    settingsInputGeneration += 1;
 }
 
 async function connect(): Promise<void> {
@@ -99,6 +104,7 @@ function applyTemplatePreset(preset: string): void {
     byId<HTMLInputElement>('partsFilenameTemplate').value = selected.parts;
     byId<HTMLInputElement>('defaultClipFilenameTemplate').value = selected.clip;
     validateFilenameTemplates();
+    markSettingsInputChanged();
     // Programmatic .value = ... does not trigger the 'input' event the
     // template inputs listen on for debounced save, so the preset click
     // would otherwise look applied but never persist until the user
@@ -831,6 +837,7 @@ async function flushSettingsAutoSave(reconnectAfterSave = false): Promise<void> 
 
     const payload = collectAutoSavePayload();
     const fingerprint = getSettingsFingerprint(payload);
+    const inputGeneration = settingsInputGeneration;
 
     if (fingerprint === lastPersistedSettingsFingerprint) {
         if (reconnectAfterSave && pendingCredentialsReconnect) {
@@ -849,7 +856,11 @@ async function flushSettingsAutoSave(reconnectAfterSave = false): Promise<void> 
     try {
         await persistSecretInputs();
         config = await window.api.saveConfig(payload);
-        lastPersistedSettingsFingerprint = getSettingsFingerprint({});
+        if (settingsInputGeneration === inputGeneration) {
+            lastPersistedSettingsFingerprint = getSettingsFingerprint({});
+        } else {
+            pendingSettingsAutoSave = true;
+        }
         if (reconnectAfterSave && pendingCredentialsReconnect) {
             pendingCredentialsReconnect = false;
             await connect();
@@ -928,13 +939,17 @@ function initSettingsAutoSave(): void {
 
     for (const id of immediateSaveIds) {
         const element = byId<HTMLInputElement | HTMLSelectElement>(id);
-        element.addEventListener('change', triggerImmediateSave);
+        element.addEventListener('change', () => {
+            markSettingsInputChanged();
+            triggerImmediateSave();
+        });
         element.addEventListener('blur', triggerImmediateSave);
     }
 
     for (const id of debouncedSaveIds) {
         const element = byId<HTMLInputElement>(id);
         element.addEventListener('input', () => {
+            markSettingsInputChanged();
             scheduleSettingsAutoSave();
         });
         element.addEventListener('blur', () => {
@@ -945,6 +960,7 @@ function initSettingsAutoSave(): void {
     for (const id of credentialIds) {
         const element = byId<HTMLInputElement>(id);
         element.addEventListener('input', () => {
+            markSettingsInputChanged();
             pendingCredentialsReconnect = true;
             scheduleSettingsAutoSave();
         });

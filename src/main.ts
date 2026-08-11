@@ -52,7 +52,7 @@ import { registerTrustedIpcHandler } from './main/domain/privileged-ipc';
 import { createRendererQueueItem, getMergeGroupCleanupPaths } from './main/domain/renderer-queue-input';
 import { createAppStateStore, type AppStateStore } from './main/domain/app-state-store';
 import { createExportableConfig } from './main/domain/config-export';
-import { persistStateChange } from './main/domain/persistence-commit';
+import { commitQueueMutation, persistStateChange } from './main/domain/persistence-commit';
 import { resolveSecretInputUpdate } from './main/domain/secret-input';
 import { createSecretStore, type SecretStore } from './main/domain/secret-store';
 import { createElectronSecureStorage } from './main/infra/secure-storage';
@@ -7424,25 +7424,29 @@ registerTrustedIpcHandler(ipcMain, 'add-to-queue', isTrustedRendererEvent, () =>
 registerTrustedIpcHandler(ipcMain, 'remove-from-queue', isTrustedRendererEvent, () => Promise.resolve(downloadQueue), async (_, id: string) => {
     if (typeof id !== 'string' || !id) return downloadQueue;
     const wasActiveItem = activeQueueItemId === id || activeDownloads.has(id) || queueProcessRegistry.activeItemIds().includes(id);
+    const removedItem = downloadQueue.find((item) => item.id === id);
 
-    if (wasActiveItem) {
-        cancelledItemIds.add(id);
-        await queueProcessRegistry.cancelItem(id);
-        activeDownloads.delete(id);
-        const nextActiveId = queueProcessRegistry.activeItemIds()[0] || null;
-        activeQueueItemId = nextActiveId;
-        runtimeMetrics.activeItemId = nextActiveId;
-        runtimeMetrics.activeItemTitle = nextActiveId ? downloadQueue.find((item) => item.id === nextActiveId)?.title || null : null;
-        appendDebugLog('queue-item-removed-active-cancelled', { id });
-    }
-
-    // Clean up merge-group temp files (must run for any merge group, not just active)
-    const removedItem = downloadQueue.find(item => item.id === id);
-    for (const cleanupPath of getMergeGroupCleanupPaths(removedItem)) {
-        try { if (fs.existsSync(cleanupPath)) fs.unlinkSync(cleanupPath); } catch { }
-    }
-
-    downloadQueue = persistStateChange(downloadQueue, (current) => current.filter((item) => item.id !== id), saveQueue);
+    await commitQueueMutation(
+        downloadQueue,
+        (current) => current.filter((item) => item.id !== id),
+        saveQueue,
+        (nextQueue) => { downloadQueue = nextQueue; },
+        async () => {
+            if (wasActiveItem) {
+                cancelledItemIds.add(id);
+                await queueProcessRegistry.cancelItem(id);
+                activeDownloads.delete(id);
+                const nextActiveId = queueProcessRegistry.activeItemIds()[0] || null;
+                activeQueueItemId = nextActiveId;
+                runtimeMetrics.activeItemId = nextActiveId;
+                runtimeMetrics.activeItemTitle = nextActiveId ? downloadQueue.find((item) => item.id === nextActiveId)?.title || null : null;
+                appendDebugLog('queue-item-removed-active-cancelled', { id });
+            }
+            for (const cleanupPath of getMergeGroupCleanupPaths(removedItem)) {
+                try { if (fs.existsSync(cleanupPath)) fs.unlinkSync(cleanupPath); } catch { }
+            }
+        },
+    );
     emitQueueUpdated();
     return downloadQueue;
 });
@@ -7631,7 +7635,6 @@ ipcMain.handle('pause-download', async (event) => {
     if (!isTrustedRendererEvent(event)) return false;
     if (!isDownloading || queuePaused) return false;
 
-    await Promise.all(queueProcessRegistry.activeItemIds().map((id) => queueProcessRegistry.pauseItem(id)));
     const nextQueue = downloadQueue.map((item) => item.status === 'downloading' ? {
         ...item,
         status: 'paused' as const,
@@ -7639,8 +7642,18 @@ ipcMain.handle('pause-download', async (event) => {
         eta: '',
         progressStatus: tBackend('downloadPaused')
     } : item);
-    downloadQueue = persistStateChange(downloadQueue, () => nextQueue, saveQueue);
-    queuePaused = true;
+    await commitQueueMutation(
+        downloadQueue,
+        () => nextQueue,
+        saveQueue,
+        (candidate) => {
+            downloadQueue = candidate;
+            queuePaused = true;
+        },
+        async () => {
+            await Promise.all(queueProcessRegistry.activeItemIds().map((id) => queueProcessRegistry.pauseItem(id)));
+        },
+    );
     emitQueueUpdated(true);
     mainWindow?.webContents.send('download-paused');
     return true;

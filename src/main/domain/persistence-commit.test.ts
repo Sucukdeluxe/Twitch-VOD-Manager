@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { openDatabase, type DbHandle } from '../infra/db';
 import { createAppStateStore } from './app-state-store';
-import { persistStateChange } from './persistence-commit';
+import { commitQueueMutation, persistStateChange } from './persistence-commit';
 
 let directory: string;
 let db: DbHandle;
@@ -56,6 +56,65 @@ describe('persistStateChange', () => {
         expect(() => {
             runtime = persistStateChange(runtime, () => next, (candidate) => createAppStateStore(failingDb).saveQueue(candidate));
         }).toThrow('SQLITE_IOERR queue');
+        expect(runtime).toEqual(previous);
+        expect(createAppStateStore(db).loadQueue()).toEqual(previous);
+    });
+
+    it('does not cancel a process or delete a file when queue removal cannot persist', async () => {
+        const previous = [{ id: 'q1', status: 'pending' }];
+        const temporaryFile = path.join(directory, 'q1.partial');
+        fs.writeFileSync(temporaryFile, 'keep');
+        createAppStateStore(db).saveQueue(previous);
+        const failingDb: DbHandle = {
+            ...db,
+            run(sql, params) {
+                if (sql.includes('DELETE FROM queue_items')) throw new Error('SQLITE_IOERR remove');
+                db.run(sql, params);
+            },
+        };
+        const cancelProcess = vi.fn();
+        let runtime = previous;
+
+        await expect(commitQueueMutation(
+            runtime,
+            () => [],
+            (candidate) => createAppStateStore(failingDb).saveQueue(candidate),
+            (candidate) => { runtime = candidate; },
+            async () => {
+                cancelProcess('q1');
+                fs.rmSync(temporaryFile);
+            },
+        )).rejects.toThrow('SQLITE_IOERR remove');
+
+        expect(cancelProcess).not.toHaveBeenCalled();
+        expect(fs.existsSync(temporaryFile)).toBe(true);
+        expect(runtime).toEqual(previous);
+        expect(createAppStateStore(db).loadQueue()).toEqual(previous);
+    });
+
+    it('does not pause a process when a paused queue snapshot cannot persist', async () => {
+        const previous = [{ id: 'q1', status: 'downloading' }];
+        const paused = [{ id: 'q1', status: 'paused' }];
+        createAppStateStore(db).saveQueue(previous);
+        const failingDb: DbHandle = {
+            ...db,
+            run(sql, params) {
+                if (sql.includes('DELETE FROM queue_items')) throw new Error('SQLITE_IOERR pause');
+                db.run(sql, params);
+            },
+        };
+        const pauseProcess = vi.fn();
+        let runtime = previous;
+
+        await expect(commitQueueMutation(
+            runtime,
+            () => paused,
+            (candidate) => createAppStateStore(failingDb).saveQueue(candidate),
+            (candidate) => { runtime = candidate; },
+            async () => { pauseProcess('q1'); },
+        )).rejects.toThrow('SQLITE_IOERR pause');
+
+        expect(pauseProcess).not.toHaveBeenCalled();
         expect(runtime).toEqual(previous);
         expect(createAppStateStore(db).loadQueue()).toEqual(previous);
     });
