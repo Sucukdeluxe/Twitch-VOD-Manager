@@ -409,10 +409,10 @@ export interface ManagedToolStatuses {
     ffmpeg: ManagedToolStatus;
 }
 
-export function getManagedToolStatuses(): ManagedToolStatuses {
+export async function getManagedToolStatuses(): Promise<ManagedToolStatuses> {
     return {
-        streamlink: getManagedToolInstaller('streamlink').status(APPLICATION_TOOL_MANIFEST.streamlink),
-        ffmpeg: getManagedToolInstaller('ffmpeg').status(APPLICATION_TOOL_MANIFEST.ffmpeg)
+        streamlink: await getManagedToolInstaller('streamlink').status(APPLICATION_TOOL_MANIFEST.streamlink),
+        ffmpeg: await getManagedToolInstaller('ffmpeg').status(APPLICATION_TOOL_MANIFEST.ffmpeg)
     };
 }
 
@@ -424,17 +424,19 @@ export async function repairManagedTools(): Promise<{ success: boolean; statuses
     refreshBundledToolPaths(true);
     return {
         success: streamlink.success && ffmpeg.success,
-        statuses: getManagedToolStatuses()
+        statuses: await getManagedToolStatuses()
     };
 }
 
-export function resetManagedTools(): { success: boolean; statuses: ManagedToolStatuses } {
-    const streamlink = getManagedToolInstaller('streamlink').reset(APPLICATION_TOOL_MANIFEST.streamlink);
-    const ffmpeg = getManagedToolInstaller('ffmpeg').reset(APPLICATION_TOOL_MANIFEST.ffmpeg);
+export async function resetManagedTools(): Promise<{ success: boolean; statuses: ManagedToolStatuses }> {
+    const [streamlink, ffmpeg] = await Promise.all([
+        getManagedToolInstaller('streamlink').reset(APPLICATION_TOOL_MANIFEST.streamlink),
+        getManagedToolInstaller('ffmpeg').reset(APPLICATION_TOOL_MANIFEST.ffmpeg)
+    ]);
     refreshBundledToolPaths(true);
     return {
         success: streamlink.state !== 'installing' && ffmpeg.state !== 'installing',
-        statuses: getManagedToolStatuses()
+        statuses: await getManagedToolStatuses()
     };
 }
 
@@ -445,7 +447,7 @@ export async function ensureStreamlinkInstalled(): Promise<boolean> {
     refreshBundledToolPaths();
 
     const manifest = APPLICATION_TOOL_MANIFEST.streamlink;
-    const managedStatus = getManagedToolInstaller('streamlink').status(manifest);
+    const managedStatus = await getManagedToolInstaller('streamlink').status(manifest);
     const requiresManagedRepair = Boolean(bundledStreamlinkPath) && !managedStatus.verified;
     const current = getStreamlinkCommand();
     const versionArgs = [...current.prefixArgs, '--version'];
@@ -491,7 +493,7 @@ export async function ensureFfmpegInstalled(): Promise<boolean> {
     refreshBundledToolPaths();
 
     const manifest = APPLICATION_TOOL_MANIFEST.ffmpeg;
-    const managedStatus = getManagedToolInstaller('ffmpeg').status(manifest);
+    const managedStatus = await getManagedToolInstaller('ffmpeg').status(manifest);
     const requiresManagedRepair = Boolean(bundledFFmpegPath || bundledFFprobePath) && !managedStatus.verified;
     const ffmpegPath = getFFmpegPath();
     const ffprobePath = getFFprobePath();

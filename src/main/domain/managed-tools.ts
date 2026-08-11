@@ -92,8 +92,16 @@ function findFileRecursive(rootDir: string, fileName: string): string | null {
     return null;
 }
 
-function sha256File(filePath: string): string {
-    return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+function sha256File(filePath: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const hash = crypto.createHash('sha256');
+        const stream = fs.createReadStream(filePath);
+        stream.on('data', (chunk) => {
+            hash.update(chunk);
+        });
+        stream.once('error', reject);
+        stream.once('end', () => resolve(hash.digest('hex')));
+    });
 }
 
 function isRecord(value: unknown): value is ManagedToolRecord {
@@ -146,20 +154,20 @@ export class ManagedToolInstaller {
 
     constructor(private readonly options: ManagedToolInstallerOptions) {}
 
-    status(manifest: ExternalToolManifest, includeInstallState = true): ManagedToolStatus {
+    async status(manifest: ExternalToolManifest, includeInstallState = true): Promise<ManagedToolStatus> {
         if (includeInstallState && this.inFlight.has(manifest.id)) {
             return this.createStatus(manifest, 'installing', false);
         }
 
-        const recovery = this.recover(manifest, []);
+        const recovery = await this.recover(manifest, []);
         if (!recovery.success) {
             return this.createStatus(manifest, 'corrupt', false);
         }
-        return this.statusFromInspection(manifest);
+        return await this.statusFromInspection(manifest);
     }
 
-    install(manifest: ExternalToolManifest): Promise<ManagedToolInstallResult> {
-        const currentStatus = this.status(manifest);
+    async install(manifest: ExternalToolManifest): Promise<ManagedToolInstallResult> {
+        const currentStatus = await this.status(manifest);
         if (currentStatus.verified) {
             return Promise.resolve({ success: true, status: currentStatus, diagnostics: [] });
         }
@@ -170,19 +178,19 @@ export class ManagedToolInstaller {
         return this.start(manifest);
     }
 
-    reset(manifest: ExternalToolManifest): ManagedToolStatus {
+    async reset(manifest: ExternalToolManifest): Promise<ManagedToolStatus> {
         if (this.inFlight.has(manifest.id)) {
-            return this.status(manifest);
+            return await this.status(manifest);
         }
         const diagnostics: string[] = [];
-        const journal = this.readJournal();
+        const journal = await this.readJournal();
         if (isJournal(journal, this.options.installationDirectory)) {
             this.cleanup(journal.backupDirectory, true, diagnostics);
             this.cleanup(journal.stagingDirectory, true, diagnostics);
         }
         this.cleanup(this.options.installationDirectory, true, diagnostics);
         this.cleanup(this.journalPath(), false, diagnostics);
-        return this.status(manifest);
+        return await this.status(manifest);
     }
 
     private start(manifest: ExternalToolManifest): Promise<ManagedToolInstallResult> {
@@ -192,7 +200,7 @@ export class ManagedToolInstaller {
         let operation!: Promise<ManagedToolInstallResult>;
         operation = Promise.resolve()
             .then(() => this.installOnce(manifest))
-            .catch((error: unknown) => this.failure(manifest, 'download-failed', this.errorText(error), []))
+            .catch(async (error: unknown) => await this.failure(manifest, 'download-failed', this.errorText(error), []))
             .finally(() => {
                 if (this.inFlight.get(manifest.id) === operation) {
                     this.inFlight.delete(manifest.id);
@@ -209,29 +217,29 @@ export class ManagedToolInstaller {
         const diagnostics: string[] = [];
 
         try {
-            const recovery = this.recover(manifest, diagnostics);
+            const recovery = await this.recover(manifest, diagnostics);
             if (!recovery.success) {
-                return this.failure(manifest, recovery.error!, recovery.detail, diagnostics);
+                return await this.failure(manifest, recovery.error!, recovery.detail, diagnostics);
             }
 
             fs.mkdirSync(this.options.temporaryDirectory, { recursive: true });
             await this.options.download(manifest.sourceUrl, archivePath);
-            if (sha256File(archivePath).toLowerCase() !== manifest.sha256.toLowerCase()) {
-                return this.failure(manifest, 'archive-hash-mismatch', undefined, diagnostics);
+            if ((await sha256File(archivePath)).toLowerCase() !== manifest.sha256.toLowerCase()) {
+                return await this.failure(manifest, 'archive-hash-mismatch', undefined, diagnostics);
             }
 
             try {
                 await this.options.extract(archivePath, stagingDirectory);
             } catch (error) {
-                return this.failure(manifest, 'extract-failed', this.errorText(error), diagnostics);
+                return await this.failure(manifest, 'extract-failed', this.errorText(error), diagnostics);
             }
 
             const executablePaths = this.executablePaths(stagingDirectory, manifest.executables);
             if (!executablePaths) {
-                return this.failure(manifest, 'required-executable-missing', undefined, diagnostics);
+                return await this.failure(manifest, 'required-executable-missing', undefined, diagnostics);
             }
 
-            const executableHashes = Object.fromEntries(executablePaths.map(([name, executablePath]) => [name, sha256File(executablePath)]));
+            const executableHashes = Object.fromEntries(await Promise.all(executablePaths.map(async ([name, executablePath]) => [name, await sha256File(executablePath)] as const)));
             const record: ManagedToolRecord = {
                 id: manifest.id,
                 version: manifest.version,
@@ -242,21 +250,21 @@ export class ManagedToolInstaller {
             };
             fs.writeFileSync(path.join(stagingDirectory, RECORD_FILE_NAME), JSON.stringify(record));
 
-            const promotion = this.promote(manifest, stagingDirectory, diagnostics);
+            const promotion = await this.promote(manifest, stagingDirectory, diagnostics);
             if (!promotion.success) {
-                return this.failure(manifest, promotion.error!, promotion.detail, diagnostics);
+                return await this.failure(manifest, promotion.error!, promotion.detail, diagnostics);
             }
 
-            return { success: true, status: this.statusFromInspection(manifest), diagnostics };
+            return { success: true, status: await this.statusFromInspection(manifest), diagnostics };
         } catch (error) {
-            return this.failure(manifest, 'download-failed', this.errorText(error), diagnostics);
+            return await this.failure(manifest, 'download-failed', this.errorText(error), diagnostics);
         } finally {
             this.cleanup(archivePath, false, diagnostics);
             this.cleanup(stagingDirectory, true, diagnostics);
         }
     }
 
-    private promote(manifest: ExternalToolManifest, stagingDirectory: string, diagnostics: string[]): RecoveryResult {
+    private async promote(manifest: ExternalToolManifest, stagingDirectory: string, diagnostics: string[]): Promise<RecoveryResult> {
         const backupDirectory = `${this.options.installationDirectory}.backup-${crypto.randomUUID()}`;
         const journal: InstallationJournal = {
             installationDirectory: this.options.installationDirectory,
@@ -279,26 +287,26 @@ export class ManagedToolInstaller {
             this.cleanup(this.journalPath(), false, diagnostics);
             return { success: true };
         } catch (error) {
-            const recovery = this.recover(manifest, diagnostics);
+            const recovery = await this.recover(manifest, diagnostics);
             return recovery.success
                 ? { success: false, error: 'promotion-failed', detail: this.errorText(error) }
                 : recovery;
         }
     }
 
-    private recover(manifest: ExternalToolManifest, diagnostics: string[]): RecoveryResult {
-        const journal = this.readJournal();
+    private async recover(manifest: ExternalToolManifest, diagnostics: string[]): Promise<RecoveryResult> {
+        const journal = await this.readJournal();
         if (journal === undefined) {
             return { success: true };
         }
         if (!isJournal(journal, this.options.installationDirectory)) {
             return { success: false, error: 'recovery-journal-invalid', detail: 'Ungültiges Installationsjournal.' };
         }
-        return this.recoverJournal(manifest, journal, diagnostics);
+        return await this.recoverJournal(manifest, journal, diagnostics);
     }
 
-    private recoverJournal(manifest: ExternalToolManifest, journal: InstallationJournal, diagnostics: string[]): RecoveryResult {
-        const active = this.inspectInstallation(this.options.installationDirectory, manifest);
+    private async recoverJournal(manifest: ExternalToolManifest, journal: InstallationJournal, diagnostics: string[]): Promise<RecoveryResult> {
+        const active = await this.inspectInstallation(this.options.installationDirectory, manifest);
         if (active.strictValid || (journal.phase === 'staged' && active.layoutUsable)) {
             this.cleanup(journal.backupDirectory, true, diagnostics);
             this.cleanup(journal.stagingDirectory, true, diagnostics);
@@ -306,36 +314,48 @@ export class ManagedToolInstaller {
             return { success: true };
         }
 
-        const backup = this.inspectInstallation(journal.backupDirectory, manifest);
-        if (!backup.layoutUsable) {
+        const backup = await this.inspectInstallation(journal.backupDirectory, manifest);
+        if (backup.layoutUsable) {
+            let displacedDirectory: string | undefined;
+            try {
+                if (fs.existsSync(this.options.installationDirectory)) {
+                    displacedDirectory = `${this.options.installationDirectory}.recovery-${crypto.randomUUID()}`;
+                    this.rename(this.options.installationDirectory, displacedDirectory);
+                }
+                this.rename(journal.backupDirectory, this.options.installationDirectory);
+            } catch (error) {
+                return { success: false, error: 'recovery-restore-failed', detail: this.errorText(error) };
+            }
+
+            this.cleanup(journal.stagingDirectory, true, diagnostics);
+            if (displacedDirectory) {
+                this.cleanup(displacedDirectory, true, diagnostics);
+            }
+            this.cleanup(this.journalPath(), false, diagnostics);
+            return { success: true };
+        }
+
+        const staging = await this.inspectInstallation(journal.stagingDirectory, manifest);
+        if (journal.phase !== 'staged' || !staging.strictValid || fs.existsSync(this.options.installationDirectory)) {
             return { success: false, error: 'recovery-restore-failed', detail: 'Kein nutzbares Tool-Backup für die Wiederherstellung vorhanden.' };
         }
 
-        let displacedDirectory: string | undefined;
         try {
-            if (fs.existsSync(this.options.installationDirectory)) {
-                displacedDirectory = `${this.options.installationDirectory}.recovery-${crypto.randomUUID()}`;
-                this.rename(this.options.installationDirectory, displacedDirectory);
-            }
-            this.rename(journal.backupDirectory, this.options.installationDirectory);
+            this.rename(journal.stagingDirectory, this.options.installationDirectory);
         } catch (error) {
             return { success: false, error: 'recovery-restore-failed', detail: this.errorText(error) };
         }
 
-        this.cleanup(journal.stagingDirectory, true, diagnostics);
-        if (displacedDirectory) {
-            this.cleanup(displacedDirectory, true, diagnostics);
-        }
         this.cleanup(this.journalPath(), false, diagnostics);
         return { success: true };
     }
 
-    private statusFromInspection(manifest: ExternalToolManifest): ManagedToolStatus {
-        const inspection = this.inspectInstallation(this.options.installationDirectory, manifest);
+    private async statusFromInspection(manifest: ExternalToolManifest): Promise<ManagedToolStatus> {
+        const inspection = await this.inspectInstallation(this.options.installationDirectory, manifest);
         return this.createStatus(manifest, inspection.state, inspection.strictValid, inspection.version);
     }
 
-    private inspectInstallation(directory: string, manifest: ExternalToolManifest): InstallationInspection {
+    private async inspectInstallation(directory: string, manifest: ExternalToolManifest): Promise<InstallationInspection> {
         if (!fs.existsSync(directory)) {
             return { state: 'missing', version: manifest.version, layoutUsable: false, strictValid: false };
         }
@@ -345,7 +365,7 @@ export class ManagedToolInstaller {
             return { state: 'corrupt', version: manifest.version, layoutUsable: false, strictValid: false };
         }
 
-        const record = this.readRecord(directory);
+        const record = await this.readRecord(directory);
         if (!record || !isRecord(record)) {
             return { state: 'unverified', version: manifest.version, layoutUsable: true, strictValid: false };
         }
@@ -357,7 +377,7 @@ export class ManagedToolInstaller {
         }
 
         try {
-            const hashesMatch = executablePaths.every(([name, executablePath]) => sha256File(executablePath).toLowerCase() === record.executableHashes[name].toLowerCase());
+            const hashesMatch = (await Promise.all(executablePaths.map(async ([name, executablePath]) => (await sha256File(executablePath)).toLowerCase() === record.executableHashes[name].toLowerCase()))).every(Boolean);
             return hashesMatch
                 ? { state: 'verified', version: record.version, layoutUsable: true, strictValid: true }
                 : { state: 'corrupt', version: record.version, layoutUsable: true, strictValid: false };
@@ -374,20 +394,20 @@ export class ManagedToolInstaller {
         return paths as Array<[string, string]>;
     }
 
-    private readRecord(directory: string): unknown {
+    private async readRecord(directory: string): Promise<unknown> {
         try {
-            return JSON.parse(fs.readFileSync(path.join(directory, RECORD_FILE_NAME), 'utf8'));
+            return JSON.parse(await fs.promises.readFile(path.join(directory, RECORD_FILE_NAME), 'utf8'));
         } catch {
             return null;
         }
     }
 
-    private readJournal(): unknown | typeof INVALID_JOURNAL | undefined {
+    private async readJournal(): Promise<unknown | typeof INVALID_JOURNAL | undefined> {
         try {
             if (!fs.existsSync(this.journalPath())) {
                 return undefined;
             }
-            return JSON.parse(fs.readFileSync(this.journalPath(), 'utf8'));
+            return JSON.parse(await fs.promises.readFile(this.journalPath(), 'utf8'));
         } catch {
             return INVALID_JOURNAL;
         }
@@ -433,12 +453,12 @@ export class ManagedToolInstaller {
         };
     }
 
-    private failure(manifest: ExternalToolManifest, error: NonNullable<ManagedToolInstallResult['error']>, detail: string | undefined, diagnostics: string[]): ManagedToolInstallResult {
+    private async failure(manifest: ExternalToolManifest, error: NonNullable<ManagedToolInstallResult['error']>, detail: string | undefined, diagnostics: string[]): Promise<ManagedToolInstallResult> {
         return {
             success: false,
             error,
             detail,
-            status: this.statusFromInspection(manifest),
+            status: await this.statusFromInspection(manifest),
             diagnostics
         };
     }

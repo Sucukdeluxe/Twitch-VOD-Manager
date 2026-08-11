@@ -7977,9 +7977,9 @@ registerTrustedIpcHandler(ipcMain, 'run-preflight', isTrustedRendererEvent, () =
     return await runPreflight(autoFix);
 });
 
-ipcMain.handle('get-managed-tool-status', (event) => {
+ipcMain.handle('get-managed-tool-status', async (event) => {
     if (!isTrustedRendererEvent(event)) return null;
-    return getManagedToolStatuses();
+    return await getManagedToolStatuses();
 });
 
 ipcMain.handle('repair-managed-tools', async (event) => {
@@ -7987,9 +7987,9 @@ ipcMain.handle('repair-managed-tools', async (event) => {
     return await repairManagedTools();
 });
 
-ipcMain.handle('reset-managed-tools', (event) => {
+ipcMain.handle('reset-managed-tools', async (event) => {
     if (!isTrustedRendererEvent(event)) return null;
-    return resetManagedTools();
+    return await resetManagedTools();
 });
 
 registerTrustedIpcHandler(ipcMain, 'get-debug-log', isTrustedRendererEvent, () => Promise.resolve(''), async (_, lines: number = 200) => {

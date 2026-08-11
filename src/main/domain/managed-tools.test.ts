@@ -1,4 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const fileSystemSpies = vi.hoisted(() => ({
+    readFileSync: vi.fn()
+}));
+
+vi.mock('node:fs', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('node:fs')>();
+    fileSystemSpies.readFileSync.mockImplementation(actual.readFileSync);
+    return { ...actual, readFileSync: fileSystemSpies.readFileSync };
+});
+
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -187,7 +198,7 @@ describe('managed tool installer', () => {
         });
     });
 
-    it('marks a mismatched installed version as unverified', () => {
+    it('marks a mismatched installed version as unverified', async () => {
         const { installer, installPath } = createInstaller();
         writeExistingInstallation(installPath);
         fs.writeFileSync(path.join(installPath, '.tool-manifest.json'), JSON.stringify({
@@ -198,7 +209,7 @@ describe('managed tool installer', () => {
             sha256: sha256('old archive')
         }));
 
-        expect(installer.status(manifest())).toMatchObject({
+        await expect(installer.status(manifest())).resolves.toMatchObject({
             version: '8.3.0',
             state: 'unverified',
             verified: false
@@ -222,8 +233,7 @@ describe('managed tool installer', () => {
 
         const first = installer.repair(manifest());
         const second = installer.repair(manifest());
-        await Promise.resolve();
-        expect(download).toHaveBeenCalledTimes(1);
+        await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(1));
 
         releaseDownload?.();
         const [firstResult, secondResult] = await Promise.all([first, second]);
@@ -233,7 +243,7 @@ describe('managed tool installer', () => {
         expect(download).toHaveBeenCalledTimes(1);
     });
 
-    it('restores a valid previous tool at the active path after interruption between backup and promotion', () => {
+    it('restores a valid previous tool at the active path after interruption between backup and promotion', async () => {
         const { installer, installPath } = createInstaller();
         const backupPath = `${installPath}.backup-interrupted`;
         const stagingPath = `${installPath}.stage-interrupted`;
@@ -241,14 +251,14 @@ describe('managed tool installer', () => {
         writeVerifiedInstallation(stagingPath, 'new executable');
         writeInterruptedPromotionJournal(installPath, backupPath, stagingPath, 'backup-created');
 
-        expect(installer.status(manifest())).toMatchObject({ state: 'verified', verified: true });
+        await expect(installer.status(manifest())).resolves.toMatchObject({ state: 'verified', verified: true });
         expect(fs.readFileSync(path.join(installPath, 'bin', 'streamlink.exe'), 'utf8')).toBe('old executable');
         expect(fs.existsSync(backupPath)).toBe(false);
         expect(fs.existsSync(stagingPath)).toBe(false);
         expect(fs.existsSync(`${installPath}.transaction.json`)).toBe(false);
     });
 
-    it('keeps a valid promoted tool after interruption between promotion and journal cleanup', () => {
+    it('keeps a valid promoted tool after interruption between promotion and journal cleanup', async () => {
         const { installer, installPath } = createInstaller();
         const backupPath = `${installPath}.backup-interrupted`;
         const stagingPath = `${installPath}.stage-interrupted`;
@@ -256,7 +266,7 @@ describe('managed tool installer', () => {
         writeVerifiedInstallation(backupPath, 'old executable');
         writeInterruptedPromotionJournal(installPath, backupPath, stagingPath, 'backup-created');
 
-        expect(installer.status(manifest())).toMatchObject({ state: 'verified', verified: true });
+        await expect(installer.status(manifest())).resolves.toMatchObject({ state: 'verified', verified: true });
         expect(fs.readFileSync(path.join(installPath, 'bin', 'streamlink.exe'), 'utf8')).toBe('new executable');
         expect(fs.existsSync(backupPath)).toBe(false);
         expect(fs.existsSync(`${installPath}.transaction.json`)).toBe(false);
@@ -313,11 +323,61 @@ describe('managed tool installer', () => {
         expect(installed.success).toBe(true);
         fs.writeFileSync(path.join(installPath, 'bin', 'streamlink.exe'), 'changed executable');
 
-        expect(installer.status(manifest())).toMatchObject({ state: 'corrupt', verified: false });
+        await expect(installer.status(manifest())).resolves.toMatchObject({ state: 'corrupt', verified: false });
 
         const repaired = await installer.repair(manifest());
         expect(repaired.success).toBe(true);
         expect(repaired.status).toMatchObject({ state: 'verified', verified: true });
         expect(fs.readFileSync(path.join(installPath, 'bin', 'streamlink.exe'), 'utf8')).toBe('new executable');
+    });
+
+    it('promotes a verified staged first install after interruption before promotion', async () => {
+        const { installer, installPath, download } = createInstaller();
+        const stagingPath = `${installPath}.stage-interrupted`;
+        writeVerifiedInstallation(stagingPath, 'first executable');
+        writeInterruptedPromotionJournal(installPath, `${installPath}.backup-interrupted`, stagingPath, 'staged');
+
+        await expect(installer.status(manifest())).resolves.toMatchObject({ state: 'verified', verified: true });
+        expect(fs.readFileSync(path.join(installPath, 'bin', 'streamlink.exe'), 'utf8')).toBe('first executable');
+        expect(fs.existsSync(stagingPath)).toBe(false);
+        expect(fs.existsSync(`${installPath}.transaction.json`)).toBe(false);
+
+        const result = await installer.install(manifest());
+        expect(result.success).toBe(true);
+        expect(download).not.toHaveBeenCalled();
+    });
+
+    it('clears a staged first-install journal after promotion before its phase update', async () => {
+        const { installer, installPath, download } = createInstaller();
+        writeVerifiedInstallation(installPath, 'first executable');
+        writeInterruptedPromotionJournal(installPath, `${installPath}.backup-interrupted`, `${installPath}.stage-interrupted`, 'staged');
+
+        await expect(installer.status(manifest())).resolves.toMatchObject({ state: 'verified', verified: true });
+        expect(fs.readFileSync(path.join(installPath, 'bin', 'streamlink.exe'), 'utf8')).toBe('first executable');
+        expect(fs.existsSync(`${installPath}.transaction.json`)).toBe(false);
+
+        const result = await installer.install(manifest());
+        expect(result.success).toBe(true);
+        expect(download).not.toHaveBeenCalled();
+    });
+
+    it('streams multi-megabyte executable verification without readFileSync and detects corruption', async () => {
+        const multiMegabyteExecutable = Buffer.alloc(3 * 1024 * 1024, 0x5a);
+        const { installer, installPath } = createInstaller({
+            extract: async (_archivePath, destinationPath) => {
+                fs.mkdirSync(path.join(destinationPath, 'bin'), { recursive: true });
+                fs.writeFileSync(path.join(destinationPath, 'bin', 'streamlink.exe'), multiMegabyteExecutable);
+            }
+        });
+
+        expect((await installer.repair(manifest())).success).toBe(true);
+        fileSystemSpies.readFileSync.mockClear();
+
+        await expect(installer.status(manifest())).resolves.toMatchObject({ state: 'verified', verified: true });
+        expect(fileSystemSpies.readFileSync).not.toHaveBeenCalled();
+
+        fs.writeFileSync(path.join(installPath, 'bin', 'streamlink.exe'), Buffer.alloc(3 * 1024 * 1024, 0x2a));
+        await expect(installer.status(manifest())).resolves.toMatchObject({ state: 'corrupt', verified: false });
+        expect(fileSystemSpies.readFileSync).not.toHaveBeenCalled();
     });
 });
