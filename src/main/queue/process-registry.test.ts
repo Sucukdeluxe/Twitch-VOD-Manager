@@ -12,7 +12,7 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 function createResource(wait: Promise<void> = Promise.resolve()): QueueProcessResource {
     return {
         kill: vi.fn(),
-        wait,
+        wait: () => wait,
         pause: vi.fn(),
         resume: vi.fn(),
         cancel: vi.fn(async () => undefined),
@@ -67,6 +67,37 @@ describe('QueueProcessRegistry', () => {
         expect(postProcessing.resume).toHaveBeenCalledOnce();
         expect(unrelated.pause).not.toHaveBeenCalled();
         expect(unrelated.resume).not.toHaveBeenCalled();
+        expect(registry.isPaused('item-a')).toBe(false);
+    });
+
+    it('keeps pause latched until existing and newly registered resources finish pausing', async () => {
+        const registry = new QueueProcessRegistry();
+        const firstPaused = deferred();
+        const latePaused = deferred();
+        const first = createResource();
+        const late = createResource();
+        first.pause = vi.fn(() => firstPaused.promise);
+        late.pause = vi.fn(() => latePaused.promise);
+
+        registry.register('item-a', 'merge', first);
+        const pausing = registry.pauseItem('item-a');
+        registry.register('item-a', 'post-processing', late);
+        const resuming = registry.resumeItem('item-a');
+
+        await Promise.resolve();
+        expect(registry.isPaused('item-a')).toBe(true);
+        expect(first.resume).not.toHaveBeenCalled();
+        expect(late.pause).toHaveBeenCalledOnce();
+
+        firstPaused.resolve();
+        await Promise.resolve();
+        expect(registry.isPaused('item-a')).toBe(true);
+
+        latePaused.resolve();
+        await Promise.all([pausing, resuming]);
+
+        expect(first.resume).toHaveBeenCalledOnce();
+        expect(late.resume).toHaveBeenCalledOnce();
         expect(registry.isPaused('item-a')).toBe(false);
     });
 

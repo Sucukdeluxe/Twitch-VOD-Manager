@@ -19,7 +19,7 @@ import { tBackend as tBackendCore, type BackendMessageKey } from './main/domain/
 import { watchRendererChanges } from './main/dev-reload';
 import { createPausableOutput, type PausableOutput } from './main/domain/pausable-output';
 import { PartialDownloadRegistry } from './main/domain/partial-download';
-import { QueueProcessRegistry, QueueRunLifecycle } from './main/queue/process-registry';
+import { QueueProcessRegistry, QueueRunLifecycle, waitForChildProcessExit } from './main/queue/process-registry';
 import type { DbHandle } from './main/infra/db';
 import {
     normalizeLogin,
@@ -3348,41 +3348,51 @@ async function concatVideoFiles(inputFiles: string[], outputFile: string, itemId
         outputFile
     ];
 
-    return await new Promise<boolean>((resolve) => {
-        const proc = spawn(ffmpeg, args, { windowsHide: true });
-        const registration = itemId
-            ? queueProcessRegistry.register(itemId, 'post-processing', {
-                kill: () => proc.kill(),
-                wait: waitForChildProcessClose(proc),
-                cleanup: () => {
-                    try { fs.rmSync(outputFile, { force: true }); } catch { }
-                    try { fs.rmSync(listFile, { force: true }); } catch { }
-                },
-            })
-            : null;
-        let stderrBuf = '';
-        proc.stderr?.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString(); });
-        proc.on('close', (code) => {
-            registration?.release();
-            try { fs.unlinkSync(listFile); } catch { /* ignore */ }
-            if (code === 0 && (!itemId || !queueProcessRegistry.isCancelled(itemId)) && fs.existsSync(outputFile) && fs.statSync(outputFile).size > 0) {
-                appendDebugLog('concat-ok', { output: outputFile, parts: inputFiles.length });
-                resolve(true);
-            } else {
-                appendDebugLog('concat-failed', { code, stderrTail: stderrBuf.slice(-400) });
-                try {
-                    if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
-                } catch { /* ignore */ }
-                resolve(false);
-            }
-        });
-        proc.on('error', (err) => {
-            registration?.release();
-            try { fs.unlinkSync(listFile); } catch { /* ignore */ }
-            appendDebugLog('concat-spawn-error', String(err));
-            resolve(false);
-        });
-    });
+    try {
+        while (true) {
+            const success = await new Promise<boolean>((resolve) => {
+                const proc = spawn(ffmpeg, args, { windowsHide: true });
+                const registration = itemId
+                    ? queueProcessRegistry.register(itemId, 'post-processing', {
+                        kill: () => proc.kill(),
+                        wait: () => waitForChildProcessExit(proc),
+                        pause: async () => {
+                            try { proc.kill(); } catch { }
+                            await waitForChildProcessExit(proc);
+                        },
+                        cleanup: () => {
+                            try { fs.rmSync(outputFile, { force: true }); } catch { }
+                            try { fs.rmSync(listFile, { force: true }); } catch { }
+                        },
+                    })
+                    : null;
+                let stderrBuf = '';
+                proc.stderr?.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString(); });
+                proc.on('close', (code) => {
+                    registration?.release();
+                    if (code === 0 && (!itemId || (!queueProcessRegistry.isCancelled(itemId) && !queueProcessRegistry.isPaused(itemId))) && fs.existsSync(outputFile) && fs.statSync(outputFile).size > 0) {
+                        appendDebugLog('concat-ok', { output: outputFile, parts: inputFiles.length });
+                        resolve(true);
+                    } else {
+                        appendDebugLog('concat-failed', { code, stderrTail: stderrBuf.slice(-400) });
+                        try { fs.rmSync(outputFile, { force: true }); } catch { }
+                        resolve(false);
+                    }
+                });
+                proc.on('error', (err) => {
+                    registration?.release();
+                    appendDebugLog('concat-spawn-error', String(err));
+                    resolve(false);
+                });
+            });
+            if (success) return true;
+            if (!itemId || !queueProcessRegistry.isPaused(itemId)) return false;
+            await queueProcessRegistry.whenResumed(itemId);
+            if (queueProcessRegistry.isCancelled(itemId)) return false;
+        }
+    } finally {
+        try { fs.rmSync(listFile, { force: true }); } catch { }
+    }
 }
 
 async function cutVideo(
@@ -3590,8 +3600,11 @@ async function mergeVideos(
             const registration = itemId
                 ? queueProcessRegistry.register(itemId, 'merge', {
                     kill: () => proc.kill(),
-                    wait: waitForChildProcessClose(proc),
-                    pause: () => proc.kill(),
+                    wait: () => waitForChildProcessExit(proc),
+                    pause: async () => {
+                        try { proc.kill(); } catch { }
+                        await waitForChildProcessExit(proc);
+                    },
                     cleanup: () => {
                         try { fs.rmSync(outputFile, { force: true }); } catch { }
                         try { fs.rmSync(concatFile, { force: true }); } catch { }
@@ -3707,8 +3720,11 @@ async function splitMergedFile(
             const registration = itemId
                 ? queueProcessRegistry.register(itemId, 'split', {
                     kill: () => proc.kill(),
-                    wait: waitForChildProcessClose(proc),
-                    pause: () => proc.kill(),
+                    wait: () => waitForChildProcessExit(proc),
+                    pause: async () => {
+                        try { proc.kill(); } catch { }
+                        await waitForChildProcessExit(proc);
+                    },
                     cleanup: () => { try { fs.rmSync(outputFile, { force: true }); } catch { } },
                 })
                 : null;
@@ -3806,7 +3822,7 @@ function downloadVODPart(
         const outputFinished = output.finished.then(() => null, (error) => error);
         const processRegistration = queueProcessRegistry.register(itemId, 'streamlink', {
             kill: () => proc.kill(),
-            wait: waitForChildProcessClose(proc),
+            wait: () => waitForChildProcessExit(proc),
             pause: () => output.pause(),
             resume: () => output.resume(),
             cancel: () => output.cancel(),
@@ -8285,22 +8301,6 @@ let shutdownCleanupDone = false;
 let quitAfterCleanup = false;
 let shutdownPromise: Promise<void> | null = null;
 
-function waitForChildProcessClose(process: ChildProcess | null, timeoutMs = 5000): Promise<void> {
-    if (!process || process.exitCode !== null || process.signalCode !== null) return Promise.resolve();
-    return new Promise((resolve) => {
-        let settled = false;
-        const finish = (): void => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            resolve();
-        };
-        const timer = setTimeout(finish, timeoutMs);
-        process.once('close', finish);
-        process.once('error', finish);
-    });
-}
-
 async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Promise<void> {
     if (shutdownCleanupDone) return;
     shutdownCleanupDone = true;
@@ -8348,7 +8348,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
     if (currentEditorProcess) {
         const editorProcess = currentEditorProcess;
         try { editorProcess.kill(); } catch { /* already exited */ }
-        await waitForChildProcessClose(editorProcess);
+        await waitForChildProcessExit(editorProcess);
         currentEditorProcess = null;
     }
 
@@ -8357,7 +8357,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
     for (const process of exportProcesses) {
         try { process.kill(); } catch { }
     }
-    await Promise.all(exportProcesses.map((process) => waitForChildProcessClose(process)));
+    await Promise.all(exportProcesses.map((process) => waitForChildProcessExit(process)));
     if (currentCutterProcess && exportProcesses.includes(currentCutterProcess)) currentCutterProcess = null;
     const mediaProcesses = [...currentCutterMediaProcesses, ...currentCutterWaveformProcesses, ...currentCutterProbeProcesses, ...currentCutterInfoProcesses, ...currentCutterPreviewProcesses];
     cancelCutterMediaPreparation();
@@ -8367,7 +8367,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
     for (const process of currentCutterInfoProcesses) {
         try { process.kill(); } catch { }
     }
-    await Promise.all(mediaProcesses.map((process) => waitForChildProcessClose(process)));
+    await Promise.all(mediaProcesses.map((process) => waitForChildProcessExit(process)));
     removeCutterPreviewDirectory(cutterMediaJob?.previewDirectory || null);
     if (currentCutterPartialFile) {
         try { fs.rmSync(currentCutterPartialFile, { force: true }); } catch { }

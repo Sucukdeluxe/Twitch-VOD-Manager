@@ -1,8 +1,25 @@
+import type { ChildProcess } from 'node:child_process';
+
 export type QueueProcessPhase = 'streamlink' | 'merge' | 'split' | 'post-processing';
+
+export function waitForChildProcessExit(process: ChildProcess | null, forceKillAfterMs = 5000): Promise<void> {
+    if (!process || process.exitCode !== null || process.signalCode !== null) return Promise.resolve();
+    return new Promise((resolve) => {
+        const finish = (): void => {
+            clearTimeout(timer);
+            resolve();
+        };
+        const timer = setTimeout(() => {
+            if (process.exitCode !== null || process.signalCode !== null) return;
+            try { process.kill('SIGKILL'); } catch { }
+        }, forceKillAfterMs);
+        process.once('close', finish);
+    });
+}
 
 export interface QueueProcessResource {
     kill?: () => unknown;
-    wait?: Promise<unknown>;
+    wait?: () => Promise<unknown>;
     pause?: () => unknown | Promise<unknown>;
     resume?: () => unknown | Promise<unknown>;
     cancel?: () => unknown | Promise<unknown>;
@@ -27,6 +44,7 @@ export class QueueProcessRegistry {
     private readonly pausedItems = new Set<string>();
     private readonly cancellationWaiters = new Map<string, Set<() => void>>();
     private readonly resumeWaiters = new Map<string, Set<() => void>>();
+    private readonly pauseRuns = new Map<string, Promise<void>>();
     private readonly settling = new Set<Promise<void>>();
     private shuttingDown = false;
 
@@ -43,6 +61,7 @@ export class QueueProcessRegistry {
             this.groups.set(itemId, group);
         }
         group.add(entry);
+        if (this.pausedItems.has(itemId)) this.enqueuePause(itemId, [entry]);
 
         return {
             accepted: true,
@@ -52,13 +71,21 @@ export class QueueProcessRegistry {
 
     async pauseItem(itemId: string): Promise<void> {
         this.pausedItems.add(itemId);
-        await this.invokeItem(itemId, 'pause');
+        await this.enqueuePause(itemId, [...(this.groups.get(itemId) || [])]);
     }
 
     async resumeItem(itemId: string): Promise<void> {
-        await this.invokeItem(itemId, 'resume');
-        this.pausedItems.delete(itemId);
-        this.resolveWaiters(this.resumeWaiters, itemId);
+        while (this.pausedItems.has(itemId) && !this.cancelledItems.has(itemId)) {
+            const pauseRun = this.pauseRuns.get(itemId);
+            if (pauseRun) await pauseRun;
+            if (!this.pausedItems.has(itemId) || this.cancelledItems.has(itemId)) return;
+            if (pauseRun !== this.pauseRuns.get(itemId)) continue;
+            await this.invokeItem(itemId, 'resume');
+            if (pauseRun !== this.pauseRuns.get(itemId)) continue;
+            this.pausedItems.delete(itemId);
+            this.pauseRuns.delete(itemId);
+            this.resolveWaiters(this.resumeWaiters, itemId);
+        }
     }
 
     async cancelItem(itemId: string): Promise<void> {
@@ -75,6 +102,7 @@ export class QueueProcessRegistry {
         this.groups.delete(itemId);
         this.cancellationWaiters.delete(itemId);
         this.resumeWaiters.delete(itemId);
+        this.pauseRuns.delete(itemId);
         this.pausedItems.delete(itemId);
     }
 
@@ -86,6 +114,7 @@ export class QueueProcessRegistry {
         this.pausedItems.delete(itemId);
         this.cancellationWaiters.delete(itemId);
         this.resumeWaiters.delete(itemId);
+        this.pauseRuns.delete(itemId);
     }
 
     isCancelled(itemId: string): boolean {
@@ -138,7 +167,7 @@ export class QueueProcessRegistry {
         entry.stopping = (async () => {
             try { entry.resource.kill?.(); } catch { }
             try { await entry.resource.cancel?.(); } catch { }
-            try { await entry.resource.wait; } catch { }
+            try { await entry.resource.wait?.(); } catch { }
             try { await entry.resource.cleanup?.(); } catch { }
             this.release(entry);
         })();
@@ -148,6 +177,18 @@ export class QueueProcessRegistry {
     private trackSettlement(settlement: Promise<void>): void {
         this.settling.add(settlement);
         void settlement.finally(() => this.settling.delete(settlement));
+    }
+
+    private enqueuePause(itemId: string, entries: RegisteredResource[]): Promise<void> {
+        const previous = this.pauseRuns.get(itemId) || Promise.resolve();
+        const pauseRun = Promise.allSettled([
+            previous,
+            ...entries.map(async ({ resource }) => {
+                await resource.pause?.();
+            }),
+        ]).then(() => undefined);
+        this.pauseRuns.set(itemId, pauseRun);
+        return pauseRun;
     }
 
     private release(entry: RegisteredResource): void {
