@@ -4,6 +4,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { openDatabase, type DbHandle } from '../infra/db';
 import { migrateJsonToSqlite } from './migrator';
+import { MemorySecureStorage } from '../infra/secure-storage';
+import { createSecretStore } from './secret-store';
 
 let tmpDir: string;
 let appDataDir: string;
@@ -33,8 +35,8 @@ describe('migrateJsonToSqlite', () => {
         expect(result.downloadedVodsCount).toBe(0);
         expect(result.streamersCount).toBe(0);
 
-        const marker = db.get<{ name: string }>('SELECT name FROM migrations_applied WHERE name = ?', ['v4-to-v5-jsons']);
-        expect(marker?.name).toBe('v4-to-v5-jsons');
+        const marker = db.get<{ name: string }>('SELECT name FROM migrations_applied WHERE name = ?', ['authoritative-state-v1']);
+        expect(marker?.name).toBe('authoritative-state-v1');
     });
 
     test('migrates config.json keys into config_kv', () => {
@@ -118,5 +120,121 @@ describe('migrateJsonToSqlite', () => {
         expect(result.configMigrated).toBe(false);
         expect(result.errors.length).toBeGreaterThan(0);
         expect(result.errors[0].source).toBe('config.json');
+        expect(db.get('SELECT name FROM migrations_applied WHERE name = ?', ['authoritative-state-v1'])).toBeUndefined();
+    });
+
+    test('rolls back all records and marker when migration is interrupted', () => {
+        writeJson('config.json', { language: 'de', metadata_cache_minutes: 30 });
+        writeJson('download_queue.json', [{ id: 'q1', status: 'pending', title: 'Queue item' }]);
+        let queueInsertReached = false;
+        const interruptedDb: DbHandle = {
+            ...db,
+            run(sql, params) {
+                if (sql.includes('INSERT OR REPLACE INTO queue_items')) {
+                    queueInsertReached = true;
+                    throw new Error('simulated interruption');
+                }
+                db.run(sql, params);
+            },
+        };
+
+        const result = migrateJsonToSqlite({ db: interruptedDb, appDataDir });
+
+        expect(queueInsertReached).toBe(true);
+        expect(result.errors).toEqual([{ source: 'migration', message: 'simulated interruption' }]);
+        expect(db.all('SELECT * FROM config_kv')).toEqual([]);
+        expect(db.all('SELECT * FROM queue_items')).toEqual([]);
+        expect(db.get('SELECT name FROM migrations_applied WHERE name = ?', ['authoritative-state-v1'])).toBeUndefined();
+    });
+
+    test('rolls back config queue and secrets when the migration marker cannot be written', () => {
+        const configPath = writeJson('config.json', { language: 'de', client_secret: 'must-survive' });
+        writeJson('download_queue.json', [{ id: 'q1', status: 'pending' }]);
+        const interruptedDb: DbHandle = {
+            ...db,
+            run(sql, params) {
+                if (sql.includes('INSERT INTO migrations_applied')) throw new Error('marker unavailable');
+                db.run(sql, params);
+            },
+        };
+        const secrets = createSecretStore(interruptedDb, new MemorySecureStorage());
+
+        const result = migrateJsonToSqlite({ db: interruptedDb, appDataDir, secrets });
+
+        expect(result.errors).toEqual([{ source: 'migration', message: 'marker unavailable' }]);
+        expect(db.all('SELECT * FROM config_kv')).toEqual([]);
+        expect(db.all('SELECT * FROM queue_items')).toEqual([]);
+        expect(db.all('SELECT * FROM app_secrets')).toEqual([]);
+        expect(db.get('SELECT name FROM migrations_applied WHERE name = ?', ['authoritative-state-v1'])).toBeUndefined();
+        expect(fs.readFileSync(configPath, 'utf-8')).toContain('must-survive');
+    });
+
+    test('imports legacy JSON once and ignores later JSON changes after restart', () => {
+        const configPath = writeJson('config.json', { language: 'de' });
+        migrateJsonToSqlite({ db, appDataDir });
+        fs.writeFileSync(configPath, JSON.stringify({ language: 'en' }), 'utf-8');
+
+        const second = migrateJsonToSqlite({ db, appDataDir });
+        const language = db.get<{ value: string }>('SELECT value FROM config_kv WHERE key = ?', ['language']);
+
+        expect(second.alreadyApplied).toBe(true);
+        expect(JSON.parse(language!.value)).toBe('de');
+    });
+
+    test('does not let the former shadow-migration marker skip authoritative secret import', () => {
+        const configPath = writeJson('config.json', { language: 'de', client_secret: 'legacy-secret' });
+        db.run('INSERT INTO migrations_applied(name, payload) VALUES (?, ?)', ['v4-to-v5-jsons', '{}']);
+        const secrets = createSecretStore(db, new MemorySecureStorage());
+
+        const result = migrateJsonToSqlite({ db, appDataDir, secrets });
+
+        expect(result.alreadyApplied).toBe(false);
+        expect(result.errors).toEqual([]);
+        expect(secrets.get('twitch_client_secret')).toBe('legacy-secret');
+        expect(fs.readFileSync(configPath, 'utf-8')).not.toContain('legacy-secret');
+    });
+
+    test('migrates plaintext secrets into encrypted versioned records and scrubs JSON', () => {
+        const configPath = writeJson('config.json', {
+            client_secret: 'legacy-client-secret',
+            discord_webhook_url: 'https://discord.com/api/webhooks/legacy',
+            language: 'de',
+        });
+        const secrets = createSecretStore(db, new MemorySecureStorage());
+
+        const result = migrateJsonToSqlite({ db, appDataDir, secrets });
+
+        expect(result.errors).toEqual([]);
+        expect(secrets.get('twitch_client_secret')).toBe('legacy-client-secret');
+        expect(secrets.get('discord_webhook_url')).toBe('https://discord.com/api/webhooks/legacy');
+        expect(fs.readFileSync(configPath, 'utf-8')).not.toContain('legacy-client-secret');
+        expect(fs.readFileSync(configPath + '.v4-backup', 'utf-8')).not.toContain('/webhooks/legacy');
+        expect(db.get('SELECT key FROM config_kv WHERE key = ?', ['discord_webhook_url'])).toBeUndefined();
+    });
+
+    test('keeps plaintext legacy secrets untouched when production encryption is unavailable', () => {
+        const configPath = writeJson('config.json', { client_secret: 'must-survive', language: 'de' });
+        const secrets = createSecretStore(db, new MemorySecureStorage());
+
+        const result = migrateJsonToSqlite({ db, appDataDir, secrets, requireEncryption: true });
+
+        expect(result.errors).toEqual([{ source: 'migration', message: 'OS secret encryption is unavailable' }]);
+        expect(fs.readFileSync(configPath, 'utf-8')).toContain('must-survive');
+        expect(secrets.get('twitch_client_secret')).toBeNull();
+        expect(db.get('SELECT name FROM migrations_applied WHERE name = ?', ['authoritative-state-v1'])).toBeUndefined();
+    });
+
+    test('keeps plaintext legacy secrets when the sanitized backup cannot be published', () => {
+        const configPath = writeJson('config.json', { client_secret: 'must-survive', language: 'de' });
+        fs.mkdirSync(`${configPath}.v4-backup`);
+        const secrets = createSecretStore(db, new MemorySecureStorage());
+
+        const result = migrateJsonToSqlite({ db, appDataDir, secrets });
+
+        expect(result.errors).toHaveLength(1);
+        expect(fs.readFileSync(configPath, 'utf-8')).toContain('must-survive');
+        expect(db.all('SELECT * FROM config_kv')).toEqual([]);
+        expect(db.all('SELECT * FROM app_secrets')).toEqual([]);
+        expect(db.get('SELECT name FROM migrations_applied WHERE name = ?', ['authoritative-state-v1'])).toBeUndefined();
     });
 });

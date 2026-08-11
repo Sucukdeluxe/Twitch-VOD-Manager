@@ -102,6 +102,11 @@ contextBridge.exposeInMainWorld('api', {
     // Config
     getConfig: () => ipcRenderer.invoke('get-config'),
     saveConfig: (config: any, fileCapability?: string) => ipcRenderer.invoke('save-config', config, fileCapability),
+    getSecretStatus: () => ipcRenderer.invoke('get-secret-status'),
+    setClientSecret: (value: string) => ipcRenderer.invoke('set-client-secret', value),
+    clearClientSecret: () => ipcRenderer.invoke('clear-client-secret'),
+    setDiscordWebhook: (value: string) => ipcRenderer.invoke('set-discord-webhook', value),
+    clearDiscordWebhook: () => ipcRenderer.invoke('clear-discord-webhook'),
 
     // Auth
     login: () => ipcRenderer.invoke('login'),

@@ -34,6 +34,10 @@ export function openDatabase(filePath: string): DbHandle {
     db.pragma('foreign_keys = ON');
 
     runMultiStatement(db, SCHEMA_V5_SQL);
+    const queueColumns = db.prepare('PRAGMA table_info(queue_items)').all() as Array<{ name: string }>;
+    if (!queueColumns.some((column) => column.name === 'queue_position')) {
+        db.prepare('ALTER TABLE queue_items ADD COLUMN queue_position INTEGER NOT NULL DEFAULT 0').run();
+    }
 
     const handle: DbHandle = {
         run(sql, params) {

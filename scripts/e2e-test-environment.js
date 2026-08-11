@@ -7,7 +7,6 @@ const OFFLINE_PROXY = 'http://127.0.0.1:1';
 function buildSafeConfig(downloadsDir, overrides = {}) {
   return {
     client_id: '',
-    client_secret: '',
     download_path: downloadsDir,
     streamers: [],
     theme: 'twitch',
@@ -32,7 +31,6 @@ function buildSafeConfig(downloadsDir, overrides = {}) {
     auto_record_poll_seconds: 90,
     download_chat_replay: false,
     capture_live_chat: false,
-    discord_webhook_url: '',
     discord_notify_live_start: false,
     discord_notify_live_end: false,
     discord_notify_vod_complete: false,
@@ -50,14 +48,12 @@ function buildSafeConfig(downloadsDir, overrides = {}) {
     delete_parts_after_merge: false,
     ...overrides,
     client_id: '',
-    client_secret: '',
     download_path: downloadsDir,
     streamers: [],
     auto_resume_queue_on_startup: false,
     auto_record_streamers: [],
     download_chat_replay: false,
     capture_live_chat: false,
-    discord_webhook_url: '',
     discord_notify_live_start: false,
     discord_notify_live_end: false,
     discord_notify_vod_complete: false,
@@ -112,6 +108,17 @@ function writeE2eConfig(environment, overrides = {}) {
 }
 
 function readE2eConfig(environment) {
+  const databasePath = path.join(environment.appDataDir, 'app.db');
+  if (fs.existsSync(databasePath)) {
+    const Database = require('better-sqlite3');
+    const database = new Database(databasePath, { readonly: true });
+    try {
+      const rows = database.prepare('SELECT key, value FROM config_kv').all();
+      return Object.fromEntries(rows.map((row) => [row.key, JSON.parse(row.value)]));
+    } finally {
+      database.close();
+    }
+  }
   return JSON.parse(fs.readFileSync(environment.configFile, 'utf8'));
 }
 

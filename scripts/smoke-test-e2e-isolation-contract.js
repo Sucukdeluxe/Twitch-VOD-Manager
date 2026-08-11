@@ -70,6 +70,7 @@ function inspectHelper() {
   const {
     createE2eEnvironment,
     getElectronLaunchOptions,
+    readE2eConfig,
     cleanupE2eEnvironment
   } = require(HELPER_FILE);
   const environment = createE2eEnvironment('isolation-contract');
@@ -111,8 +112,16 @@ function inspectHelper() {
     if (config.auto_cleanup_enabled !== false) {
       failures.push('Seed config enables automatic cleanup');
     }
-    if (config.discord_webhook_url !== '') {
-      failures.push('Seed config contains a webhook');
+    if ('client_secret' in config || 'discord_webhook_url' in config) {
+      failures.push('Seed config contains secret fields');
+    }
+    const Database = require('better-sqlite3');
+    const database = new Database(path.join(environment.appDataDir, 'app.db'));
+    database.exec('CREATE TABLE config_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)');
+    database.prepare('INSERT INTO config_kv(key, value, updated_at) VALUES (?, ?, ?)').run('language', JSON.stringify('sqlite'), 1);
+    database.close();
+    if (readE2eConfig(environment).language !== 'sqlite') {
+      failures.push('Helper did not read authoritative SQLite config');
     }
     if (!Array.isArray(queue) || queue.length !== 0) {
       failures.push('Seed queue is not empty');

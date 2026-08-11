@@ -1,4 +1,6 @@
 const { _electron: electron } = require('playwright');
+const fs = require('fs');
+const path = require('path');
 const {
   createE2eEnvironment,
   writeE2eConfig,
@@ -86,6 +88,9 @@ async function run() {
     await app.close();
     app = null;
 
+    for (const filename of ['app.db', 'app.db-wal', 'app.db-shm']) {
+      fs.rmSync(path.join(environment.appDataDir, filename), { force: true });
+    }
     writeE2eConfig(environment, {
       download_mode: 'full',
       part_minutes: 120

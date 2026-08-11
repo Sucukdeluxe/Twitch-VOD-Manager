@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS config_kv (
 
 CREATE TABLE IF NOT EXISTS queue_items (
     id TEXT PRIMARY KEY,
+    queue_position INTEGER NOT NULL DEFAULT 0,
     streamer_login TEXT,
     vod_id TEXT,
     clip_id TEXT,
@@ -37,6 +38,13 @@ CREATE TABLE IF NOT EXISTS queue_items (
 CREATE INDEX IF NOT EXISTS idx_queue_status ON queue_items(status);
 CREATE INDEX IF NOT EXISTS idx_queue_streamer ON queue_items(streamer_login);
 CREATE INDEX IF NOT EXISTS idx_queue_created ON queue_items(created_at);
+
+CREATE TABLE IF NOT EXISTS app_secrets (
+    key TEXT PRIMARY KEY,
+    version INTEGER NOT NULL,
+    encrypted_value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
 
 CREATE TABLE IF NOT EXISTS downloaded_vods (
     vod_id TEXT PRIMARY KEY,

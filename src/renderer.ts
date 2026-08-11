@@ -5,13 +5,15 @@ const QUEUE_SYNC_HIDDEN_MS = 9000;
 const QUEUE_SYNC_RECENT_ACTIVITY_WINDOW_MS = 15000;
 
 async function init(): Promise<void> {
-    const [loadedConfig, initialQueue, isDown, version] = await Promise.all([
+    const [loadedConfig, loadedSecretStatus, initialQueue, isDown, version] = await Promise.all([
         window.api.getConfig(),
+        window.api.getSecretStatus(),
         window.api.getQueue(),
         window.api.isDownloading(),
         window.api.getVersion()
     ]);
     config = loadedConfig;
+    secretStatus = loadedSecretStatus;
     const language = setLanguage((config.language as string) || 'en');
     config.language = language;
     queue = Array.isArray(initialQueue) ? initialQueue : [];
@@ -24,7 +26,7 @@ async function init(): Promise<void> {
     document.title = `${UI_TEXT.appName} v${version}`;
 
     byId<HTMLInputElement>('clientId').value = config.client_id ?? '';
-    byId<HTMLInputElement>('clientSecret').value = config.client_secret ?? '';
+    byId<HTMLInputElement>('clientSecret').value = secretStatus.clientSecretConfigured ? SECRET_INPUT_MASK : '';
     byId<HTMLInputElement>('downloadPath').value = config.download_path ?? '';
     byId<HTMLSelectElement>('themeSelect').value = config.theme ?? 'twitch';
     byId<HTMLSelectElement>('languageSelect').value = config.language ?? 'en';
@@ -182,7 +184,7 @@ async function init(): Promise<void> {
         else startStatsBarPolling();
     });
 
-    if (config.client_id && config.client_secret) {
+    if (config.client_id && secretStatus.clientSecretConfigured) {
         await connect();
     } else {
         updateStatus(UI_TEXT.status.noLogin, false);

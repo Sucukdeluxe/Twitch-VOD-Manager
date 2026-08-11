@@ -50,6 +50,11 @@ import {
 } from './main/domain/file-capability';
 import { registerTrustedIpcHandler } from './main/domain/privileged-ipc';
 import { createRendererQueueItem, getMergeGroupCleanupPaths } from './main/domain/renderer-queue-input';
+import { createAppStateStore, type AppStateStore } from './main/domain/app-state-store';
+import { createExportableConfig } from './main/domain/config-export';
+import { resolveSecretInputUpdate } from './main/domain/secret-input';
+import { createSecretStore, type SecretStore } from './main/domain/secret-store';
+import { createElectronSecureStorage } from './main/infra/secure-storage';
 import {
     setDebugLogFn, initToolDirs,
     getStreamlinkPath, getStreamlinkCommand, getFFmpegPath, getFFprobePath,
@@ -74,8 +79,6 @@ const GITHUB_RELEASES_DOWNLOAD_BASE_URL = 'https://github.com/Sucukdeluxe/Twitch
 
 // Paths
 const APPDATA_DIR = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'Twitch_VOD_Manager');
-const CONFIG_FILE = path.join(APPDATA_DIR, 'config.json');
-const QUEUE_FILE = path.join(APPDATA_DIR, 'download_queue.json');
 const DEBUG_LOG_FILE = path.join(APPDATA_DIR, 'debug.log');
 const PARTIAL_DOWNLOADS_FILE = path.join(APPDATA_DIR, 'partial-downloads.json');
 const TOOLS_DIR = path.join(APPDATA_DIR, 'tools');
@@ -140,7 +143,6 @@ const partialDownloadRegistry = new PartialDownloadRegistry(PARTIAL_DOWNLOADS_FI
 // ==========================================
 interface Config {
     client_id: string;
-    client_secret: string;
     download_path: string;
     streamers: string[];
     streamer_display_names: Record<string, string>;
@@ -167,7 +169,6 @@ interface Config {
     auto_record_poll_seconds: number;
     download_chat_replay: boolean;
     capture_live_chat: boolean;
-    discord_webhook_url: string;
     discord_notify_live_start: boolean;
     discord_notify_live_end: boolean;
     discord_notify_vod_complete: boolean;
@@ -330,7 +331,6 @@ interface ReleaseUpdateInfo {
 // ==========================================
 const defaultConfig: Config = {
     client_id: '',
-    client_secret: '',
     download_path: DEFAULT_DOWNLOAD_PATH,
     streamers: [],
     streamer_display_names: {},
@@ -357,7 +357,6 @@ const defaultConfig: Config = {
     auto_record_poll_seconds: 90,
     download_chat_replay: false,
     capture_live_chat: false,
-    discord_webhook_url: '',
     discord_notify_live_start: false,
     discord_notify_live_end: false,
     discord_notify_vod_complete: false,
@@ -425,10 +424,6 @@ function normalizeConfigTemplates(input: Config): Config {
         auto_record_poll_seconds: normalizeAutoRecordPollSeconds(input.auto_record_poll_seconds),
         download_chat_replay: input.download_chat_replay === true,
         capture_live_chat: input.capture_live_chat === true,
-        // Webhook URL is stored but never validated server-side — invalid
-        // URLs just cause the post to fail (logged, non-fatal). Users with
-        // accidental whitespace are saved by the .trim().
-        discord_webhook_url: typeof input.discord_webhook_url === 'string' ? input.discord_webhook_url.trim() : '',
         discord_notify_live_start: input.discord_notify_live_start === true,
         discord_notify_live_end: input.discord_notify_live_end === true,
         discord_notify_vod_complete: input.discord_notify_vod_complete === true,
@@ -476,14 +471,9 @@ function recordDownloadedVodId(vodId: string): void {
 
 function loadConfig(): Config {
     try {
-        if (fs.existsSync(CONFIG_FILE)) {
-            const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
-            const parsed = JSON.parse(data);
-            if (!isPlainObject(parsed)) {
-                console.error('Config file is not a JSON object — using defaults');
-                return normalizeConfigTemplates(defaultConfig);
-            }
-            return normalizeConfigTemplates({ ...defaultConfig, ...parsed });
+        const persisted = appStateStore?.loadConfig();
+        if (persisted && isPlainObject(persisted)) {
+            return normalizeConfigTemplates({ ...defaultConfig, ...persisted } as Config);
         }
     } catch (e) {
         console.error('Error loading config:', e);
@@ -493,7 +483,8 @@ function loadConfig(): Config {
 
 function saveConfig(config: Config): void {
     try {
-        writeFileAtomicSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+        if (!appStateStore) throw new Error('Application state store is unavailable');
+        appStateStore.saveConfig(config);
     } catch (e) {
         console.error('Error saving config:', e);
     }
@@ -623,26 +614,18 @@ function loadQueue(): QueueItem[] {
     }
 
     try {
-        if (fs.existsSync(QUEUE_FILE)) {
-            const data = fs.readFileSync(QUEUE_FILE, 'utf-8');
-            const parsed = JSON.parse(data);
-            if (!Array.isArray(parsed)) {
-                console.error('Queue file is not a JSON array — ignoring');
-                return [];
-            }
-
-            const items: QueueItem[] = [];
-            let droppedCount = 0;
-            for (const raw of parsed) {
-                const sanitized = sanitizeQueueItem(raw);
-                if (sanitized) items.push(sanitized);
-                else droppedCount++;
-            }
-            if (droppedCount > 0) {
-                console.error(`loadQueue: dropped ${droppedCount} invalid queue item(s)`);
-            }
-            return items;
+        const parsed = appStateStore?.loadQueue<QueueItem>() ?? [];
+        const items: QueueItem[] = [];
+        let droppedCount = 0;
+        for (const raw of parsed) {
+            const sanitized = sanitizeQueueItem(raw);
+            if (sanitized) items.push(sanitized);
+            else droppedCount++;
         }
+        if (droppedCount > 0) {
+            console.error(`loadQueue: dropped ${droppedCount} invalid queue item(s)`);
+        }
+        return items;
     } catch (e) {
         console.error('Error loading queue:', e);
     }
@@ -654,9 +637,7 @@ let pendingQueueSnapshot: QueueItem[] | null = null;
 
 function clearQueueFileFromDisk(): void {
     try {
-        if (fs.existsSync(QUEUE_FILE)) {
-            fs.unlinkSync(QUEUE_FILE);
-        }
+        appStateStore?.saveQueue([]);
     } catch (e) {
         console.error('Error clearing queue file:', e);
     }
@@ -669,7 +650,8 @@ function writeQueueToDisk(queue: QueueItem[]): void {
     }
 
     try {
-        writeFileAtomicSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
+        if (!appStateStore) throw new Error('Application state store is unavailable');
+        appStateStore.saveQueue(queue);
     } catch (e) {
         console.error('Error saving queue:', e);
     }
@@ -746,9 +728,13 @@ function startDevelopmentReload(): void {
         stopDevelopmentReload = null;
     });
 }
-let config = loadConfig();
+let appStateStore: AppStateStore | null = null;
+let appSecretStore: SecretStore | null = null;
+let config = normalizeConfigTemplates(defaultConfig);
+let twitchClientSecret = '';
+let discordWebhookUrl = '';
 let accessToken: string | null = null;
-let downloadQueue: QueueItem[] = loadQueue();
+let downloadQueue: QueueItem[] = [];
 let queueIdCounter = 0;
 let lastQueueBroadcastFingerprint = '';
 let isDownloading = false;
@@ -1807,7 +1793,7 @@ function validateDownloadedFileIntegrity(filePath: string, expectedDurationSecon
 // TWITCH API
 // ==========================================
 async function twitchLogin(): Promise<boolean> {
-    if (!config.client_id || !config.client_secret) {
+    if (!config.client_id || !twitchClientSecret) {
         return false;
     }
 
@@ -1815,7 +1801,7 @@ async function twitchLogin(): Promise<boolean> {
         const response = await axios.post('https://id.twitch.tv/oauth2/token', null, {
             params: {
                 client_id: config.client_id,
-                client_secret: config.client_secret,
+                client_secret: twitchClientSecret,
                 grant_type: 'client_credentials'
             },
             timeout: API_TIMEOUT
@@ -1844,7 +1830,7 @@ function requestTwitchLogin(): Promise<boolean> {
 }
 
 async function ensureTwitchAuth(forceRefresh = false): Promise<boolean> {
-    if (!config.client_id || !config.client_secret) {
+    if (!config.client_id || !twitchClientSecret) {
         accessToken = null;
         return false;
     }
@@ -5281,7 +5267,7 @@ async function sendDiscordWebhook(payload: {
     color: DiscordEmbedColor;
     fields?: Array<{ name: string; value: string; inline?: boolean }>;
 }): Promise<void> {
-    const url = (config.discord_webhook_url || '').trim();
+    const url = discordWebhookUrl.trim();
     if (!isAcceptableDiscordWebhook(url)) return;
 
     const body = {
@@ -7208,6 +7194,49 @@ function setupAutoUpdater() {
 // ==========================================
 ipcMain.handle('get-config', () => config);
 
+ipcMain.handle('get-secret-status', (event) => {
+    if (!isTrustedRendererEvent(event) || !appSecretStore) {
+        return { encryptionAvailable: false, clientSecretConfigured: false, discordWebhookConfigured: false };
+    }
+    return appSecretStore.status();
+});
+
+ipcMain.handle('set-client-secret', (event, value: string) => {
+    if (!isTrustedRendererEvent(event) || !appSecretStore || !appSecretStore.status().encryptionAvailable) return appSecretStore?.status() ?? null;
+    const update = resolveSecretInputUpdate(typeof value === 'string' ? value : '', false);
+    if (update.action !== 'set') return appSecretStore.status();
+    appSecretStore.set('twitch_client_secret', update.value);
+    twitchClientSecret = update.value;
+    accessToken = null;
+    twitchLoginInFlight = null;
+    return appSecretStore.status();
+});
+
+ipcMain.handle('clear-client-secret', (event) => {
+    if (!isTrustedRendererEvent(event) || !appSecretStore) return appSecretStore?.status() ?? null;
+    appSecretStore.clear('twitch_client_secret');
+    twitchClientSecret = '';
+    accessToken = null;
+    twitchLoginInFlight = null;
+    return appSecretStore.status();
+});
+
+ipcMain.handle('set-discord-webhook', (event, value: string) => {
+    if (!isTrustedRendererEvent(event) || !appSecretStore || !appSecretStore.status().encryptionAvailable) return appSecretStore?.status() ?? null;
+    const update = resolveSecretInputUpdate(typeof value === 'string' ? value : '', false);
+    if (update.action !== 'set') return appSecretStore.status();
+    appSecretStore.set('discord_webhook_url', update.value);
+    discordWebhookUrl = update.value;
+    return appSecretStore.status();
+});
+
+ipcMain.handle('clear-discord-webhook', (event) => {
+    if (!isTrustedRendererEvent(event) || !appSecretStore) return appSecretStore?.status() ?? null;
+    appSecretStore.clear('discord_webhook_url');
+    discordWebhookUrl = '';
+    return appSecretStore.status();
+});
+
 ipcMain.handle('get-automation-status', () => ({
     autoRecord: {
         watching: Array.isArray(config.auto_record_streamers) ? config.auto_record_streamers.length : 0,
@@ -7240,7 +7269,6 @@ ipcMain.handle('trigger-auto-vod-scan', async (event) => {
 ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability?: string) => {
     if (!isTrustedRendererEvent(event)) return config;
     const previousClientId = config.client_id;
-    const previousClientSecret = config.client_secret;
     const previousCacheMinutes = config.metadata_cache_minutes;
     const previousPersistQueueOnRestart = config.persist_queue_on_restart;
     const previousTheme = config.theme;
@@ -7251,6 +7279,8 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
     const previousStreamerList = JSON.stringify(config.streamers || []);
 
     const acceptedConfig = { ...newConfig };
+    delete (acceptedConfig as Record<string, unknown>).client_secret;
+    delete (acceptedConfig as Record<string, unknown>).discord_webhook_url;
     if (typeof acceptedConfig.download_path === 'string' && acceptedConfig.download_path !== config.download_path) {
         const selectedPath = typeof fileCapability === 'string'
             ? resolveFileCapability(event, fileCapability, 'selected-folder')
@@ -7261,7 +7291,7 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
     }
     config = normalizeConfigTemplates({ ...config, ...acceptedConfig });
 
-    if (config.client_id !== previousClientId || config.client_secret !== previousClientSecret) {
+    if (config.client_id !== previousClientId) {
         accessToken = null;
         twitchLoginInFlight = null;
     }
@@ -8185,12 +8215,7 @@ ipcMain.handle('export-config', async (event) => {
         const outputCapability = issueFileCapability(event, 'config-export', dialogResult.filePath, 'output-file', ['json']);
         const outputFile = resolveFileCapability(event, outputCapability.token, 'config-export', true);
         if (!outputFile) return { success: false, error: 'File access denied' };
-        const exportable = {
-            ...config,
-            client_secret: '',
-            __exportVersion: 1,
-            __exportedAt: new Date().toISOString()
-        };
+        const exportable = createExportableConfig(config as unknown as Record<string, unknown>);
         writeFileAtomicSync(outputFile, JSON.stringify(exportable, null, 2));
         return { success: true, filePath: outputFile };
     } catch (e) {
@@ -8222,13 +8247,12 @@ ipcMain.handle('import-config', async (event) => {
         // Merge over current config so unknown / missing keys keep their
         // existing values. Then run normalizeConfigTemplates so any
         // out-of-range field falls back to defaults.
-        const merged = normalizeConfigTemplates({ ...config, ...parsed } as Config);
-
-        // Preserve the existing client_secret if the import stripped it
-        // (export does this on purpose) — the user shouldn't lose creds.
-        if (!merged.client_secret && config.client_secret) {
-            merged.client_secret = config.client_secret;
-        }
+        const imported = { ...parsed } as Record<string, unknown>;
+        delete imported.client_secret;
+        delete imported.discord_webhook_url;
+        delete imported.__exportVersion;
+        delete imported.__exportedAt;
+        const merged = normalizeConfigTemplates({ ...config, ...imported } as Config);
 
         config = merged;
         saveConfig(config);
@@ -8439,20 +8463,40 @@ app.whenReady().then(() => {
     startMetadataCacheCleanup();
     startDebugLogFlushTimer();
 
-    // SQLite-Open + Shadow-Migration. Long-lived handle in appDb (siehe oben).
-    // Lazy require, damit Native-Build-Fehler den App-Start nicht verhindern.
     try {
         const { openDatabase } = require('./main/infra/db');
         const { migrateJsonToSqlite } = require('./main/domain/migrator');
         const dbPath = path.join(APPDATA_DIR, 'app.db');
-        appDb = openDatabase(dbPath);
-        const result = migrateJsonToSqlite({ db: appDb, appDataDir: APPDATA_DIR });
+        const database: DbHandle = openDatabase(dbPath);
+        appDb = database;
+        const secureStorage = createElectronSecureStorage();
+        appSecretStore = createSecretStore(database, secureStorage);
+        const result = migrateJsonToSqlite({
+            db: database,
+            appDataDir: APPDATA_DIR,
+            secrets: appSecretStore,
+            requireEncryption: true,
+        });
         appendDebugLog('sqlite-migrator', result);
+        if (result.errors.length > 0) throw new Error(result.errors.map((entry: { source: string; message: string }) => `${entry.source}: ${entry.message}`).join('; '));
+        appStateStore = createAppStateStore(database);
+        config = loadConfig();
+        downloadQueue = config.persist_queue_on_restart === false ? [] : loadQueue();
+        if (config.persist_queue_on_restart === false) appStateStore.saveQueue([]);
+        twitchClientSecret = appSecretStore.get('twitch_client_secret') ?? '';
+        discordWebhookUrl = appSecretStore.get('discord_webhook_url') ?? '';
     } catch (e) {
         appendDebugLog('sqlite-open-failed', {
             error: e instanceof Error ? e.message : String(e),
         });
+        try { appDb?.close(); } catch { }
         appDb = null;
+        appStateStore = null;
+        appSecretStore = null;
+        config = normalizeConfigTemplates(defaultConfig);
+        downloadQueue = [];
+        twitchClientSecret = '';
+        discordWebhookUrl = '';
     }
 
     restartAutoRecordPoller();

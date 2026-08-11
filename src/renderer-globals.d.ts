@@ -1,6 +1,5 @@
 interface AppConfig {
     client_id?: string;
-    client_secret?: string;
     download_path?: string;
     streamers?: string[];
     streamer_display_names?: Record<string, string>;
@@ -27,7 +26,6 @@ interface AppConfig {
     auto_record_poll_seconds?: number;
     download_chat_replay?: boolean;
     capture_live_chat?: boolean;
-    discord_webhook_url?: string;
     discord_notify_live_start?: boolean;
     discord_notify_live_end?: boolean;
     discord_notify_vod_complete?: boolean;
@@ -170,6 +168,12 @@ interface VideoInfo {
     audioCodec: string | null;
     previewCompatible: boolean;
     variableFrameRate: boolean;
+}
+
+interface SecretStatus {
+    encryptionAvailable: boolean;
+    clientSecretConfigured: boolean;
+    discordWebhookConfigured: boolean;
 }
 
 interface VideoEditorMedia {
@@ -370,6 +374,11 @@ interface ArchiveStats {
 interface ApiBridge {
     getConfig(): Promise<AppConfig>;
     saveConfig(config: Partial<AppConfig>, fileCapability?: string): Promise<AppConfig>;
+    getSecretStatus(): Promise<SecretStatus>;
+    setClientSecret(value: string): Promise<SecretStatus>;
+    clearClientSecret(): Promise<SecretStatus>;
+    setDiscordWebhook(value: string): Promise<SecretStatus>;
+    clearDiscordWebhook(): Promise<SecretStatus>;
     login(): Promise<boolean>;
     getUserId(username: string): Promise<string | null>;
     getVODs(userId: string, forceRefresh?: boolean): Promise<VOD[]>;

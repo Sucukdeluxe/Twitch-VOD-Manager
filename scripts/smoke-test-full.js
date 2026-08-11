@@ -214,7 +214,7 @@ async function run() {
         assert(deState.deActive, 'German language button did not activate');
         assert(enState.enActive, 'English language button did not activate');
 
-        await window.api.saveConfig({ client_id: '', client_secret: '' });
+        await window.api.saveConfig({ client_id: '' });
         window.showTab('vods');
         await window.selectStreamer('fixture_streamer');
 

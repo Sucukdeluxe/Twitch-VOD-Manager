@@ -6,6 +6,12 @@ let pendingSettingsAutoSave = false;
 let settingsAutoSaveTimer: number | null = null;
 let pendingCredentialsReconnect = false;
 let lastPersistedSettingsFingerprint = '';
+const SECRET_INPUT_MASK = '••••••••';
+let secretStatus: SecretStatus = {
+    encryptionAvailable: false,
+    clientSecretConfigured: false,
+    discordWebhookConfigured: false
+};
 
 function canRunSettingsAutoRefresh(): boolean {
     if (document.hidden) {
@@ -16,7 +22,7 @@ function canRunSettingsAutoRefresh(): boolean {
 }
 
 async function connect(): Promise<void> {
-    const hasCredentials = Boolean((config.client_id ?? '').toString().trim() && (config.client_secret ?? '').toString().trim());
+    const hasCredentials = Boolean((config.client_id ?? '').toString().trim() && secretStatus.clientSecretConfigured);
     if (!hasCredentials) {
         isConnected = false;
         updateStatus(UI_TEXT.status.noLogin, false, 'public');
@@ -576,9 +582,34 @@ function toggleDebugAutoRefresh(enabled: boolean): void {
 
 function collectCredentialsPayload(): Partial<AppConfig> {
     return {
-        client_id: byId<HTMLInputElement>('clientId').value.trim(),
-        client_secret: byId<HTMLInputElement>('clientSecret').value.trim()
+        client_id: byId<HTMLInputElement>('clientId').value.trim()
     };
+}
+
+function syncSecretFields(): void {
+    byId<HTMLInputElement>('clientSecret').value = secretStatus.clientSecretConfigured ? SECRET_INPUT_MASK : '';
+    byId<HTMLInputElement>('discordWebhookUrl').value = secretStatus.discordWebhookConfigured ? SECRET_INPUT_MASK : '';
+}
+
+async function persistSecretInputs(): Promise<void> {
+    const clientValue = byId<HTMLInputElement>('clientSecret').value;
+    if (clientValue !== SECRET_INPUT_MASK) {
+        secretStatus = clientValue.trim()
+            ? await window.api.setClientSecret(clientValue.trim())
+            : secretStatus.clientSecretConfigured
+                ? await window.api.clearClientSecret()
+                : secretStatus;
+    }
+
+    const webhookValue = byId<HTMLInputElement>('discordWebhookUrl').value;
+    if (webhookValue !== SECRET_INPUT_MASK) {
+        secretStatus = webhookValue.trim()
+            ? await window.api.setDiscordWebhook(webhookValue.trim())
+            : secretStatus.discordWebhookConfigured
+                ? await window.api.clearDiscordWebhook()
+                : secretStatus;
+    }
+    syncSecretFields();
 }
 
 function syncPartMinutesFieldState(): void {
@@ -611,7 +642,6 @@ function collectDownloadSettingsPayload(): Partial<AppConfig> {
         auto_resume_live_recording: byId<HTMLInputElement>('autoResumeLiveRecordingToggle').checked,
         auto_merge_resumed_parts: byId<HTMLInputElement>('autoMergeResumedPartsToggle').checked,
         delete_parts_after_merge: byId<HTMLInputElement>('deletePartsAfterMergeToggle').checked,
-        discord_webhook_url: byId<HTMLInputElement>('discordWebhookUrl').value.trim(),
         discord_notify_live_start: byId<HTMLInputElement>('discordNotifyLiveStartToggle').checked,
         discord_notify_live_end: byId<HTMLInputElement>('discordNotifyLiveEndToggle').checked,
         discord_notify_vod_complete: byId<HTMLInputElement>('discordNotifyVodCompleteToggle').checked,
@@ -658,7 +688,7 @@ function getSettingsFingerprint(payload: Partial<AppConfig>): string {
     const effective = { ...config, ...payload };
     return JSON.stringify([
         effective.client_id ?? '',
-        effective.client_secret ?? '',
+        byId<HTMLInputElement>('clientSecret').value,
         effective.sidebar_split_view !== false,
         effective.download_mode ?? 'full',
         effective.part_minutes ?? 120,
@@ -676,7 +706,7 @@ function getSettingsFingerprint(payload: Partial<AppConfig>): string {
         effective.auto_resume_live_recording !== false,
         effective.auto_merge_resumed_parts === true,
         effective.delete_parts_after_merge === true,
-        effective.discord_webhook_url ?? '',
+        byId<HTMLInputElement>('discordWebhookUrl').value,
         effective.discord_notify_live_start === true,
         effective.discord_notify_live_end === true,
         effective.discord_notify_vod_complete === true,
@@ -697,7 +727,7 @@ function getSettingsFingerprint(payload: Partial<AppConfig>): string {
 
 function syncSettingsFormFromConfig(): void {
     byId<HTMLInputElement>('clientId').value = config.client_id ?? '';
-    byId<HTMLInputElement>('clientSecret').value = config.client_secret ?? '';
+    syncSecretFields();
     byId<HTMLInputElement>('sidebarSplitViewToggle').checked = config.sidebar_split_view !== false;
     applySidebarLayoutPreference(config.sidebar_split_view !== false);
     byId<HTMLSelectElement>('downloadMode').value = (config.download_mode as 'parts' | 'full') ?? 'full';
@@ -716,7 +746,6 @@ function syncSettingsFormFromConfig(): void {
     byId<HTMLInputElement>('autoResumeLiveRecordingToggle').checked = (config.auto_resume_live_recording as boolean) !== false;
     byId<HTMLInputElement>('autoMergeResumedPartsToggle').checked = (config.auto_merge_resumed_parts as boolean) === true;
     byId<HTMLInputElement>('deletePartsAfterMergeToggle').checked = (config.delete_parts_after_merge as boolean) === true;
-    byId<HTMLInputElement>('discordWebhookUrl').value = (config.discord_webhook_url as string) || '';
     byId<HTMLInputElement>('discordNotifyLiveStartToggle').checked = (config.discord_notify_live_start as boolean) === true;
     byId<HTMLInputElement>('discordNotifyLiveEndToggle').checked = (config.discord_notify_live_end as boolean) === true;
     byId<HTMLInputElement>('discordNotifyVodCompleteToggle').checked = (config.discord_notify_vod_complete as boolean) === true;
@@ -759,6 +788,7 @@ async function persistSettings(options: {
         Object.assign(payload, templatePayload);
     }
 
+    await persistSecretInputs();
     config = await window.api.saveConfig(payload);
     syncSettingsFormFromConfig();
     pendingCredentialsReconnect = false;
@@ -798,7 +828,9 @@ async function flushSettingsAutoSave(reconnectAfterSave = false): Promise<void> 
 
     settingsAutoSaveInFlight = true;
     try {
+        await persistSecretInputs();
         config = await window.api.saveConfig(payload);
+        syncSecretFields();
         lastPersistedSettingsFingerprint = getSettingsFingerprint({});
         if (reconnectAfterSave && pendingCredentialsReconnect) {
             pendingCredentialsReconnect = false;
@@ -901,6 +933,13 @@ function initSettingsAutoSave(): void {
         element.addEventListener('blur', () => {
             pendingCredentialsReconnect = true;
             void flushSettingsAutoSave(true);
+        });
+    }
+
+    for (const id of ['clientSecret', 'discordWebhookUrl'] as const) {
+        byId<HTMLInputElement>(id).addEventListener('focus', (event) => {
+            const input = event.currentTarget as HTMLInputElement;
+            if (input.value === SECRET_INPUT_MASK) input.select();
         });
     }
 
