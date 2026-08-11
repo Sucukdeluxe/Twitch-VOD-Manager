@@ -4914,13 +4914,17 @@ input[type="number"]::-webkit-outer-spin-button {
    per-message colour for the username (driven by Twitch's IRC color
    metadata). */
 .chat-viewer-row {
-    min-height: 29px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    height: 29px;
     padding: 4px 8px;
     line-height: 1.55;
     border-radius: 4px;
     transition: background 0.12s;
     font-size: 13px;
-    word-wrap: break-word;
+    overflow: hidden;
+    white-space: nowrap;
 }
 
 .chat-viewer-virtual-canvas {
@@ -4952,6 +4956,13 @@ input[type="number"]::-webkit-outer-spin-button {
     color: var(--accent);
 }
 
+.chat-viewer-row > span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .chat-viewer-row .chat-viewer-tag {
     color: var(--accent);
     font-style: italic;
@@ -4977,9 +4988,27 @@ input[type="number"]::-webkit-outer-spin-button {
    handles the palette. Add a new event type by extending this
    block, not the renderer. */
 .event-viewer-row {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    height: 36px;
     padding: 8px 10px;
     border-bottom: 1px solid var(--border-soft);
     font-size: 12px;
+    gap: 8px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.event-viewer-virtual-canvas {
+    position: relative;
+    min-height: 100%;
+}
+
+.event-viewer-virtual-rows {
+    position: absolute;
+    inset: 0 0 auto;
+    width: 100%;
 }
 
 .event-viewer-row:last-child {
@@ -4988,7 +5017,7 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .event-viewer-time {
     color: var(--text-secondary);
-    margin-right: 8px;
+    flex: 0 0 auto;
     font-family: 'Consolas', 'Segoe UI Mono', monospace;
 }
 
@@ -5002,7 +5031,7 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .event-viewer-tag {
     font-weight: 600;
-    margin-right: 8px;
+    flex: 0 0 auto;
     color: var(--accent);
     text-transform: uppercase;
     letter-spacing: 0.3px;
@@ -5044,9 +5073,12 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .event-viewer-detail {
-    margin-top: 4px;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text);
-    line-height: 1.5;
 }
 
 /* ============================================

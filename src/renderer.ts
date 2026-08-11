@@ -308,26 +308,56 @@ interface EventLogEntry {
     part?: number;
 }
 
+let eventsViewerMessages: EventLogEntry[] = [];
+let eventsViewerSessionGeneration = 0;
+let eventsViewerReadAbort: AbortController | null = null;
+let eventsViewerVirtualList: ReturnType<typeof RendererAccessibility.createFixedHeightVirtualList> | null = null;
+const eventsViewerRenderGeneration = new RendererAccessibility.RenderGeneration();
+const EVENT_VIEWER_ROW_HEIGHT = 36;
+const EVENT_VIEWER_OVERSCAN = 12;
+
+function disposeEventsViewerVirtualList(): void {
+    eventsViewerVirtualList?.dispose();
+    eventsViewerVirtualList = null;
+}
+
 async function openEventsViewer(filePath: string, title: string): Promise<void> {
+    const sessionGeneration = ++eventsViewerSessionGeneration;
+    eventsViewerReadAbort?.abort();
+    eventsViewerRenderGeneration.cancel();
+    const abortController = new AbortController();
+    eventsViewerReadAbort = abortController;
     const list = byId('eventsViewerList');
     const status = byId('eventsViewerStatus');
     byId('eventsViewerTitle').textContent = title || UI_TEXT.queue.viewEvents;
+    disposeEventsViewerVirtualList();
     list.replaceChildren();
+    RendererAccessibility.setBusy(list, true);
     status.textContent = UI_TEXT.queue.viewChatLoading;
     RendererAccessibility.openDialog('eventsViewerModal', { onEscape: closeEventsViewer });
 
-    const result = await window.api.readChatFile(filePath);
+    const result = await window.api.readChatFile(filePath, abortController.signal);
+    if (sessionGeneration !== eventsViewerSessionGeneration || abortController.signal.aborted || !RendererAccessibility.isDialogOpen('eventsViewerModal')) return;
+    RendererAccessibility.setBusy(list, false);
     if (!result.success || !Array.isArray(result.messages)) {
+        if (result.cancelled) return;
         status.textContent = UI_TEXT.queue.viewChatFailed + (result.error ? `: ${result.error}` : '');
         return;
     }
-    const events = result.messages as EventLogEntry[];
-    status.textContent = UI_TEXT.queue.viewEventsCount.replace('{count}', String(events.length));
-    renderEventsList(events);
+    eventsViewerMessages = result.messages as EventLogEntry[];
+    status.textContent = UI_TEXT.queue.viewEventsCount.replace('{count}', String(result.total ?? eventsViewerMessages.length));
+    renderEventsList(eventsViewerMessages, eventsViewerRenderGeneration.next());
 }
 
 function closeEventsViewer(): void {
+    eventsViewerSessionGeneration++;
+    eventsViewerReadAbort?.abort();
+    eventsViewerReadAbort = null;
+    eventsViewerRenderGeneration.cancel();
+    disposeEventsViewerVirtualList();
+    RendererAccessibility.setBusy(byId('eventsViewerList'), false);
     RendererAccessibility.closeDialog('eventsViewerModal');
+    eventsViewerMessages = [];
 }
 
 function formatEventTime(iso?: string): string {
@@ -338,8 +368,43 @@ function formatEventTime(iso?: string): string {
     } catch { return iso; }
 }
 
-function renderEventsList(events: EventLogEntry[]): void {
+function getEventViewerDetail(event: EventLogEntry): string {
+    if (event.type === 'recording_start') return `${UI_TEXT.queue.eventStartedAs}: "${event.title || '-'}" — ${event.game || '-'}`;
+    if (event.type === 'recording_end') {
+        const duration = typeof event.durationSeconds === 'number'
+            ? `${Math.floor(event.durationSeconds / 3600)}h ${Math.floor((event.durationSeconds % 3600) / 60)}m ${event.durationSeconds % 60}s`
+            : '?';
+        const outcome = event.success ? '✓' : '✗';
+        return `${outcome} ${UI_TEXT.queue.eventEndedAfter}: ${duration}${event.error ? ` — ${event.error}` : ''}`;
+    }
+    if (event.type === 'recording_resume') return (UI_TEXT.queue.eventRecordingResume || 'Resume started — part {part}').replace('{part}', String(event.part || '?'));
+    if (event.type === 'title_change') return UI_TEXT.queue.eventTitleFromTo.replace('{from}', `"${event.from || '-'}"`).replace('{to}', `"${event.to || '-'}"`);
+    if (event.type === 'game_change') return UI_TEXT.queue.eventGameFromTo.replace('{from}', event.from || '-').replace('{to}', event.to || '-');
+    return JSON.stringify(event);
+}
+
+function createEventViewerRow(event: EventLogEntry): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'event-viewer-row';
+    const time = document.createElement('span');
+    time.className = 'event-viewer-time';
+    time.textContent = formatEventTime(event.t);
+    const tag = document.createElement('span');
+    tag.className = 'event-viewer-tag';
+    if (event.type) tag.dataset.type = event.type;
+    tag.textContent = event.type || 'event';
+    const detail = document.createElement('div');
+    detail.className = 'event-viewer-detail';
+    detail.textContent = getEventViewerDetail(event);
+    row.title = `${time.textContent} ${tag.textContent} ${detail.textContent}`.trim();
+    row.append(time, tag, detail);
+    return row;
+}
+
+function renderEventsList(events: EventLogEntry[], generation: number): void {
+    if (!eventsViewerRenderGeneration.isCurrent(generation) || !RendererAccessibility.isDialogOpen('eventsViewerModal')) return;
     const list = byId('eventsViewerList');
+    disposeEventsViewerVirtualList();
     list.replaceChildren();
     if (events.length === 0) {
         const empty = document.createElement('div');
@@ -348,48 +413,25 @@ function renderEventsList(events: EventLogEntry[]): void {
         list.appendChild(empty);
         return;
     }
-
-    for (const ev of events) {
-        const row = document.createElement('div');
-        row.className = 'event-viewer-row';
-
-        const time = document.createElement('span');
-        time.className = 'event-viewer-time';
-        time.textContent = formatEventTime(ev.t);
-        row.appendChild(time);
-
-        const tag = document.createElement('span');
-        tag.className = 'event-viewer-tag';
-        // Per-type tag colour comes from CSS via a data-type attribute
-        // selector — keeps the type->colour mapping with the rest of the
-        // visual styling instead of inline in the renderer.
-        if (ev.type) tag.dataset.type = ev.type;
-        tag.textContent = ev.type || 'event';
-        row.appendChild(tag);
-
-        const detail = document.createElement('div');
-        detail.className = 'event-viewer-detail';
-
-        if (ev.type === 'recording_start') {
-            detail.textContent = `${UI_TEXT.queue.eventStartedAs}: "${ev.title || '-'}" — ${ev.game || '-'}`;
-        } else if (ev.type === 'recording_end') {
-            const dur = typeof ev.durationSeconds === 'number'
-                ? `${Math.floor(ev.durationSeconds / 3600)}h ${Math.floor((ev.durationSeconds % 3600) / 60)}m ${ev.durationSeconds % 60}s`
-                : '?';
-            const ok = ev.success ? '✓' : '✗';
-            detail.textContent = `${ok} ${UI_TEXT.queue.eventEndedAfter}: ${dur}${ev.error ? ` — ${ev.error}` : ''}`;
-        } else if (ev.type === 'recording_resume') {
-            detail.textContent = (UI_TEXT.queue.eventRecordingResume || 'Resume started — part {part}').replace('{part}', String(ev.part || '?'));
-        } else if (ev.type === 'title_change') {
-            detail.textContent = `${UI_TEXT.queue.eventTitleFromTo.replace('{from}', `"${ev.from || '-'}"`).replace('{to}', `"${ev.to || '-'}"`)}`;
-        } else if (ev.type === 'game_change') {
-            detail.textContent = `${UI_TEXT.queue.eventGameFromTo.replace('{from}', ev.from || '-').replace('{to}', ev.to || '-')}`;
-        } else {
-            detail.textContent = JSON.stringify(ev);
+    const canvas = document.createElement('div');
+    canvas.className = 'event-viewer-virtual-canvas';
+    canvas.style.height = `${events.length * EVENT_VIEWER_ROW_HEIGHT}px`;
+    const rows = document.createElement('div');
+    rows.className = 'event-viewer-virtual-rows';
+    canvas.appendChild(rows);
+    list.appendChild(canvas);
+    eventsViewerVirtualList = RendererAccessibility.createFixedHeightVirtualList(list, {
+        itemCount: () => events.length,
+        rowHeight: EVENT_VIEWER_ROW_HEIGHT,
+        overscan: EVENT_VIEWER_OVERSCAN,
+        render: (range) => {
+            if (!eventsViewerRenderGeneration.isCurrent(generation) || !RendererAccessibility.isDialogOpen('eventsViewerModal')) return;
+            rows.style.transform = `translateY(${range.start * EVENT_VIEWER_ROW_HEIGHT}px)`;
+            const fragment = document.createDocumentFragment();
+            for (let index = range.start; index < range.end; index++) fragment.appendChild(createEventViewerRow(events[index]));
+            rows.replaceChildren(fragment);
         }
-        row.appendChild(detail);
-        list.appendChild(row);
-    }
+    });
 }
 
 interface ChatViewerMessage {
@@ -412,13 +454,20 @@ let chatViewerMessages: ChatViewerMessage[] = [];
 let chatViewerFormat: 'replay' | 'live' = 'replay';
 let chatViewerSessionGeneration = 0;
 let chatViewerReadAbort: AbortController | null = null;
+let chatViewerVirtualList: ReturnType<typeof RendererAccessibility.createFixedHeightVirtualList> | null = null;
 const chatViewerRenderGeneration = new RendererAccessibility.RenderGeneration();
 const CHAT_VIEWER_ROW_HEIGHT = 29;
 const CHAT_VIEWER_OVERSCAN = 12;
 
+function disposeChatViewerVirtualList(): void {
+    chatViewerVirtualList?.dispose();
+    chatViewerVirtualList = null;
+}
+
 async function openChatViewer(filePath: string, title: string): Promise<void> {
     const sessionGeneration = ++chatViewerSessionGeneration;
     chatViewerReadAbort?.abort();
+    chatViewerRenderGeneration.cancel();
     const abortController = new AbortController();
     chatViewerReadAbort = abortController;
     const modal = byId('chatViewerModal');
@@ -426,13 +475,16 @@ async function openChatViewer(filePath: string, title: string): Promise<void> {
     const status = byId('chatViewerStatus');
     const filterInput = byId<HTMLInputElement>('chatViewerFilter');
     byId('chatViewerTitle').textContent = title || UI_TEXT.queue.viewChat;
+    disposeChatViewerVirtualList();
     list.replaceChildren();
+    RendererAccessibility.setBusy(list, true);
     filterInput.value = '';
     status.textContent = UI_TEXT.queue.viewChatLoading;
     RendererAccessibility.openDialog('chatViewerModal', { initialFocus: filterInput, onEscape: closeChatViewer });
 
     const result = await window.api.readChatFile(filePath, abortController.signal);
     if (sessionGeneration !== chatViewerSessionGeneration || abortController.signal.aborted || !modal.classList.contains('show')) return;
+    RendererAccessibility.setBusy(list, false);
     if (!result.success || !Array.isArray(result.messages)) {
         if (result.cancelled) return;
         status.textContent = UI_TEXT.queue.viewChatFailed + (result.error ? `: ${result.error}` : '');
@@ -451,6 +503,8 @@ function closeChatViewer(): void {
     chatViewerReadAbort?.abort();
     chatViewerReadAbort = null;
     chatViewerRenderGeneration.cancel();
+    disposeChatViewerVirtualList();
+    RendererAccessibility.setBusy(byId('chatViewerList'), false);
     RendererAccessibility.closeDialog('chatViewerModal');
     chatViewerMessages = [];
 }
@@ -458,6 +512,8 @@ function closeChatViewer(): void {
 function onChatViewerFilterChange(): void {
     const generation = chatViewerRenderGeneration.next();
     const list = byId('chatViewerList');
+    disposeChatViewerVirtualList();
+    RendererAccessibility.setBusy(list, false);
     list.scrollTop = 0;
     list.replaceChildren();
     const filter = byId<HTMLInputElement>('chatViewerFilter').value.trim().toLowerCase();
@@ -465,7 +521,7 @@ function onChatViewerFilterChange(): void {
         renderChatViewerList(chatViewerMessages, generation);
         return;
     }
-    list.setAttribute('aria-busy', 'true');
+    RendererAccessibility.setBusy(list, true);
     const filtered: ChatViewerMessage[] = [];
     let index = 0;
     const filterChunk = (): void => {
@@ -481,7 +537,7 @@ function onChatViewerFilterChange(): void {
             window.setTimeout(filterChunk, 0);
             return;
         }
-        list.removeAttribute('aria-busy');
+        RendererAccessibility.setBusy(list, false);
         renderChatViewerList(filtered, generation);
     };
     filterChunk();
@@ -519,12 +575,15 @@ function createChatViewerRow(m: ChatViewerMessage): HTMLElement {
     const message = document.createElement('span');
     message.textContent = ' ' + (m.msg || m.text || '');
     row.appendChild(message);
+    row.title = [time, user, m.msg || m.text || ''].filter(Boolean).join(' ');
     return row;
 }
 
 function renderChatViewerList(messages: ChatViewerMessage[], generation: number): void {
     if (!chatViewerRenderGeneration.isCurrent(generation) || !RendererAccessibility.isDialogOpen('chatViewerModal')) return;
     const list = byId('chatViewerList');
+    disposeChatViewerVirtualList();
+    RendererAccessibility.setBusy(list, false);
     list.replaceChildren();
     const canvas = document.createElement('div');
     canvas.className = 'chat-viewer-virtual-canvas';
@@ -533,24 +592,18 @@ function renderChatViewerList(messages: ChatViewerMessage[], generation: number)
     rows.className = 'chat-viewer-virtual-rows';
     canvas.appendChild(rows);
     list.appendChild(canvas);
-    let scheduled = false;
-    const renderVisibleRows = (): void => {
-        if (!chatViewerRenderGeneration.isCurrent(generation) || !RendererAccessibility.isDialogOpen('chatViewerModal')) return;
-        const range = RendererAccessibility.getVirtualRange(list.scrollTop, list.clientHeight, messages.length, CHAT_VIEWER_ROW_HEIGHT, CHAT_VIEWER_OVERSCAN);
-        rows.style.transform = `translateY(${range.start * CHAT_VIEWER_ROW_HEIGHT}px)`;
-        const fragment = document.createDocumentFragment();
-        for (let index = range.start; index < range.end; index++) fragment.appendChild(createChatViewerRow(messages[index]));
-        rows.replaceChildren(fragment);
-    };
-    list.addEventListener('scroll', () => {
-        if (scheduled) return;
-        scheduled = true;
-        requestAnimationFrame(() => {
-            scheduled = false;
-            renderVisibleRows();
-        });
-    }, { passive: true });
-    renderVisibleRows();
+    chatViewerVirtualList = RendererAccessibility.createFixedHeightVirtualList(list, {
+        itemCount: () => messages.length,
+        rowHeight: CHAT_VIEWER_ROW_HEIGHT,
+        overscan: CHAT_VIEWER_OVERSCAN,
+        render: (range) => {
+            if (!chatViewerRenderGeneration.isCurrent(generation) || !RendererAccessibility.isDialogOpen('chatViewerModal')) return;
+            rows.style.transform = `translateY(${range.start * CHAT_VIEWER_ROW_HEIGHT}px)`;
+            const fragment = document.createDocumentFragment();
+            for (let index = range.start; index < range.end; index++) fragment.appendChild(createChatViewerRow(messages[index]));
+            rows.replaceChildren(fragment);
+        }
+    });
 }
 
 function formatChatTimeMarker(m: ChatViewerMessage): string {

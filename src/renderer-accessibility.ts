@@ -8,6 +8,13 @@ interface RendererOpenDialogState {
     onEscape?: () => void;
 }
 
+interface RendererFixedHeightVirtualListOptions {
+    itemCount: () => number;
+    rowHeight: number;
+    overscan: number;
+    render: (range: { start: number; end: number }) => void;
+}
+
 const RendererAccessibility = (() => {
     const dialogStack: string[] = [];
     const dialogStates = new Map<string, RendererOpenDialogState>();
@@ -59,6 +66,38 @@ const RendererAccessibility = (() => {
         const normalized = language === 'en' ? 'en' : 'de';
         document.documentElement.lang = normalized;
         return normalized;
+    }
+
+    function setBusy(element: HTMLElement, busy: boolean): void {
+        if (busy) element.setAttribute('aria-busy', 'true');
+        else element.removeAttribute('aria-busy');
+    }
+
+    function createFixedHeightVirtualList(list: HTMLElement, options: RendererFixedHeightVirtualListOptions): { dispose(): void; render(): void } {
+        let disposed = false;
+        let scheduled = false;
+        const render = (): void => {
+            if (disposed) return;
+            options.render(getVirtualRange(list.scrollTop, list.clientHeight, options.itemCount(), options.rowHeight, options.overscan));
+        };
+        const onScroll = (): void => {
+            if (scheduled || disposed) return;
+            scheduled = true;
+            requestAnimationFrame(() => {
+                scheduled = false;
+                render();
+            });
+        };
+        list.addEventListener('scroll', onScroll, { passive: true });
+        render();
+        return {
+            dispose: () => {
+                if (disposed) return;
+                disposed = true;
+                list.removeEventListener('scroll', onScroll);
+            },
+            render,
+        };
     }
 
     function getFocusable(dialog: HTMLElement): HTMLElement[] {
@@ -153,6 +192,7 @@ const RendererAccessibility = (() => {
         if (!(dialog instanceof HTMLElement)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopImmediatePropagation();
             closeTopmostDialog();
             return;
         }
@@ -177,6 +217,8 @@ const RendererAccessibility = (() => {
         getNextFocusIndex,
         getNextMenuIndex,
         setDocumentLanguage,
+        setBusy,
+        createFixedHeightVirtualList,
         isDialogOpen,
         openDialog,
         closeDialog,
