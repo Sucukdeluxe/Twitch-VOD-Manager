@@ -397,7 +397,8 @@ function getManagedToolInstaller(toolId: 'streamlink' | 'ffmpeg'): ManagedToolIn
             if (!await extractZip(archivePath, destinationPath)) {
                 throw new Error('tool archive extraction failed');
             }
-        }
+        },
+        diagnostic: (message, details) => _appendDebugLog(message, details)
     });
     managedToolInstallers.set(toolId, installer);
     return installer;

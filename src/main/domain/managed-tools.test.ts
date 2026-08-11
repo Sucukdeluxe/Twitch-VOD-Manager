@@ -27,10 +27,33 @@ function writeExistingInstallation(installPath: string, contents = 'old executab
     fs.writeFileSync(path.join(installPath, 'bin', 'streamlink.exe'), contents);
 }
 
+function writeVerifiedInstallation(installPath: string, contents = 'old executable'): void {
+    writeExistingInstallation(installPath, contents);
+    const toolManifest = manifest();
+    fs.writeFileSync(path.join(installPath, '.tool-manifest.json'), JSON.stringify({
+        id: toolManifest.id,
+        version: toolManifest.version,
+        sourceUrl: toolManifest.sourceUrl,
+        archiveName: toolManifest.archiveName,
+        sha256: toolManifest.sha256,
+        executableHashes: { 'streamlink.exe': sha256(contents) }
+    }));
+}
+
+function writeInterruptedPromotionJournal(installPath: string, backupPath: string, stagingPath: string, phase: string): void {
+    fs.writeFileSync(`${installPath}.transaction.json`, JSON.stringify({
+        installationDirectory: installPath,
+        backupDirectory: backupPath,
+        stagingDirectory: stagingPath,
+        phase
+    }));
+}
+
 function createInstaller(options: {
     archiveContents?: string;
     extract?: (archivePath: string, destinationPath: string) => Promise<void>;
     rename?: (sourcePath: string, destinationPath: string) => void;
+    remove?: (targetPath: string, options: { recursive?: boolean; force?: boolean }) => void;
 } = {}) {
     const installPath = path.join(directory, 'installed');
     const tempPath = path.join(directory, 'temporary');
@@ -50,7 +73,8 @@ function createInstaller(options: {
             temporaryDirectory: tempPath,
             download,
             extract,
-            rename: options.rename
+            rename: options.rename,
+            remove: options.remove
         }),
         download
     };
@@ -127,7 +151,7 @@ describe('managed tool installer', () => {
         expect(fs.readFileSync(path.join(installPath, 'bin', 'streamlink.exe'), 'utf8')).toBe('old executable');
     });
 
-    it('reports promotion failure when the previous installation cannot be restored', async () => {
+    it('reports recovery failure when the previous installation cannot be restored', async () => {
         const installPath = path.join(directory, 'installed');
         const { installer } = createInstaller({
             rename: (sourcePath, destinationPath) => {
@@ -145,7 +169,7 @@ describe('managed tool installer', () => {
         const result = await installer.repair(manifest());
 
         expect(result.success).toBe(false);
-        expect(result.error).toBe('promotion-failed');
+        expect(result.error).toBe('recovery-restore-failed');
     });
 
     it('reports a verified manifest version only after a staged install is promoted', async () => {
@@ -207,5 +231,93 @@ describe('managed tool installer', () => {
         expect(firstResult.success).toBe(true);
         expect(secondResult.success).toBe(true);
         expect(download).toHaveBeenCalledTimes(1);
+    });
+
+    it('restores a valid previous tool at the active path after interruption between backup and promotion', () => {
+        const { installer, installPath } = createInstaller();
+        const backupPath = `${installPath}.backup-interrupted`;
+        const stagingPath = `${installPath}.stage-interrupted`;
+        writeVerifiedInstallation(backupPath, 'old executable');
+        writeVerifiedInstallation(stagingPath, 'new executable');
+        writeInterruptedPromotionJournal(installPath, backupPath, stagingPath, 'backup-created');
+
+        expect(installer.status(manifest())).toMatchObject({ state: 'verified', verified: true });
+        expect(fs.readFileSync(path.join(installPath, 'bin', 'streamlink.exe'), 'utf8')).toBe('old executable');
+        expect(fs.existsSync(backupPath)).toBe(false);
+        expect(fs.existsSync(stagingPath)).toBe(false);
+        expect(fs.existsSync(`${installPath}.transaction.json`)).toBe(false);
+    });
+
+    it('keeps a valid promoted tool after interruption between promotion and journal cleanup', () => {
+        const { installer, installPath } = createInstaller();
+        const backupPath = `${installPath}.backup-interrupted`;
+        const stagingPath = `${installPath}.stage-interrupted`;
+        writeVerifiedInstallation(installPath, 'new executable');
+        writeVerifiedInstallation(backupPath, 'old executable');
+        writeInterruptedPromotionJournal(installPath, backupPath, stagingPath, 'backup-created');
+
+        expect(installer.status(manifest())).toMatchObject({ state: 'verified', verified: true });
+        expect(fs.readFileSync(path.join(installPath, 'bin', 'streamlink.exe'), 'utf8')).toBe('new executable');
+        expect(fs.existsSync(backupPath)).toBe(false);
+        expect(fs.existsSync(`${installPath}.transaction.json`)).toBe(false);
+    });
+
+    it('reports a precise recovery failure while preserving the usable backup path', async () => {
+        const installPath = path.join(directory, 'installed');
+        const backupPath = `${installPath}.backup-interrupted`;
+        const stagingPath = `${installPath}.stage-interrupted`;
+        const { installer } = createInstaller({
+            rename: (sourcePath, destinationPath) => {
+                if (sourcePath === backupPath && destinationPath === installPath) {
+                    throw new Error('restore denied');
+                }
+                fs.renameSync(sourcePath, destinationPath);
+            }
+        });
+        writeVerifiedInstallation(backupPath, 'old executable');
+        writeVerifiedInstallation(stagingPath, 'new executable');
+        writeInterruptedPromotionJournal(installPath, backupPath, stagingPath, 'backup-created');
+
+        const result = await installer.repair(manifest());
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe('recovery-restore-failed');
+        expect(result.detail).toContain('restore denied');
+        expect(fs.readFileSync(path.join(backupPath, 'bin', 'streamlink.exe'), 'utf8')).toBe('old executable');
+    });
+
+    it('does not leave a repair in flight when archive cleanup fails', async () => {
+        let archiveCleanupFailed = false;
+        const { installer, download } = createInstaller({
+            remove: (targetPath, options) => {
+                if (!archiveCleanupFailed && String(targetPath).includes(manifest().archiveName)) {
+                    archiveCleanupFailed = true;
+                    throw new Error('archive cleanup denied');
+                }
+                fs.rmSync(targetPath, options);
+            }
+        });
+
+        const first = await installer.repair(manifest());
+        const second = await installer.repair(manifest());
+
+        expect(first.success).toBe(true);
+        expect(first.diagnostics).toContain('archive cleanup denied');
+        expect(second.success).toBe(true);
+        expect(download).toHaveBeenCalledTimes(2);
+    });
+
+    it('marks a changed managed executable corrupt and repairs it from a verified archive', async () => {
+        const { installer, installPath } = createInstaller();
+        const installed = await installer.repair(manifest());
+        expect(installed.success).toBe(true);
+        fs.writeFileSync(path.join(installPath, 'bin', 'streamlink.exe'), 'changed executable');
+
+        expect(installer.status(manifest())).toMatchObject({ state: 'corrupt', verified: false });
+
+        const repaired = await installer.repair(manifest());
+        expect(repaired.success).toBe(true);
+        expect(repaired.status).toMatchObject({ state: 'verified', verified: true });
+        expect(fs.readFileSync(path.join(installPath, 'bin', 'streamlink.exe'), 'utf8')).toBe('new executable');
     });
 });

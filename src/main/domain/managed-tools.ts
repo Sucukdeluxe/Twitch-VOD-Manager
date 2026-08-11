@@ -25,7 +25,9 @@ export interface ManagedToolStatus {
 export interface ManagedToolInstallResult {
     success: boolean;
     status: ManagedToolStatus;
-    error?: 'download-failed' | 'archive-hash-mismatch' | 'extract-failed' | 'required-executable-missing' | 'promotion-failed';
+    error?: 'download-failed' | 'archive-hash-mismatch' | 'extract-failed' | 'required-executable-missing' | 'promotion-failed' | 'recovery-journal-invalid' | 'recovery-restore-failed';
+    detail?: string;
+    diagnostics: string[];
 }
 
 interface ManagedToolRecord {
@@ -34,6 +36,27 @@ interface ManagedToolRecord {
     sourceUrl: string;
     archiveName: string;
     sha256: string;
+    executableHashes?: Record<string, string>;
+}
+
+interface InstallationJournal {
+    installationDirectory: string;
+    backupDirectory: string;
+    stagingDirectory: string;
+    phase: 'staged' | 'backup-created' | 'promoted';
+}
+
+interface InstallationInspection {
+    state: ManagedToolStatus['state'];
+    version: string;
+    layoutUsable: boolean;
+    strictValid: boolean;
+}
+
+interface RecoveryResult {
+    success: boolean;
+    error?: NonNullable<ManagedToolInstallResult['error']>;
+    detail?: string;
 }
 
 export interface ManagedToolInstallerOptions {
@@ -42,9 +65,13 @@ export interface ManagedToolInstallerOptions {
     download(sourceUrl: string, archivePath: string): Promise<void>;
     extract(archivePath: string, destinationPath: string): Promise<void>;
     rename?(sourcePath: string, destinationPath: string): void;
+    remove?(targetPath: string, options: { recursive?: boolean; force?: boolean }): void;
+    diagnostic?(message: string, details: Record<string, string>): void;
 }
 
 const RECORD_FILE_NAME = '.tool-manifest.json';
+const JOURNAL_SUFFIX = '.transaction.json';
+const INVALID_JOURNAL = Symbol('invalid-journal');
 
 function findFileRecursive(rootDir: string, fileName: string): string | null {
     try {
@@ -79,6 +106,27 @@ function isRecord(value: unknown): value is ManagedToolRecord {
         && typeof record.sha256 === 'string';
 }
 
+function isJournal(value: unknown, installationDirectory: string): value is InstallationJournal {
+    if (!value || typeof value !== 'object') return false;
+    const journal = value as Record<string, unknown>;
+    if (typeof journal.installationDirectory !== 'string'
+        || typeof journal.backupDirectory !== 'string'
+        || typeof journal.stagingDirectory !== 'string'
+        || (journal.phase !== 'staged' && journal.phase !== 'backup-created' && journal.phase !== 'promoted')) {
+        return false;
+    }
+    const expectedDirectory = path.resolve(installationDirectory);
+    return path.resolve(journal.installationDirectory) === expectedDirectory
+        && isInstallationSibling(expectedDirectory, journal.backupDirectory, '.backup-')
+        && isInstallationSibling(expectedDirectory, journal.stagingDirectory, '.stage-');
+}
+
+function isInstallationSibling(installationDirectory: string, candidate: string, suffix: string): boolean {
+    const resolvedCandidate = path.resolve(candidate);
+    return path.dirname(resolvedCandidate) === path.dirname(installationDirectory)
+        && path.basename(resolvedCandidate).startsWith(`${path.basename(installationDirectory)}${suffix}`);
+}
+
 function matchesManifest(record: ManagedToolRecord, manifest: ExternalToolManifest): boolean {
     return record.id === manifest.id
         && record.version === manifest.version
@@ -87,54 +135,33 @@ function matchesManifest(record: ManagedToolRecord, manifest: ExternalToolManife
         && record.sha256 === manifest.sha256;
 }
 
+function hasExecutableHashes(record: ManagedToolRecord, executables: string[]): record is ManagedToolRecord & { executableHashes: Record<string, string> } {
+    if (!record.executableHashes || typeof record.executableHashes !== 'object') return false;
+    return executables.every((executable) => typeof record.executableHashes?.[executable] === 'string'
+        && /^[a-f0-9]{64}$/i.test(record.executableHashes[executable]));
+}
+
 export class ManagedToolInstaller {
     private readonly inFlight = new Map<ManagedToolId, Promise<ManagedToolInstallResult>>();
 
     constructor(private readonly options: ManagedToolInstallerOptions) {}
 
     status(manifest: ExternalToolManifest, includeInstallState = true): ManagedToolStatus {
-        const base: Omit<ManagedToolStatus, 'state' | 'verified'> = {
-            id: manifest.id,
-            version: manifest.version,
-            sourceUrl: manifest.sourceUrl,
-            archiveName: manifest.archiveName
-        };
-
         if (includeInstallState && this.inFlight.has(manifest.id)) {
-            return { ...base, state: 'installing', verified: false };
+            return this.createStatus(manifest, 'installing', false);
         }
 
-        if (!fs.existsSync(this.options.installationDirectory)) {
-            return { ...base, state: 'missing', verified: false };
+        const recovery = this.recover(manifest, []);
+        if (!recovery.success) {
+            return this.createStatus(manifest, 'corrupt', false);
         }
-
-        let record: ManagedToolRecord | null = null;
-        try {
-            const parsed = JSON.parse(fs.readFileSync(path.join(this.options.installationDirectory, RECORD_FILE_NAME), 'utf8'));
-            if (!isRecord(parsed)) {
-                return { ...base, state: 'corrupt', verified: false };
-            }
-            record = parsed;
-        } catch {
-            const hasAnyExecutable = manifest.executables.some((name) => findFileRecursive(this.options.installationDirectory, name));
-            return { ...base, state: hasAnyExecutable ? 'unverified' : 'corrupt', verified: false };
-        }
-
-        const recordBase = { ...base, version: record.version };
-        if (!matchesManifest(record, manifest)) {
-            return { ...recordBase, state: 'unverified', verified: false };
-        }
-
-        const allExecutablesPresent = manifest.executables.every((name) => findFileRecursive(this.options.installationDirectory, name));
-        return allExecutablesPresent
-            ? { ...recordBase, state: 'verified', verified: true }
-            : { ...recordBase, state: 'corrupt', verified: false };
+        return this.statusFromInspection(manifest);
     }
 
     install(manifest: ExternalToolManifest): Promise<ManagedToolInstallResult> {
         const currentStatus = this.status(manifest);
         if (currentStatus.verified) {
-            return Promise.resolve({ success: true, status: currentStatus });
+            return Promise.resolve({ success: true, status: currentStatus, diagnostics: [] });
         }
         return this.start(manifest);
     }
@@ -147,7 +174,14 @@ export class ManagedToolInstaller {
         if (this.inFlight.has(manifest.id)) {
             return this.status(manifest);
         }
-        fs.rmSync(this.options.installationDirectory, { recursive: true, force: true });
+        const diagnostics: string[] = [];
+        const journal = this.readJournal();
+        if (isJournal(journal, this.options.installationDirectory)) {
+            this.cleanup(journal.backupDirectory, true, diagnostics);
+            this.cleanup(journal.stagingDirectory, true, diagnostics);
+        }
+        this.cleanup(this.options.installationDirectory, true, diagnostics);
+        this.cleanup(this.journalPath(), false, diagnostics);
         return this.status(manifest);
     }
 
@@ -155,13 +189,16 @@ export class ManagedToolInstaller {
         const existing = this.inFlight.get(manifest.id);
         if (existing) return existing;
 
-        const operation = this.installOnce(manifest);
+        let operation!: Promise<ManagedToolInstallResult>;
+        operation = Promise.resolve()
+            .then(() => this.installOnce(manifest))
+            .catch((error: unknown) => this.failure(manifest, 'download-failed', this.errorText(error), []))
+            .finally(() => {
+                if (this.inFlight.get(manifest.id) === operation) {
+                    this.inFlight.delete(manifest.id);
+                }
+            });
         this.inFlight.set(manifest.id, operation);
-        void operation.then(() => {
-            if (this.inFlight.get(manifest.id) === operation) {
-                this.inFlight.delete(manifest.id);
-            }
-        });
         return operation;
     }
 
@@ -169,78 +206,245 @@ export class ManagedToolInstaller {
         const uniqueSuffix = crypto.randomUUID();
         const archivePath = path.join(this.options.temporaryDirectory, `${manifest.archiveName}.${uniqueSuffix}`);
         const stagingDirectory = `${this.options.installationDirectory}.stage-${uniqueSuffix}`;
-        let error: ManagedToolInstallResult['error'] | undefined;
+        const diagnostics: string[] = [];
 
         try {
+            const recovery = this.recover(manifest, diagnostics);
+            if (!recovery.success) {
+                return this.failure(manifest, recovery.error!, recovery.detail, diagnostics);
+            }
+
             fs.mkdirSync(this.options.temporaryDirectory, { recursive: true });
             await this.options.download(manifest.sourceUrl, archivePath);
             if (sha256File(archivePath).toLowerCase() !== manifest.sha256.toLowerCase()) {
-                error = 'archive-hash-mismatch';
-                return { success: false, error, status: this.status(manifest, false) };
+                return this.failure(manifest, 'archive-hash-mismatch', undefined, diagnostics);
             }
 
             try {
                 await this.options.extract(archivePath, stagingDirectory);
-            } catch {
-                error = 'extract-failed';
-                return { success: false, error, status: this.status(manifest, false) };
+            } catch (error) {
+                return this.failure(manifest, 'extract-failed', this.errorText(error), diagnostics);
             }
 
-            if (!manifest.executables.every((name) => findFileRecursive(stagingDirectory, name))) {
-                error = 'required-executable-missing';
-                return { success: false, error, status: this.status(manifest, false) };
+            const executablePaths = this.executablePaths(stagingDirectory, manifest.executables);
+            if (!executablePaths) {
+                return this.failure(manifest, 'required-executable-missing', undefined, diagnostics);
             }
 
+            const executableHashes = Object.fromEntries(executablePaths.map(([name, executablePath]) => [name, sha256File(executablePath)]));
             const record: ManagedToolRecord = {
                 id: manifest.id,
                 version: manifest.version,
                 sourceUrl: manifest.sourceUrl,
                 archiveName: manifest.archiveName,
-                sha256: manifest.sha256
+                sha256: manifest.sha256,
+                executableHashes
             };
             fs.writeFileSync(path.join(stagingDirectory, RECORD_FILE_NAME), JSON.stringify(record));
 
-            try {
-                this.promote(stagingDirectory);
-            } catch {
-                error = 'promotion-failed';
-                return { success: false, error, status: this.status(manifest, false) };
+            const promotion = this.promote(manifest, stagingDirectory, diagnostics);
+            if (!promotion.success) {
+                return this.failure(manifest, promotion.error!, promotion.detail, diagnostics);
             }
 
-            return { success: true, status: this.status(manifest, false) };
-        } catch {
-            error = 'download-failed';
-            return { success: false, error, status: this.status(manifest, false) };
+            return { success: true, status: this.statusFromInspection(manifest), diagnostics };
+        } catch (error) {
+            return this.failure(manifest, 'download-failed', this.errorText(error), diagnostics);
         } finally {
-            fs.rmSync(archivePath, { force: true });
-            fs.rmSync(stagingDirectory, { recursive: true, force: true });
+            this.cleanup(archivePath, false, diagnostics);
+            this.cleanup(stagingDirectory, true, diagnostics);
         }
     }
 
-    private promote(stagingDirectory: string): void {
+    private promote(manifest: ExternalToolManifest, stagingDirectory: string, diagnostics: string[]): RecoveryResult {
         const backupDirectory = `${this.options.installationDirectory}.backup-${crypto.randomUUID()}`;
-        const rename = this.options.rename ?? fs.renameSync;
-        let previousMoved = false;
+        const journal: InstallationJournal = {
+            installationDirectory: this.options.installationDirectory,
+            backupDirectory,
+            stagingDirectory,
+            phase: 'staged'
+        };
 
         try {
+            this.writeJournal(journal, diagnostics);
             if (fs.existsSync(this.options.installationDirectory)) {
-                rename(this.options.installationDirectory, backupDirectory);
-                previousMoved = true;
+                this.rename(this.options.installationDirectory, backupDirectory);
+                journal.phase = 'backup-created';
+                this.writeJournal(journal, diagnostics);
             }
-            rename(stagingDirectory, this.options.installationDirectory);
-            if (previousMoved) {
-                try {
-                    fs.rmSync(backupDirectory, { recursive: true, force: true });
-                } catch {}
-            }
+            this.rename(stagingDirectory, this.options.installationDirectory);
+            journal.phase = 'promoted';
+            this.writeJournal(journal, diagnostics);
+            this.cleanup(backupDirectory, true, diagnostics);
+            this.cleanup(this.journalPath(), false, diagnostics);
+            return { success: true };
         } catch (error) {
-            if (previousMoved && fs.existsSync(backupDirectory) && !fs.existsSync(this.options.installationDirectory)) {
-                try {
-                    rename(backupDirectory, this.options.installationDirectory);
-                } catch {}
-            }
-            throw error;
+            const recovery = this.recover(manifest, diagnostics);
+            return recovery.success
+                ? { success: false, error: 'promotion-failed', detail: this.errorText(error) }
+                : recovery;
         }
+    }
+
+    private recover(manifest: ExternalToolManifest, diagnostics: string[]): RecoveryResult {
+        const journal = this.readJournal();
+        if (journal === undefined) {
+            return { success: true };
+        }
+        if (!isJournal(journal, this.options.installationDirectory)) {
+            return { success: false, error: 'recovery-journal-invalid', detail: 'Ungültiges Installationsjournal.' };
+        }
+        return this.recoverJournal(manifest, journal, diagnostics);
+    }
+
+    private recoverJournal(manifest: ExternalToolManifest, journal: InstallationJournal, diagnostics: string[]): RecoveryResult {
+        const active = this.inspectInstallation(this.options.installationDirectory, manifest);
+        if (active.strictValid || (journal.phase === 'staged' && active.layoutUsable)) {
+            this.cleanup(journal.backupDirectory, true, diagnostics);
+            this.cleanup(journal.stagingDirectory, true, diagnostics);
+            this.cleanup(this.journalPath(), false, diagnostics);
+            return { success: true };
+        }
+
+        const backup = this.inspectInstallation(journal.backupDirectory, manifest);
+        if (!backup.layoutUsable) {
+            return { success: false, error: 'recovery-restore-failed', detail: 'Kein nutzbares Tool-Backup für die Wiederherstellung vorhanden.' };
+        }
+
+        let displacedDirectory: string | undefined;
+        try {
+            if (fs.existsSync(this.options.installationDirectory)) {
+                displacedDirectory = `${this.options.installationDirectory}.recovery-${crypto.randomUUID()}`;
+                this.rename(this.options.installationDirectory, displacedDirectory);
+            }
+            this.rename(journal.backupDirectory, this.options.installationDirectory);
+        } catch (error) {
+            return { success: false, error: 'recovery-restore-failed', detail: this.errorText(error) };
+        }
+
+        this.cleanup(journal.stagingDirectory, true, diagnostics);
+        if (displacedDirectory) {
+            this.cleanup(displacedDirectory, true, diagnostics);
+        }
+        this.cleanup(this.journalPath(), false, diagnostics);
+        return { success: true };
+    }
+
+    private statusFromInspection(manifest: ExternalToolManifest): ManagedToolStatus {
+        const inspection = this.inspectInstallation(this.options.installationDirectory, manifest);
+        return this.createStatus(manifest, inspection.state, inspection.strictValid, inspection.version);
+    }
+
+    private inspectInstallation(directory: string, manifest: ExternalToolManifest): InstallationInspection {
+        if (!fs.existsSync(directory)) {
+            return { state: 'missing', version: manifest.version, layoutUsable: false, strictValid: false };
+        }
+
+        const executablePaths = this.executablePaths(directory, manifest.executables);
+        if (!executablePaths) {
+            return { state: 'corrupt', version: manifest.version, layoutUsable: false, strictValid: false };
+        }
+
+        const record = this.readRecord(directory);
+        if (!record || !isRecord(record)) {
+            return { state: 'unverified', version: manifest.version, layoutUsable: true, strictValid: false };
+        }
+        if (!matchesManifest(record, manifest)) {
+            return { state: 'unverified', version: record.version, layoutUsable: true, strictValid: false };
+        }
+        if (!hasExecutableHashes(record, manifest.executables)) {
+            return { state: 'unverified', version: record.version, layoutUsable: true, strictValid: false };
+        }
+
+        try {
+            const hashesMatch = executablePaths.every(([name, executablePath]) => sha256File(executablePath).toLowerCase() === record.executableHashes[name].toLowerCase());
+            return hashesMatch
+                ? { state: 'verified', version: record.version, layoutUsable: true, strictValid: true }
+                : { state: 'corrupt', version: record.version, layoutUsable: true, strictValid: false };
+        } catch {
+            return { state: 'corrupt', version: record.version, layoutUsable: true, strictValid: false };
+        }
+    }
+
+    private executablePaths(directory: string, executables: string[]): Array<[string, string]> | null {
+        const paths = executables.map((name) => [name, findFileRecursive(directory, name)] as const);
+        if (paths.some(([, executablePath]) => !executablePath)) {
+            return null;
+        }
+        return paths as Array<[string, string]>;
+    }
+
+    private readRecord(directory: string): unknown {
+        try {
+            return JSON.parse(fs.readFileSync(path.join(directory, RECORD_FILE_NAME), 'utf8'));
+        } catch {
+            return null;
+        }
+    }
+
+    private readJournal(): unknown | typeof INVALID_JOURNAL | undefined {
+        try {
+            if (!fs.existsSync(this.journalPath())) {
+                return undefined;
+            }
+            return JSON.parse(fs.readFileSync(this.journalPath(), 'utf8'));
+        } catch {
+            return INVALID_JOURNAL;
+        }
+    }
+
+    private writeJournal(journal: InstallationJournal, diagnostics: string[]): void {
+        const journalPath = this.journalPath();
+        const temporaryPath = `${journalPath}.${crypto.randomUUID()}.tmp`;
+        try {
+            fs.writeFileSync(temporaryPath, JSON.stringify(journal));
+            this.rename(temporaryPath, journalPath);
+        } finally {
+            this.cleanup(temporaryPath, false, diagnostics);
+        }
+    }
+
+    private journalPath(): string {
+        return `${this.options.installationDirectory}${JOURNAL_SUFFIX}`;
+    }
+
+    private rename(sourcePath: string, destinationPath: string): void {
+        (this.options.rename ?? fs.renameSync)(sourcePath, destinationPath);
+    }
+
+    private cleanup(targetPath: string, recursive: boolean, diagnostics: string[]): void {
+        try {
+            (this.options.remove ?? fs.rmSync)(targetPath, { recursive, force: true });
+        } catch (error) {
+            const errorText = this.errorText(error);
+            diagnostics.push(errorText);
+            this.options.diagnostic?.('managed-tool-cleanup-failed', { path: targetPath, error: errorText });
+        }
+    }
+
+    private createStatus(manifest: ExternalToolManifest, state: ManagedToolStatus['state'], verified: boolean, version = manifest.version): ManagedToolStatus {
+        return {
+            id: manifest.id,
+            version,
+            sourceUrl: manifest.sourceUrl,
+            archiveName: manifest.archiveName,
+            state,
+            verified
+        };
+    }
+
+    private failure(manifest: ExternalToolManifest, error: NonNullable<ManagedToolInstallResult['error']>, detail: string | undefined, diagnostics: string[]): ManagedToolInstallResult {
+        return {
+            success: false,
+            error,
+            detail,
+            status: this.statusFromInspection(manifest),
+            diagnostics
+        };
+    }
+
+    private errorText(error: unknown): string {
+        return error instanceof Error ? error.message : String(error);
     }
 }
 
