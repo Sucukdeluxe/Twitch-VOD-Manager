@@ -52,6 +52,7 @@ import { registerTrustedIpcHandler } from './main/domain/privileged-ipc';
 import { createRendererQueueItem, getMergeGroupCleanupPaths } from './main/domain/renderer-queue-input';
 import { createAppStateStore, type AppStateStore } from './main/domain/app-state-store';
 import { createExportableConfig } from './main/domain/config-export';
+import { persistStateChange } from './main/domain/persistence-commit';
 import { resolveSecretInputUpdate } from './main/domain/secret-input';
 import { createSecretStore, type SecretStore } from './main/domain/secret-store';
 import { createElectronSecureStorage } from './main/infra/secure-storage';
@@ -456,17 +457,15 @@ function normalizeConfigTemplates(input: Config): Config {
 
 function recordDownloadedVodId(vodId: string): void {
     if (!vodId) return;
-    if (!Array.isArray(config.downloaded_vod_ids)) config.downloaded_vod_ids = [];
-    if (config.downloaded_vod_ids.includes(vodId)) return;
-    config.downloaded_vod_ids.push(vodId);
-    // Cap to keep config size bounded — drop oldest first.
+    const downloadedVodIds = Array.isArray(config.downloaded_vod_ids) ? config.downloaded_vod_ids : [];
+    if (downloadedVodIds.includes(vodId)) return;
     const DOWNLOADED_IDS_MAX = 4096;
-    if (config.downloaded_vod_ids.length > DOWNLOADED_IDS_MAX) {
-        config.downloaded_vod_ids = config.downloaded_vod_ids.slice(
-            config.downloaded_vod_ids.length - DOWNLOADED_IDS_MAX
-        );
-    }
-    saveConfig(config);
+    const nextDownloadedVodIds = [...downloadedVodIds, vodId].slice(-DOWNLOADED_IDS_MAX);
+    config = persistStateChange(config, (current) => ({ ...current, downloaded_vod_ids: nextDownloadedVodIds }), saveConfig);
+}
+
+function cloneConfig(value: Config): Config {
+    return JSON.parse(JSON.stringify(value)) as Config;
 }
 
 function loadConfig(): Config {
@@ -481,12 +480,14 @@ function loadConfig(): Config {
     return normalizeConfigTemplates(defaultConfig);
 }
 
-function saveConfig(config: Config): void {
+function saveConfig(nextConfig: Config): void {
+    if (!appStateStore) throw new Error('Application state store is unavailable');
     try {
-        if (!appStateStore) throw new Error('Application state store is unavailable');
-        appStateStore.saveConfig(config);
-    } catch (e) {
-        console.error('Error saving config:', e);
+        appStateStore.saveConfig(nextConfig);
+        lastPersistedConfig = cloneConfig(nextConfig);
+    } catch (error) {
+        if (nextConfig === config) config = cloneConfig(lastPersistedConfig);
+        throw error;
     }
 }
 
@@ -635,12 +636,14 @@ function loadQueue(): QueueItem[] {
 let queueSaveTimer: NodeJS.Timeout | null = null;
 let pendingQueueSnapshot: QueueItem[] | null = null;
 
+function cloneQueue(queue: QueueItem[]): QueueItem[] {
+    return JSON.parse(JSON.stringify(queue)) as QueueItem[];
+}
+
 function clearQueueFileFromDisk(): void {
-    try {
-        appStateStore?.saveQueue([]);
-    } catch (e) {
-        console.error('Error clearing queue file:', e);
-    }
+    if (!appStateStore) throw new Error('Application state store is unavailable');
+    appStateStore.saveQueue([]);
+    lastPersistedQueueSnapshot = [];
 }
 
 function writeQueueToDisk(queue: QueueItem[]): void {
@@ -649,26 +652,14 @@ function writeQueueToDisk(queue: QueueItem[]): void {
         return;
     }
 
-    try {
-        if (!appStateStore) throw new Error('Application state store is unavailable');
-        appStateStore.saveQueue(queue);
-    } catch (e) {
-        console.error('Error saving queue:', e);
-    }
+    if (!appStateStore) throw new Error('Application state store is unavailable');
+    appStateStore.saveQueue(queue);
+    lastPersistedQueueSnapshot = cloneQueue(queue);
 }
 
 function saveQueue(queue: QueueItem[], force = false): void {
-    if (config.persist_queue_on_restart === false) {
-        pendingQueueSnapshot = null;
-        if (queueSaveTimer) {
-            clearTimeout(queueSaveTimer);
-            queueSaveTimer = null;
-        }
-        clearQueueFileFromDisk();
-        return;
-    }
-
-    pendingQueueSnapshot = queue;
+    const snapshot = cloneQueue(queue);
+    pendingQueueSnapshot = snapshot;
 
     if (appShutdownStarted && !force) {
         if (queueSaveTimer) {
@@ -678,28 +669,19 @@ function saveQueue(queue: QueueItem[], force = false): void {
         return;
     }
 
-    if (force) {
-        if (queueSaveTimer) {
-            clearTimeout(queueSaveTimer);
-            queueSaveTimer = null;
-        }
-
-        writeQueueToDisk(pendingQueueSnapshot);
-        pendingQueueSnapshot = null;
-        return;
-    }
-
     if (queueSaveTimer) {
-        return;
+        clearTimeout(queueSaveTimer);
+        queueSaveTimer = null;
     }
 
-    queueSaveTimer = setTimeout(() => {
-        queueSaveTimer = null;
-        if (pendingQueueSnapshot) {
-            writeQueueToDisk(pendingQueueSnapshot);
-            pendingQueueSnapshot = null;
-        }
-    }, QUEUE_SAVE_DEBOUNCE_MS);
+    try {
+        writeQueueToDisk(snapshot);
+        pendingQueueSnapshot = null;
+    } catch (error) {
+        pendingQueueSnapshot = null;
+        if (queue === downloadQueue) downloadQueue = cloneQueue(lastPersistedQueueSnapshot);
+        throw error;
+    }
 }
 
 function flushQueueSave(): void {
@@ -731,10 +713,12 @@ function startDevelopmentReload(): void {
 let appStateStore: AppStateStore | null = null;
 let appSecretStore: SecretStore | null = null;
 let config = normalizeConfigTemplates(defaultConfig);
+let lastPersistedConfig = cloneConfig(config);
 let twitchClientSecret = '';
 let discordWebhookUrl = '';
 let accessToken: string | null = null;
 let downloadQueue: QueueItem[] = [];
+let lastPersistedQueueSnapshot: QueueItem[] = [];
 let queueIdCounter = 0;
 let lastQueueBroadcastFingerprint = '';
 let isDownloading = false;
@@ -7289,7 +7273,8 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
             delete acceptedConfig.download_path;
         }
     }
-    config = normalizeConfigTemplates({ ...config, ...acceptedConfig });
+    const nextConfig = normalizeConfigTemplates({ ...config, ...acceptedConfig });
+    config = persistStateChange(config, () => nextConfig, saveConfig);
 
     if (config.client_id !== previousClientId) {
         accessToken = null;
@@ -7303,8 +7288,6 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
     if (config.theme !== previousTheme) {
         nativeTheme.themeSource = config.theme === 'light' ? 'light' : 'dark';
     }
-
-    saveConfig(config);
 
     if (config.persist_queue_on_restart === false) {
         pendingQueueSnapshot = null;
@@ -7408,8 +7391,7 @@ ipcMain.handle('start-live-recording', async (event, streamerName: string) => {
         return { success: false, error: 'ALREADY_RECORDING', streamer: login };
     }
 
-    downloadQueue.push(liveItem);
-    saveQueue(downloadQueue);
+    downloadQueue = persistStateChange(downloadQueue, (current) => [...current, liveItem], saveQueue);
     emitQueueUpdated();
     if (!isDownloading) scheduleQueueProcessing();
     appendDebugLog('live-recording-queued', { streamer: login, title: liveItem.title });
@@ -7434,8 +7416,7 @@ registerTrustedIpcHandler(ipcMain, 'add-to-queue', isTrustedRendererEvent, () =>
         return downloadQueue;
     }
 
-    downloadQueue.push(item);
-    saveQueue(downloadQueue);
+    downloadQueue = persistStateChange(downloadQueue, (current) => [...current, item], saveQueue);
     emitQueueUpdated();
     return downloadQueue;
 });
@@ -7461,16 +7442,14 @@ registerTrustedIpcHandler(ipcMain, 'remove-from-queue', isTrustedRendererEvent, 
         try { if (fs.existsSync(cleanupPath)) fs.unlinkSync(cleanupPath); } catch { }
     }
 
-    downloadQueue = downloadQueue.filter(item => item.id !== id);
-    saveQueue(downloadQueue);
+    downloadQueue = persistStateChange(downloadQueue, (current) => current.filter((item) => item.id !== id), saveQueue);
     emitQueueUpdated();
     return downloadQueue;
 });
 
 ipcMain.handle('clear-completed', (event) => {
     if (!isTrustedRendererEvent(event)) return downloadQueue;
-    downloadQueue = downloadQueue.filter(item => item.status !== 'completed');
-    saveQueue(downloadQueue);
+    downloadQueue = persistStateChange(downloadQueue, (current) => current.filter((item) => item.status !== 'completed'), saveQueue);
     emitQueueUpdated();
     return downloadQueue;
 });
@@ -7484,8 +7463,7 @@ ipcMain.handle('reorder-queue', (event, orderIds: string[]) => {
         return ai - bi;
     });
 
-    downloadQueue = withOrder;
-    saveQueue(downloadQueue);
+    downloadQueue = persistStateChange(downloadQueue, () => withOrder, saveQueue);
     emitQueueUpdated();
     return downloadQueue;
 });
@@ -7495,18 +7473,18 @@ ipcMain.handle('retry-failed-downloads', async (event) => {
     const failedIds = downloadQueue.filter((item) => item.status === 'error').map((item) => item.id);
     await Promise.all(failedIds.map((id) => queueProcessRegistry.cancelItem(id)));
     for (const id of failedIds) queueProcessRegistry.resetItem(id);
-    downloadQueue = downloadQueue.map((item) => {
+    const nextQueue: QueueItem[] = downloadQueue.map((item) => {
         if (item.status !== 'error') return item;
 
         return {
             ...item,
-            status: 'pending',
+            status: 'pending' as const,
             progress: 0,
             last_error: ''
         };
     });
 
-    saveQueue(downloadQueue);
+    downloadQueue = persistStateChange(downloadQueue, () => nextQueue, saveQueue);
     emitQueueUpdated();
 
     if (!isDownloading) {
@@ -7527,14 +7505,12 @@ ipcMain.handle('retry-queue-item', async (event, id: string) => {
     await queueProcessRegistry.cancelItem(id);
     queueProcessRegistry.resetItem(id);
 
-    downloadQueue[idx] = {
-        ...item,
+    downloadQueue = persistStateChange(downloadQueue, (current) => current.map((candidate) => candidate.id === id ? {
+        ...candidate,
         status: 'pending',
         progress: 0,
         last_error: ''
-    };
-
-    saveQueue(downloadQueue);
+    } : candidate), saveQueue);
     emitQueueUpdated();
     appendDebugLog('queue-item-retry-single', { id, title: item.title });
 
@@ -7615,10 +7591,9 @@ ipcMain.handle('create-merge-group', (event, itemIds: string[]) => {
     const firstIndex = downloadQueue.findIndex(item => itemIds.includes(item.id));
 
     // Remove selected items and insert merged item at first position
-    downloadQueue = downloadQueue.filter(item => !itemIds.includes(item.id));
-    downloadQueue.splice(firstIndex >= 0 ? Math.min(firstIndex, downloadQueue.length) : downloadQueue.length, 0, mergedItem);
-
-    saveQueue(downloadQueue);
+    const nextQueue = downloadQueue.filter((item) => !itemIds.includes(item.id));
+    nextQueue.splice(firstIndex >= 0 ? Math.min(firstIndex, nextQueue.length) : nextQueue.length, 0, mergedItem);
+    downloadQueue = persistStateChange(downloadQueue, () => nextQueue, saveQueue);
     emitQueueUpdated();
     return downloadQueue;
 });
@@ -7626,26 +7601,24 @@ ipcMain.handle('create-merge-group', (event, itemIds: string[]) => {
 ipcMain.handle('start-download', async (event) => {
     if (!isTrustedRendererEvent(event)) return false;
     if (isDownloading && queuePaused) {
+        const nextQueue = downloadQueue.map((item) => item.status === 'paused' ? { ...item, status: 'downloading' as const } : item);
+        downloadQueue = persistStateChange(downloadQueue, () => nextQueue, saveQueue);
         queuePaused = false;
-        for (const item of downloadQueue) {
-            if (item.status === 'paused') item.status = 'downloading';
-        }
         await Promise.all(queueProcessRegistry.activeItemIds().map((id) => queueProcessRegistry.resumeItem(id)));
-        saveQueue(downloadQueue);
         emitQueueUpdated(true);
         mainWindow?.webContents.send('download-started');
         return true;
     }
 
-    downloadQueue = downloadQueue.map((item) => item.status === 'paused' ? { ...item, status: 'pending' } : item);
+    const nextQueue = downloadQueue.map((item) => item.status === 'paused' ? { ...item, status: 'pending' as const } : item);
 
-    const hasPendingItems = downloadQueue.some(item => item.status === 'pending');
+    const hasPendingItems = nextQueue.some(item => item.status === 'pending');
     if (!hasPendingItems) {
         emitQueueUpdated();
         return false;
     }
 
-    saveQueue(downloadQueue);
+    downloadQueue = persistStateChange(downloadQueue, () => nextQueue, saveQueue);
     emitQueueUpdated();
 
     if (!isDownloading) {
@@ -7658,17 +7631,16 @@ ipcMain.handle('pause-download', async (event) => {
     if (!isTrustedRendererEvent(event)) return false;
     if (!isDownloading || queuePaused) return false;
 
-    queuePaused = true;
     await Promise.all(queueProcessRegistry.activeItemIds().map((id) => queueProcessRegistry.pauseItem(id)));
-    for (const item of downloadQueue) {
-        if (item.status === 'downloading') {
-            item.status = 'paused';
-            item.speed = '';
-            item.eta = '';
-            item.progressStatus = tBackend('downloadPaused');
-        }
-    }
-    saveQueue(downloadQueue);
+    const nextQueue = downloadQueue.map((item) => item.status === 'downloading' ? {
+        ...item,
+        status: 'paused' as const,
+        speed: '',
+        eta: '',
+        progressStatus: tBackend('downloadPaused')
+    } : item);
+    downloadQueue = persistStateChange(downloadQueue, () => nextQueue, saveQueue);
+    queuePaused = true;
     emitQueueUpdated(true);
     mainWindow?.webContents.send('download-paused');
     return true;
@@ -8170,16 +8142,17 @@ ipcMain.handle('export-runtime-metrics', async (event) => {
 ipcMain.handle('mark-vod-downloaded', (event, vodId: string, mark: boolean): { success: boolean } => {
     if (!isTrustedRendererEvent(event)) return { success: false };
     if (typeof vodId !== 'string' || !vodId) return { success: false };
-    if (!Array.isArray(config.downloaded_vod_ids)) config.downloaded_vod_ids = [];
-    const has = config.downloaded_vod_ids.includes(vodId);
+    const downloadedVodIds = Array.isArray(config.downloaded_vod_ids) ? config.downloaded_vod_ids : [];
+    const has = downloadedVodIds.includes(vodId);
+    let nextDownloadedVodIds: string[];
     if (mark && !has) {
-        config.downloaded_vod_ids.push(vodId);
+        nextDownloadedVodIds = [...downloadedVodIds, vodId];
     } else if (!mark && has) {
-        config.downloaded_vod_ids = config.downloaded_vod_ids.filter((id) => id !== vodId);
+        nextDownloadedVodIds = downloadedVodIds.filter((id) => id !== vodId);
     } else {
         return { success: true };
     }
-    saveConfig(config);
+    config = persistStateChange(config, (current) => ({ ...current, downloaded_vod_ids: nextDownloadedVodIds }), saveConfig);
     appendDebugLog('mark-vod-downloaded', { vodId, mark });
     return { success: true };
 });
@@ -8187,8 +8160,7 @@ ipcMain.handle('mark-vod-downloaded', (event, vodId: string, mark: boolean): { s
 ipcMain.handle('reset-downloaded-vod-ids', (event) => {
     if (!isTrustedRendererEvent(event)) return { success: false, removedCount: 0 };
     const count = Array.isArray(config.downloaded_vod_ids) ? config.downloaded_vod_ids.length : 0;
-    config.downloaded_vod_ids = [];
-    saveConfig(config);
+    config = persistStateChange(config, (current) => ({ ...current, downloaded_vod_ids: [] }), saveConfig);
     appendDebugLog('reset-downloaded-vod-ids', { previousCount: count });
     return { success: true, removedCount: count };
 });
@@ -8254,8 +8226,7 @@ ipcMain.handle('import-config', async (event) => {
         delete imported.__exportedAt;
         const merged = normalizeConfigTemplates({ ...config, ...imported } as Config);
 
-        config = merged;
-        saveConfig(config);
+        config = persistStateChange(config, () => merged, saveConfig);
         appendDebugLog('config-import-applied', { source: importPath });
         return { success: true, filePath: importPath };
     } catch (e) {
@@ -8481,8 +8452,10 @@ app.whenReady().then(() => {
         if (result.errors.length > 0) throw new Error(result.errors.map((entry: { source: string; message: string }) => `${entry.source}: ${entry.message}`).join('; '));
         appStateStore = createAppStateStore(database);
         config = loadConfig();
+        lastPersistedConfig = cloneConfig(config);
         downloadQueue = config.persist_queue_on_restart === false ? [] : loadQueue();
         if (config.persist_queue_on_restart === false) appStateStore.saveQueue([]);
+        lastPersistedQueueSnapshot = cloneQueue(downloadQueue);
         twitchClientSecret = appSecretStore.get('twitch_client_secret') ?? '';
         discordWebhookUrl = appSecretStore.get('discord_webhook_url') ?? '';
     } catch (e) {
@@ -8494,7 +8467,9 @@ app.whenReady().then(() => {
         appStateStore = null;
         appSecretStore = null;
         config = normalizeConfigTemplates(defaultConfig);
+        lastPersistedConfig = cloneConfig(config);
         downloadQueue = [];
+        lastPersistedQueueSnapshot = [];
         twitchClientSecret = '';
         discordWebhookUrl = '';
     }

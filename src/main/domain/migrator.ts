@@ -82,11 +82,6 @@ export function migrateJsonToSqlite(opts: MigratorOptions): MigrationResult {
     const queuePath = path.join(appDataDir, 'download_queue.json');
     const existing = db.get<{ name: string }>('SELECT name FROM migrations_applied WHERE name = ?', [MIGRATION_NAME]);
     if (existing) {
-        try {
-            scrubExistingConfig(configPath);
-        } catch (error) {
-            return emptyResult(true, [{ source: 'config.json', message: error instanceof Error ? error.message : String(error) }]);
-        }
         return emptyResult(true);
     }
 
@@ -99,7 +94,7 @@ export function migrateJsonToSqlite(opts: MigratorOptions): MigrationResult {
         errors.push({ source: 'download_queue.json', message: 'Queue JSON must be an array' });
     }
     if (errors.length > 0) return emptyResult(false, errors);
-    if (config && (typeof config !== 'object' || Array.isArray(config))) {
+    if (configExists && (!config || typeof config !== 'object' || Array.isArray(config))) {
         return emptyResult(false, [{ source: 'config.json', message: 'Config JSON must be an object' }]);
     }
     if (config && !secrets && [...SECRET_KEYS].some((key) => typeof config[key] === 'string' && config[key])) {

@@ -181,6 +181,42 @@ describe('migrateJsonToSqlite', () => {
         expect(JSON.parse(language!.value)).toBe('de');
     });
 
+    test('keeps SQLite config queue and secrets authoritative after a corrupted legacy config restart', () => {
+        const configPath = writeJson('config.json', { language: 'de', client_secret: 'persisted-secret' });
+        writeJson('download_queue.json', [{ id: 'q1', status: 'pending', title: 'Persisted queue item' }]);
+        let secrets = createSecretStore(db, new MemorySecureStorage());
+
+        migrateJsonToSqlite({ db, appDataDir, secrets });
+        db.close();
+        db = openDatabase(path.join(tmpDir, 'app.db'));
+        secrets = createSecretStore(db, new MemorySecureStorage());
+        fs.writeFileSync(configPath, '{ no longer valid JSON', 'utf-8');
+
+        const restart = migrateJsonToSqlite({ db, appDataDir, secrets });
+
+        expect(restart).toMatchObject({ alreadyApplied: true, errors: [] });
+        expect(JSON.parse(db.get<{ value: string }>('SELECT value FROM config_kv WHERE key = ?', ['language'])!.value)).toBe('de');
+        expect(db.all<{ id: string }>('SELECT id FROM queue_items ORDER BY queue_position')).toEqual([{ id: 'q1' }]);
+        expect(secrets.get('twitch_client_secret')).toBe('persisted-secret');
+    });
+
+    test.each([
+        ['null', null],
+        ['false', false],
+        ['zero', 0],
+        ['empty string', ''],
+    ])('does not mark or partially migrate a syntactically valid but invalid %s config', (_, invalidConfig) => {
+        writeJson('config.json', invalidConfig);
+        writeJson('download_queue.json', [{ id: 'q1', status: 'pending' }]);
+
+        const result = migrateJsonToSqlite({ db, appDataDir });
+
+        expect(result.errors).toEqual([{ source: 'config.json', message: 'Config JSON must be an object' }]);
+        expect(db.all('SELECT * FROM config_kv')).toEqual([]);
+        expect(db.all('SELECT * FROM queue_items')).toEqual([]);
+        expect(db.get('SELECT name FROM migrations_applied WHERE name = ?', ['authoritative-state-v1'])).toBeUndefined();
+    });
+
     test('does not let the former shadow-migration marker skip authoritative secret import', () => {
         const configPath = writeJson('config.json', { language: 'de', client_secret: 'legacy-secret' });
         db.run('INSERT INTO migrations_applied(name, payload) VALUES (?, ?)', ['v4-to-v5-jsons', '{}']);

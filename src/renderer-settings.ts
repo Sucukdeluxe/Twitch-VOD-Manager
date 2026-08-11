@@ -12,6 +12,11 @@ let secretStatus: SecretStatus = {
     clientSecretConfigured: false,
     discordWebhookConfigured: false
 };
+type SecretInputId = 'clientSecret' | 'discordWebhookUrl';
+const secretInputGenerations: Record<SecretInputId, number> = {
+    clientSecret: 0,
+    discordWebhookUrl: 0
+};
 
 function canRunSettingsAutoRefresh(): boolean {
     if (document.hidden) {
@@ -586,30 +591,44 @@ function collectCredentialsPayload(): Partial<AppConfig> {
     };
 }
 
+function secretConfigured(inputId: SecretInputId): boolean {
+    return inputId === 'clientSecret' ? secretStatus.clientSecretConfigured : secretStatus.discordWebhookConfigured;
+}
+
+function syncSecretField(inputId: SecretInputId): void {
+    byId<HTMLInputElement>(inputId).value = secretConfigured(inputId) ? SECRET_INPUT_MASK : '';
+}
+
 function syncSecretFields(): void {
-    byId<HTMLInputElement>('clientSecret').value = secretStatus.clientSecretConfigured ? SECRET_INPUT_MASK : '';
-    byId<HTMLInputElement>('discordWebhookUrl').value = secretStatus.discordWebhookConfigured ? SECRET_INPUT_MASK : '';
+    syncSecretField('clientSecret');
+    syncSecretField('discordWebhookUrl');
+}
+
+async function persistSecretInput(inputId: SecretInputId): Promise<void> {
+    const requestGeneration = secretInputGenerations[inputId];
+    const value = byId<HTMLInputElement>(inputId).value;
+    if (value === SECRET_INPUT_MASK) return;
+
+    const configured = secretConfigured(inputId);
+    let nextStatus = secretStatus;
+    if (value.trim()) {
+        nextStatus = inputId === 'clientSecret'
+            ? await window.api.setClientSecret(value.trim())
+            : await window.api.setDiscordWebhook(value.trim());
+    } else if (configured) {
+        nextStatus = inputId === 'clientSecret'
+            ? await window.api.clearClientSecret()
+            : await window.api.clearDiscordWebhook();
+    }
+
+    if (secretInputGenerations[inputId] !== requestGeneration) return;
+    secretStatus = nextStatus;
+    syncSecretField(inputId);
 }
 
 async function persistSecretInputs(): Promise<void> {
-    const clientValue = byId<HTMLInputElement>('clientSecret').value;
-    if (clientValue !== SECRET_INPUT_MASK) {
-        secretStatus = clientValue.trim()
-            ? await window.api.setClientSecret(clientValue.trim())
-            : secretStatus.clientSecretConfigured
-                ? await window.api.clearClientSecret()
-                : secretStatus;
-    }
-
-    const webhookValue = byId<HTMLInputElement>('discordWebhookUrl').value;
-    if (webhookValue !== SECRET_INPUT_MASK) {
-        secretStatus = webhookValue.trim()
-            ? await window.api.setDiscordWebhook(webhookValue.trim())
-            : secretStatus.discordWebhookConfigured
-                ? await window.api.clearDiscordWebhook()
-                : secretStatus;
-    }
-    syncSecretFields();
+    await persistSecretInput('clientSecret');
+    await persistSecretInput('discordWebhookUrl');
 }
 
 function syncPartMinutesFieldState(): void {
@@ -725,9 +744,9 @@ function getSettingsFingerprint(payload: Partial<AppConfig>): string {
     ]);
 }
 
-function syncSettingsFormFromConfig(): void {
+function syncSettingsFormFromConfig(syncSecrets = true): void {
     byId<HTMLInputElement>('clientId').value = config.client_id ?? '';
-    syncSecretFields();
+    if (syncSecrets) syncSecretFields();
     byId<HTMLInputElement>('sidebarSplitViewToggle').checked = config.sidebar_split_view !== false;
     applySidebarLayoutPreference(config.sidebar_split_view !== false);
     byId<HTMLSelectElement>('downloadMode').value = (config.download_mode as 'parts' | 'full') ?? 'full';
@@ -790,7 +809,7 @@ async function persistSettings(options: {
 
     await persistSecretInputs();
     config = await window.api.saveConfig(payload);
-    syncSettingsFormFromConfig();
+    syncSettingsFormFromConfig(false);
     pendingCredentialsReconnect = false;
 
     if (options.reconnectAfterSave) {
@@ -830,7 +849,6 @@ async function flushSettingsAutoSave(reconnectAfterSave = false): Promise<void> 
     try {
         await persistSecretInputs();
         config = await window.api.saveConfig(payload);
-        syncSecretFields();
         lastPersistedSettingsFingerprint = getSettingsFingerprint({});
         if (reconnectAfterSave && pendingCredentialsReconnect) {
             pendingCredentialsReconnect = false;
@@ -933,6 +951,12 @@ function initSettingsAutoSave(): void {
         element.addEventListener('blur', () => {
             pendingCredentialsReconnect = true;
             void flushSettingsAutoSave(true);
+        });
+    }
+
+    for (const id of ['clientSecret', 'discordWebhookUrl'] as const) {
+        byId<HTMLInputElement>(id).addEventListener('input', () => {
+            secretInputGenerations[id] += 1;
         });
     }
 
