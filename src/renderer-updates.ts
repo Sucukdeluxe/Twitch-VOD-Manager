@@ -548,7 +548,7 @@ async function checkUpdate(): Promise<void> {
             return;
         }
 
-        if (skippedReason === 'in-progress' || skippedReason === 'throttled') {
+        if (skippedReason === 'in-progress' || skippedReason === 'throttled' || skippedReason === 'timed-out') {
             shouldOpenUpdateModalOnAvailable = false;
             manualUpdateOutcomeHandled = true;
             manualUpdateCheckPending = false;

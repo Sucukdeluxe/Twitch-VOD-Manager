@@ -914,6 +914,13 @@
                             <button type="button" class="btn-secondary" id="btnPreflightFix" onclick="runPreflight(true)">Auto-Fix Tools</button>
                         </div>
                         <pre id="preflightResult" class="log-panel">Noch kein Check ausgefuhrt.</pre>
+                        <h4 id="managedToolsTitle">Verwaltete Tools</h4>
+                        <div class="form-row" style="margin-bottom: 10px;">
+                            <button type="button" class="btn-secondary" id="btnRefreshManagedTools" onclick="refreshManagedToolStatus()">Tool-Status aktualisieren</button>
+                            <button type="button" class="btn-secondary" id="btnRepairManagedTools" onclick="repairManagedTools()">Tools reparieren</button>
+                            <button type="button" class="btn-secondary" id="btnResetManagedTools" onclick="resetManagedTools()">Tools zurücksetzen</button>
+                        </div>
+                        <pre id="managedToolStatus" class="log-panel">Noch kein Tool-Status geladen.</pre>
                     </div>
 
                     <div class="settings-card" data-settings-pane="debug" hidden>

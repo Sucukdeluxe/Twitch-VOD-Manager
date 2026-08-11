@@ -258,6 +258,20 @@ interface PreflightResult {
     timestamp: string;
 }
 
+interface ManagedToolStatus {
+    id: 'streamlink' | 'ffmpeg';
+    version: string;
+    sourceUrl: string;
+    archiveName: string;
+    state: 'missing' | 'installing' | 'verified' | 'unverified' | 'corrupt';
+    verified: boolean;
+}
+
+interface ManagedToolStatuses {
+    streamlink: ManagedToolStatus;
+    ffmpeg: ManagedToolStatus;
+}
+
 interface StreamerStorageEntry {
     name: string;
     fileCount: number;
@@ -442,11 +456,14 @@ interface ApiBridge {
     cutVideo(inputCapability: string, startTime: number, endTime: number): Promise<{ success: boolean; outputName: string | null }>;
     mergeVideos(inputCapabilities: string[], outputCapability: string): Promise<{ success: boolean; outputName: string | null }>;
     getVersion(): Promise<string>;
-    checkUpdate(): Promise<{ checking?: boolean; error?: boolean; skipped?: 'ready-to-install' | 'in-progress' | 'throttled' | 'error' | string }>;
+    checkUpdate(): Promise<{ checking?: boolean; error?: boolean; skipped?: 'ready-to-install' | 'in-progress' | 'throttled' | 'timed-out' | 'error' | string }>;
     downloadUpdate(): Promise<{ downloading?: boolean; error?: boolean; skipped?: 'ready-to-install' | 'in-progress' | 'error' | string }>;
     installUpdate(): Promise<void>;
     openExternal(url: string): Promise<void>;
     runPreflight(autoFix: boolean): Promise<PreflightResult>;
+    getManagedToolStatus(): Promise<ManagedToolStatuses | null>;
+    repairManagedTools(): Promise<{ success: boolean; statuses: ManagedToolStatuses } | null>;
+    resetManagedTools(): Promise<{ success: boolean; statuses: ManagedToolStatuses } | null>;
     getDebugLog(lines: number): Promise<string>;
     getRuntimeMetrics(): Promise<RuntimeMetricsSnapshot>;
     exportRuntimeMetrics(): Promise<{ success: boolean; cancelled?: boolean; error?: string; filePath?: string }>;

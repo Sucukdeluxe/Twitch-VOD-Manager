@@ -2,6 +2,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, execSync, spawnSync } from 'child_process';
 import axios from 'axios';
+import { createManagedToolInstaller, type ManagedToolInstaller, type ManagedToolStatus } from './main/domain/managed-tools';
+import { APPLICATION_TOOL_MANIFEST } from './main/domain/tool-manifest';
 
 // ==========================================
 // CONSTANTS
@@ -28,6 +30,7 @@ export function initToolDirs(streamlinkDir: string, ffmpegDir: string, getTempPa
     TOOLS_STREAMLINK_DIR = streamlinkDir;
     TOOLS_FFMPEG_DIR = ffmpegDir;
     _getTempPath = getTempPath;
+    managedToolInstallers.clear();
 }
 
 // ==========================================
@@ -44,6 +47,7 @@ let verifiedStreamlinkCommandKey: string | null = null;
 let verifiedFfmpegCommandKey: string | null = null;
 let bundledToolPathSignature = '';
 let bundledToolPathRefreshedAt = 0;
+const managedToolInstallers = new Map<'streamlink' | 'ffmpeg', ManagedToolInstaller>();
 
 // ==========================================
 // INTERNAL HELPERS
@@ -376,19 +380,79 @@ async function extractZip(zipPath: string, destinationDir: string): Promise<bool
     }
 }
 
+function getManagedToolInstaller(toolId: 'streamlink' | 'ffmpeg'): ManagedToolInstaller {
+    const existing = managedToolInstallers.get(toolId);
+    if (existing) return existing;
+
+    const installationDirectory = toolId === 'streamlink' ? TOOLS_STREAMLINK_DIR : TOOLS_FFMPEG_DIR;
+    const installer = createManagedToolInstaller({
+        installationDirectory,
+        temporaryDirectory: _getTempPath(),
+        download: async (sourceUrl, archivePath) => {
+            if (!await downloadFile(sourceUrl, archivePath)) {
+                throw new Error('tool archive download failed');
+            }
+        },
+        extract: async (archivePath, destinationPath) => {
+            if (!await extractZip(archivePath, destinationPath)) {
+                throw new Error('tool archive extraction failed');
+            }
+        }
+    });
+    managedToolInstallers.set(toolId, installer);
+    return installer;
+}
+
+export interface ManagedToolStatuses {
+    streamlink: ManagedToolStatus;
+    ffmpeg: ManagedToolStatus;
+}
+
+export function getManagedToolStatuses(): ManagedToolStatuses {
+    return {
+        streamlink: getManagedToolInstaller('streamlink').status(APPLICATION_TOOL_MANIFEST.streamlink),
+        ffmpeg: getManagedToolInstaller('ffmpeg').status(APPLICATION_TOOL_MANIFEST.ffmpeg)
+    };
+}
+
+export async function repairManagedTools(): Promise<{ success: boolean; statuses: ManagedToolStatuses }> {
+    const [streamlink, ffmpeg] = await Promise.all([
+        getManagedToolInstaller('streamlink').repair(APPLICATION_TOOL_MANIFEST.streamlink),
+        getManagedToolInstaller('ffmpeg').repair(APPLICATION_TOOL_MANIFEST.ffmpeg)
+    ]);
+    refreshBundledToolPaths(true);
+    return {
+        success: streamlink.success && ffmpeg.success,
+        statuses: getManagedToolStatuses()
+    };
+}
+
+export function resetManagedTools(): { success: boolean; statuses: ManagedToolStatuses } {
+    const streamlink = getManagedToolInstaller('streamlink').reset(APPLICATION_TOOL_MANIFEST.streamlink);
+    const ffmpeg = getManagedToolInstaller('ffmpeg').reset(APPLICATION_TOOL_MANIFEST.ffmpeg);
+    refreshBundledToolPaths(true);
+    return {
+        success: streamlink.state !== 'installing' && ffmpeg.state !== 'installing',
+        statuses: getManagedToolStatuses()
+    };
+}
+
 // ==========================================
 // AUTO-INSTALL TOOLS
 // ==========================================
 export async function ensureStreamlinkInstalled(): Promise<boolean> {
     refreshBundledToolPaths();
 
+    const manifest = APPLICATION_TOOL_MANIFEST.streamlink;
+    const managedStatus = getManagedToolInstaller('streamlink').status(manifest);
+    const requiresManagedRepair = Boolean(bundledStreamlinkPath) && !managedStatus.verified;
     const current = getStreamlinkCommand();
     const versionArgs = [...current.prefixArgs, '--version'];
-    if (isVerifiedStreamlinkCommand(current.command, versionArgs)) {
+    if (!requiresManagedRepair && isVerifiedStreamlinkCommand(current.command, versionArgs)) {
         return true;
     }
 
-    if (canExecuteCommand(current.command, versionArgs)) {
+    if (!requiresManagedRepair && canExecuteCommand(current.command, versionArgs)) {
         cacheVerifiedStreamlinkCommand(current.command, versionArgs);
         return true;
     }
@@ -399,33 +463,11 @@ export async function ensureStreamlinkInstalled(): Promise<boolean> {
 
     _appendDebugLog('streamlink-install-start');
     try {
-        fs.mkdirSync(TOOLS_STREAMLINK_DIR, { recursive: true });
-
-        const release = await axios.get('https://api.github.com/repos/streamlink/windows-builds/releases/latest', {
-            timeout: 120000,
-            headers: {
-                'Accept': 'application/vnd.github+json',
-                'User-Agent': 'Twitch-VOD-Manager'
-            }
-        });
-
-        const assets = release.data?.assets || [];
-        const zipAsset = assets.find((a: any) => typeof a?.name === 'string' && /x86_64\.zip$/i.test(a.name));
-        if (!zipAsset?.browser_download_url) {
-            _appendDebugLog('streamlink-install-no-asset-found');
+        const result = await getManagedToolInstaller('streamlink').install(manifest);
+        if (!result.success) {
+            _appendDebugLog('streamlink-install-failed', { error: result.error, status: result.status });
             return false;
         }
-
-        const zipPath = path.join(_getTempPath(), `streamlink_portable_${Date.now()}.zip`);
-        const downloadOk = await downloadFile(zipAsset.browser_download_url, zipPath);
-        if (!downloadOk) return false;
-
-        fs.rmSync(TOOLS_STREAMLINK_DIR, { recursive: true, force: true });
-        fs.mkdirSync(TOOLS_STREAMLINK_DIR, { recursive: true });
-
-        const extractOk = await extractZip(zipPath, TOOLS_STREAMLINK_DIR);
-        try { fs.unlinkSync(zipPath); } catch { }
-        if (!extractOk) return false;
 
         refreshBundledToolPaths(true);
         streamlinkCommandCache = null;
@@ -447,13 +489,16 @@ export async function ensureStreamlinkInstalled(): Promise<boolean> {
 export async function ensureFfmpegInstalled(): Promise<boolean> {
     refreshBundledToolPaths();
 
+    const manifest = APPLICATION_TOOL_MANIFEST.ffmpeg;
+    const managedStatus = getManagedToolInstaller('ffmpeg').status(manifest);
+    const requiresManagedRepair = Boolean(bundledFFmpegPath || bundledFFprobePath) && !managedStatus.verified;
     const ffmpegPath = getFFmpegPath();
     const ffprobePath = getFFprobePath();
-    if (isVerifiedFfmpegCommands(ffmpegPath, ffprobePath)) {
+    if (!requiresManagedRepair && isVerifiedFfmpegCommands(ffmpegPath, ffprobePath)) {
         return true;
     }
 
-    if (canExecuteCommand(ffmpegPath, ['-version']) && canExecuteCommand(ffprobePath, ['-version'])) {
+    if (!requiresManagedRepair && canExecuteCommand(ffmpegPath, ['-version']) && canExecuteCommand(ffprobePath, ['-version'])) {
         cacheVerifiedFfmpegCommands(ffmpegPath, ffprobePath);
         return true;
     }
@@ -464,18 +509,11 @@ export async function ensureFfmpegInstalled(): Promise<boolean> {
 
     _appendDebugLog('ffmpeg-install-start');
     try {
-        fs.mkdirSync(TOOLS_FFMPEG_DIR, { recursive: true });
-
-        const zipPath = path.join(_getTempPath(), `ffmpeg_essentials_${Date.now()}.zip`);
-        const downloadOk = await downloadFile('https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip', zipPath);
-        if (!downloadOk) return false;
-
-        fs.rmSync(TOOLS_FFMPEG_DIR, { recursive: true, force: true });
-        fs.mkdirSync(TOOLS_FFMPEG_DIR, { recursive: true });
-
-        const extractOk = await extractZip(zipPath, TOOLS_FFMPEG_DIR);
-        try { fs.unlinkSync(zipPath); } catch { }
-        if (!extractOk) return false;
+        const result = await getManagedToolInstaller('ffmpeg').install(manifest);
+        if (!result.success) {
+            _appendDebugLog('ffmpeg-install-failed', { error: result.error, status: result.status });
+            return false;
+        }
 
         refreshBundledToolPaths(true);
 

@@ -200,6 +200,9 @@ contextBridge.exposeInMainWorld('api', {
     installUpdate: () => ipcRenderer.invoke('install-update'),
     openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
     runPreflight: (autoFix: boolean) => ipcRenderer.invoke('run-preflight', autoFix),
+    getManagedToolStatus: () => ipcRenderer.invoke('get-managed-tool-status'),
+    repairManagedTools: () => ipcRenderer.invoke('repair-managed-tools'),
+    resetManagedTools: () => ipcRenderer.invoke('reset-managed-tools'),
     getDebugLog: (lines: number) => ipcRenderer.invoke('get-debug-log', lines),
     getRuntimeMetrics: (): Promise<RuntimeMetricsSnapshot> => ipcRenderer.invoke('get-runtime-metrics'),
     exportRuntimeMetrics: (): Promise<{ success: boolean; cancelled?: boolean; error?: string; filePath?: string }> =>

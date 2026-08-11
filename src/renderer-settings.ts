@@ -344,6 +344,52 @@ async function runPreflight(autoFix = false): Promise<void> {
     }
 }
 
+function getManagedToolStateLabel(state: ManagedToolStatus['state']): string {
+    const labels: Record<ManagedToolStatus['state'], string> = {
+        missing: UI_TEXT.static.managedToolsMissing,
+        installing: UI_TEXT.static.managedToolsInstalling,
+        verified: UI_TEXT.static.managedToolsVerified,
+        unverified: UI_TEXT.static.managedToolsUnverified,
+        corrupt: UI_TEXT.static.managedToolsCorrupt
+    };
+    return labels[state];
+}
+
+function renderManagedToolStatus(statuses: ManagedToolStatuses): void {
+    const lines = [statuses.streamlink, statuses.ffmpeg].map((status) => {
+        const verification = status.verified ? UI_TEXT.static.managedToolsVerified : UI_TEXT.static.managedToolsUnverified;
+        return `${status.id} ${status.version}: ${getManagedToolStateLabel(status.state)} · ${verification}`;
+    });
+    byId('managedToolStatus').textContent = lines.join('\n');
+}
+
+async function refreshManagedToolStatus(): Promise<void> {
+    const statuses = await window.api.getManagedToolStatus();
+    if (statuses) renderManagedToolStatus(statuses);
+}
+
+async function repairManagedTools(): Promise<void> {
+    const buttons = [
+        byId<HTMLButtonElement>('btnRefreshManagedTools'),
+        byId<HTMLButtonElement>('btnRepairManagedTools'),
+        byId<HTMLButtonElement>('btnResetManagedTools')
+    ];
+    for (const button of buttons) button.disabled = true;
+    byId('managedToolStatus').textContent = UI_TEXT.static.managedToolsRepairing;
+    try {
+        const result = await window.api.repairManagedTools();
+        if (result) renderManagedToolStatus(result.statuses);
+    } finally {
+        for (const button of buttons) button.disabled = false;
+    }
+}
+
+async function resetManagedTools(): Promise<void> {
+    if (!confirm(UI_TEXT.static.managedToolsResetConfirm)) return;
+    const result = await window.api.resetManagedTools();
+    if (result) renderManagedToolStatus(result.statuses);
+}
+
 async function runCleanupDryRun(): Promise<void> {
     await runCleanupOnce(true);
 }

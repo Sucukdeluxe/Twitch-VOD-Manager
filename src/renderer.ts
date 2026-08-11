@@ -204,6 +204,7 @@ async function init(): Promise<void> {
     }, 3000);
 
     void runPreflight(false);
+    void refreshManagedToolStatus();
     void refreshDebugLog();
     validateFilenameTemplates();
     void refreshRuntimeMetrics();

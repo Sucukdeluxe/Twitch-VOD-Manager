@@ -318,6 +318,11 @@ function applyLanguageToStaticUI(): void {
     setText('btnPreflightRun', UI_TEXT.static.preflightRun);
     setText('btnPreflightFix', UI_TEXT.static.preflightFix);
     setText('preflightResult', UI_TEXT.static.preflightEmpty);
+    setText('managedToolsTitle', UI_TEXT.static.managedToolsTitle);
+    setText('btnRefreshManagedTools', UI_TEXT.static.managedToolsRefresh);
+    setText('btnRepairManagedTools', UI_TEXT.static.managedToolsRepair);
+    setText('btnResetManagedTools', UI_TEXT.static.managedToolsReset);
+    setText('managedToolStatus', UI_TEXT.static.managedToolsEmpty);
     setText('debugLogTitle', UI_TEXT.static.debugLogTitle);
     setText('btnRefreshLog', UI_TEXT.static.refreshLog);
     setText('btnOpenDebugLogFile', UI_TEXT.static.openDebugLogFile);

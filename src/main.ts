@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
 import { compareUpdateVersions, isNewerUpdateVersion, normalizeUpdateVersion } from './main/domain/update-version-utils';
+import { createUpdateCheckCoordinator } from './main/domain/update-check-operation';
 import { writeFileAtomicSync } from './main/infra/fs-atomic';
 import { parseDuration, formatDuration, formatDurationDashed } from './main/infra/duration';
 import {
@@ -60,6 +61,7 @@ import {
     setDebugLogFn, initToolDirs,
     getStreamlinkPath, getStreamlinkCommand, getFFmpegPath, getFFprobePath,
     refreshBundledToolPaths, ensureStreamlinkInstalled, ensureFfmpegInstalled,
+    getManagedToolStatuses, repairManagedTools, resetManagedTools,
     canExecute, canExecuteCommand,
     cacheVerifiedStreamlinkCommand, isVerifiedStreamlinkCommand,
     cacheVerifiedFfmpegCommands, isVerifiedFfmpegCommands,
@@ -827,6 +829,7 @@ let autoUpdaterInitialized = false;
 let autoUpdateCheckTimer: NodeJS.Timeout | null = null;
 let autoUpdateStartupTimer: NodeJS.Timeout | null = null;
 let autoUpdateCheckInProgress = false;
+const autoUpdateCheckCoordinator = createUpdateCheckCoordinator();
 let autoUpdateReadyToInstall = false;
 let autoUpdateDownloadInProgress = false;
 let lastAutoUpdateCheckAt = 0;
@@ -6951,7 +6954,7 @@ function buildUpdateInfoPayload(version: string, releaseDate?: string): {
 }
 
 async function requestUpdateCheck(source: UpdateCheckSource, force = false): Promise<{ started: boolean; reason?: string }> {
-    if (autoUpdateCheckInProgress) {
+    if (autoUpdateCheckCoordinator.inProgress) {
         return { started: false, reason: 'in-progress' };
     }
 
@@ -6960,57 +6963,51 @@ async function requestUpdateCheck(source: UpdateCheckSource, force = false): Pro
         return { started: false, reason: 'throttled' };
     }
 
-    autoUpdateCheckInProgress = true;
-    lastAutoUpdateCheckAt = now;
-    appendDebugLog('update-check-start', { source });
-
-    try {
+    const result = await autoUpdateCheckCoordinator.run(async () => {
+        autoUpdateCheckInProgress = true;
+        lastAutoUpdateCheckAt = now;
+        appendDebugLog('update-check-start', { source });
         try {
-            const githubReleaseResponse = await axios.get(GITHUB_RELEASES_API_LATEST_URL, {
-                timeout: 5000,
-                headers: {
-                    'Accept': 'application/json',
-                    'User-Agent': 'Twitch-VOD-Manager'
-                }
-            });
-            cacheLatestReleaseUpdateInfo(githubReleaseResponse.data);
-            const tagName = latestReleaseUpdateInfo?.tagName || githubReleaseResponse.data?.tag_name;
-            if (tagName) {
-                autoUpdater.setFeedURL({
-                    provider: 'generic',
-                    url: `${GITHUB_RELEASES_DOWNLOAD_BASE_URL}/${tagName}`
+            try {
+                const githubReleaseResponse = await axios.get(GITHUB_RELEASES_API_LATEST_URL, {
+                    timeout: 5000,
+                    headers: {
+                        'Accept': 'application/json',
+                        'User-Agent': 'Twitch-VOD-Manager'
+                    }
                 });
-                appendDebugLog('github-feed-url-set', { tagName, owner: GITHUB_REPO_OWNER, repo: GITHUB_REPO_NAME });
+                cacheLatestReleaseUpdateInfo(githubReleaseResponse.data);
+                const tagName = latestReleaseUpdateInfo?.tagName || githubReleaseResponse.data?.tag_name;
+                if (tagName) {
+                    autoUpdater.setFeedURL({
+                        provider: 'generic',
+                        url: `${GITHUB_RELEASES_DOWNLOAD_BASE_URL}/${tagName}`
+                    });
+                    appendDebugLog('github-feed-url-set', { tagName, owner: GITHUB_REPO_OWNER, repo: GITHUB_REPO_NAME });
+                }
+            } catch (apiErr) {
+                appendDebugLog('github-api-failed', String(apiErr));
             }
-        } catch (apiErr) {
-            appendDebugLog('github-api-failed', String(apiErr));
-        }
-
-        let timeoutHandle: NodeJS.Timeout | null = null;
-        try {
-            await Promise.race([
-                autoUpdater.checkForUpdates(),
-                new Promise<never>((_, reject) => {
-                    timeoutHandle = setTimeout(() => {
-                        reject(new Error(`Update check timed out after ${AUTO_UPDATE_CHECK_TIMEOUT_MS}ms`));
-                    }, AUTO_UPDATE_CHECK_TIMEOUT_MS);
-                })
-            ]);
+            await autoUpdater.checkForUpdates();
         } finally {
-            if (timeoutHandle) {
-                clearTimeout(timeoutHandle);
-                timeoutHandle = null;
-            }
+            autoUpdateCheckInProgress = false;
         }
+    }, AUTO_UPDATE_CHECK_TIMEOUT_MS);
 
+    if (result.state === 'completed') {
         return { started: true };
-    } catch (err) {
-        appendDebugLog('update-check-failed', { source, error: String(err) });
-        console.error('Update check failed:', err);
-        return { started: false, reason: 'error' };
-    } finally {
-        autoUpdateCheckInProgress = false;
     }
+    if (result.state === 'timed-out') {
+        appendDebugLog('update-check-ui-timeout', { source, timeoutMs: AUTO_UPDATE_CHECK_TIMEOUT_MS });
+        return { started: false, reason: 'timed-out' };
+    }
+    if (result.state === 'in-progress') {
+        return { started: false, reason: 'in-progress' };
+    }
+
+    appendDebugLog('update-check-failed', { source, error: String(result.error) });
+    console.error('Update check failed:', result.error);
+    return { started: false, reason: 'error' };
 }
 
 async function requestUpdateDownload(source: UpdateDownloadSource): Promise<{ started: boolean; reason?: string }> {
@@ -7162,7 +7159,6 @@ function setupAutoUpdater() {
     });
 
     autoUpdater.on('error', (err) => {
-        autoUpdateCheckInProgress = false;
         autoUpdateDownloadInProgress = false;
         const message = String(err);
         appendDebugLog('auto-updater-error', message);
@@ -7979,6 +7975,21 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
 
 registerTrustedIpcHandler(ipcMain, 'run-preflight', isTrustedRendererEvent, () => Promise.resolve(null), async (_, autoFix: boolean = false) => {
     return await runPreflight(autoFix);
+});
+
+ipcMain.handle('get-managed-tool-status', (event) => {
+    if (!isTrustedRendererEvent(event)) return null;
+    return getManagedToolStatuses();
+});
+
+ipcMain.handle('repair-managed-tools', async (event) => {
+    if (!isTrustedRendererEvent(event)) return null;
+    return await repairManagedTools();
+});
+
+ipcMain.handle('reset-managed-tools', (event) => {
+    if (!isTrustedRendererEvent(event)) return null;
+    return resetManagedTools();
 });
 
 registerTrustedIpcHandler(ipcMain, 'get-debug-log', isTrustedRendererEvent, () => Promise.resolve(''), async (_, lines: number = 200) => {
