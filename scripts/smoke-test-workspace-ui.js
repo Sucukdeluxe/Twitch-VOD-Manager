@@ -96,6 +96,31 @@ async function run() {
     check(shell.topNavigationItems === 7, `Expected 7 native primary navigation buttons, found ${shell.topNavigationItems}`);
     check(shell.nonButtonNavigationItems === 0, `Expected only native primary navigation buttons, found ${shell.nonButtonNavigationItems} non-buttons`);
 
+    const mergeAddToolbarActions = await win.evaluate(() => {
+      const capture = () => {
+        const button = document.querySelector('[data-toolbar-for="merge"] button[onclick="addMergeFiles()"]');
+        const label = button?.querySelector('span')?.textContent?.trim() || '';
+        const accessibleLabel = button?.getAttribute('aria-label')?.trim() || label;
+        return {
+          label,
+          accessibleLabel,
+          plusCount: (button?.querySelectorAll('svg').length || 0) + ((button?.textContent?.match(/\+/g) || []).length)
+        };
+      };
+
+      window.changeLanguage('en');
+      const english = capture();
+      window.changeLanguage('de');
+      const german = capture();
+      window.changeLanguage('en');
+      return { english, german };
+    });
+    checks.mergeAddToolbarActions = mergeAddToolbarActions;
+    check(mergeAddToolbarActions.english.plusCount === 1, `English Add videos toolbar action exposes ${mergeAddToolbarActions.english.plusCount} plus signs`);
+    check(mergeAddToolbarActions.german.plusCount === 1, `German Videos hinzufügen toolbar action exposes ${mergeAddToolbarActions.german.plusCount} plus signs`);
+    check(mergeAddToolbarActions.english.label === 'Add videos' && mergeAddToolbarActions.english.accessibleLabel === 'Add videos', `English Add videos toolbar label is "${mergeAddToolbarActions.english.accessibleLabel}"`);
+    check(mergeAddToolbarActions.german.label === 'Videos hinzufügen' && mergeAddToolbarActions.german.accessibleLabel === 'Videos hinzufügen', `German Videos hinzufügen toolbar label is "${mergeAddToolbarActions.german.accessibleLabel}"`);
+
     await app.evaluate(({ ipcMain }) => {
       globalThis.__workspaceStreamerCacheCalls = { ids: 0, vods: 0, profiles: 0 };
       ipcMain.removeHandler('get-user-id');
@@ -152,16 +177,16 @@ async function run() {
     const cutterDropFixturePath = path.join(environment.mediaDir, 'electron-43-cutter-drop.mp4');
     fs.writeFileSync(cutterDropFixturePath, 'electron-43-cutter-drop-fixture', 'utf8');
     await app.evaluate(({ ipcMain }) => {
-      globalThis.__workspaceCutterDropPaths = { videoInfo: '', preview: '' };
-      ipcMain.removeHandler('get-video-info');
-      ipcMain.handle('get-video-info', (_, filePath) => {
-        globalThis.__workspaceCutterDropPaths.videoInfo = filePath;
-        return { duration: 120, width: 1920, height: 1080, fps: 60 };
-      });
-      ipcMain.removeHandler('extract-frame');
-      ipcMain.handle('extract-frame', (_, filePath) => {
-        globalThis.__workspaceCutterDropPaths.preview = filePath;
-        return null;
+      globalThis.__workspaceCutterDropPaths = { media: '' };
+      ipcMain.removeHandler('prepare-video-editor-media');
+      ipcMain.handle('prepare-video-editor-media', (_, filePath) => {
+        globalThis.__workspaceCutterDropPaths.media = filePath;
+        return {
+          sourceUrl: encodeURI(`file:///${filePath.replace(/\\/g, '/')}`),
+          info: { duration: 120, width: 1920, height: 1080, fps: 60, hasAudio: false },
+          thumbnails: ['data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='],
+          waveform: null
+        };
       });
     });
     await win.evaluate(() => {
@@ -205,8 +230,7 @@ async function run() {
     };
     check(cutterFileObject.legacyPathType === 'undefined', `Electron File.path is unexpectedly ${cutterFileObject.legacyPathType}`);
     check(cutterDropUi.filePath === cutterDropFixturePath, `Cutter drop resolved "${cutterDropUi.filePath}" instead of the Electron file path`);
-    check(cutterDropPaths.videoInfo === cutterDropFixturePath, `Cutter drop sent "${cutterDropPaths.videoInfo}" to video info instead of the Electron file path`);
-    check(cutterDropPaths.preview === cutterDropFixturePath, `Cutter drop sent "${cutterDropPaths.preview}" to preview instead of the Electron file path`);
+    check(cutterDropPaths.media === cutterDropFixturePath, `Cutter drop sent "${cutterDropPaths.media}" to media preparation instead of the Electron file path`);
     check(cutterDropUi.infoVisible && cutterDropUi.cutEnabled, 'Cutter drop did not populate the cutter controls');
 
     const queueEmptyActions = await win.evaluate(() => ({
@@ -1625,6 +1649,8 @@ async function run() {
       const germanLabelBlendAtMiddle = getComputedStyle(document.getElementById('languageDeText')).mixBlendMode;
       await pause(420);
       const target = readX();
+      const germanLabelColorSelected = getComputedStyle(document.getElementById('languageDeText')).color;
+      const englishLabelColorInactive = getComputedStyle(document.getElementById('languageEnText')).color;
       window.changeLanguage('en');
       await pause(150);
       const reverseMiddle = readX();
@@ -1644,6 +1670,8 @@ async function run() {
         targetBackgroundAtMiddle,
         englishLabelBlendAtMiddle,
         germanLabelBlendAtMiddle,
+        germanLabelColorSelected,
+        englishLabelColorInactive,
         transformRuns,
         transition: getComputedStyle(picker, '::before').transition
       };
@@ -1659,7 +1687,8 @@ async function run() {
     check(languageSwitcherMotion.reverseMiddle > languageMotionMinimum + 1 && languageSwitcherMotion.reverseMiddle < languageMotionMaximum - 1, 'Language marker has no visible reverse intermediate position');
     check(Math.abs(languageSwitcherMotion.reverseTarget - languageSwitcherMotion.start) < 1, 'Language marker does not return to English');
     check(languageSwitcherMotion.targetBackgroundAtMiddle === 'rgba(0, 0, 0, 0)', `Language target paints a second background during motion: ${languageSwitcherMotion.targetBackgroundAtMiddle}`);
-    check(languageSwitcherMotion.englishLabelBlendAtMiddle === 'difference' && languageSwitcherMotion.germanLabelBlendAtMiddle === 'difference', `Language labels do not adapt continuously to the moving marker: ${languageSwitcherMotion.englishLabelBlendAtMiddle}/${languageSwitcherMotion.germanLabelBlendAtMiddle}`);
+    check(languageSwitcherMotion.englishLabelBlendAtMiddle === 'normal' && languageSwitcherMotion.germanLabelBlendAtMiddle === 'normal', `Language labels still use color-distorting blend modes: ${languageSwitcherMotion.englishLabelBlendAtMiddle}/${languageSwitcherMotion.germanLabelBlendAtMiddle}`);
+    check(languageSwitcherMotion.germanLabelColorSelected === 'rgb(23, 32, 51)' && languageSwitcherMotion.englishLabelColorInactive === 'rgb(173, 169, 169)', `Selected and inactive language labels do not use the requested contrast: ${languageSwitcherMotion.germanLabelColorSelected}/${languageSwitcherMotion.englishLabelColorInactive}`);
     await win.evaluate(() => window.changeLanguage('en'));
     await win.waitForTimeout(460);
     await win.evaluate(() => window.changeLanguage('de'));

@@ -176,9 +176,42 @@ function applyLanguageToStaticUI(): void {
     setText('cutterInfoResolutionLabel', UI_TEXT.cutter.infoResolution);
     setText('cutterInfoFpsLabel', UI_TEXT.cutter.infoFps);
     setText('cutterInfoSelectionLabel', UI_TEXT.cutter.infoSelection);
+    setText('cutterDiscardTitle', UI_TEXT.cutter.discardTitle);
+    setText('cutterDiscardMessage', UI_TEXT.cutter.discardMessage);
+    setText('cutterDiscardCancelBtn', UI_TEXT.cutter.discardCancel);
+    setText('cutterDiscardConfirmBtn', UI_TEXT.cutter.discardConfirm);
     setText('cutterStartLabel', UI_TEXT.cutter.startLabel);
     setText('cutterEndLabel', UI_TEXT.cutter.endLabel);
     setText('btnCut', UI_TEXT.cutter.cut);
+    setText('cutterEditHeading', UI_TEXT.cutter.editorTitle);
+    setText('cutterPreviewModeLabel', UI_TEXT.cutter.previewMode);
+    setText('cutterPreviewModeHint', UI_TEXT.cutter.previewModeHint);
+    setText('cutterGlobalTrimLabel', UI_TEXT.cutter.globalTrim);
+    setText('cutterCutsLabel', UI_TEXT.cutter.cutsLabel);
+    setText('cutterCutEmpty', UI_TEXT.cutter.noCuts);
+    setText('cutterVideoTrackLabel', UI_TEXT.cutter.videoTrack);
+    setText('cutterAudioTrackLabel', UI_TEXT.cutter.audioTrack);
+    setText('cutterAudioEmpty', UI_TEXT.cutter.noAudio);
+    setText('cutterLoadingLabel', UI_TEXT.cutter.loadingMedia);
+    setText('cutterSpeedLabel', UI_TEXT.cutter.speedLabel);
+    setAriaLabel('cutterPlayBtn', UI_TEXT.cutter.play);
+    setAriaLabel('cutterStopBtn', UI_TEXT.cutter.stop);
+    setAriaLabel('cutterRewindBtn', UI_TEXT.cutter.rewind10);
+    setAriaLabel('cutterForwardBtn', UI_TEXT.cutter.forward10);
+    setAriaLabel('cutterMuteBtn', UI_TEXT.cutter.mute);
+    setAriaLabel('cutterVolume', UI_TEXT.cutter.volume);
+    setAriaLabel('cutterSettingsBtn', UI_TEXT.cutter.playerSettings);
+    setAriaLabel('cutterFullscreenBtn', UI_TEXT.cutter.fullscreen);
+    setAriaLabel('cutterUndoBtn', UI_TEXT.cutter.undo);
+    setAriaLabel('cutterRedoBtn', UI_TEXT.cutter.redo);
+    setAriaLabel('cutterZoomOutBtn', UI_TEXT.cutter.zoomOut);
+    setAriaLabel('cutterZoomInBtn', UI_TEXT.cutter.zoomIn);
+    setAriaLabel('cutterZoom', UI_TEXT.cutter.zoom);
+    setAriaLabel('cutterTrimStartHandle', UI_TEXT.cutter.trimStart);
+    setAriaLabel('cutterTrimEndHandle', UI_TEXT.cutter.trimEnd);
+    setText('cutterCancelExportBtn', UI_TEXT.cutter.cancel);
+    setAriaLabel('cutterNewCutBtn', UI_TEXT.cutter.newCut);
+    setTitle('cutterNewCutBtn', UI_TEXT.cutter.newCut);
     setText('mergeTitle', UI_TEXT.static.mergeTitle);
     setText('mergeDesc', UI_TEXT.static.mergeDesc);
     setText('mergeAddBtn', UI_TEXT.static.mergeAdd);
@@ -413,6 +446,9 @@ function applyLanguageToStaticUI(): void {
     if (typeof workspaceSync === 'function') {
         workspaceSync(activeTabId.replace(/Tab$/, ''));
     }
+    if (typeof updateCutterPlayUi === 'function') updateCutterPlayUi();
+    if (typeof updateCutterMuteUi === 'function') updateCutterMuteUi();
+    if (typeof renderCutterEditor === 'function') renderCutterEditor();
 }
 
 function localizeCurrentStatusText(current: string): string {

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.5 - 2026-08-11
+
+- Added a complete local video editor for MP4, M4V, MOV, WebM, MKV, TS and AVI files with frame-accurate trimming, removable ranges, undo and redo, timeline zoom and atomic exports.
+- Added a responsive desktop player with smooth scrubbing, keyboard controls, volume interaction, fullscreen playback and synchronized playback state.
+- Added high-resolution video thumbnails and a reusable waveform timeline that remain sharp across zoom levels without blocking the first usable view.
+- Added precise timeline handles, mouse-wheel zoom anchored to the pointer and smooth navigation for short and long recordings.
+- Added safe source validation, cancellable exports and protection against partial or overwritten output files.
+- Added a confirmation step before replacing an active edit and reset playback controls correctly when another video is opened.
+- Improved editor layout, timestamp readability, metadata alignment, action contrast and language-selection contrast across supported window sizes.
+
 ## 1.0.4 - 2026-08-11
 
 - Added smooth entrance and exit motion for the VOD selection action dock, including Windows systems with reduced animations enabled.

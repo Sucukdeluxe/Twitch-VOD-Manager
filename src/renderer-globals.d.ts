@@ -165,6 +165,49 @@ interface VideoInfo {
     width: number;
     height: number;
     fps: number;
+    hasAudio: boolean;
+    videoCodec: string;
+    audioCodec: string | null;
+    previewCompatible: boolean;
+    variableFrameRate: boolean;
+}
+
+interface VideoEditorMedia {
+    sourceUrl: string;
+    info: VideoInfo;
+    jobId: number;
+    thumbnails: string[];
+    waveform: string | null;
+}
+
+interface VideoEditorAssets {
+    jobId: number;
+    thumbnails: string[];
+    thumbnailSprite: string | null;
+    thumbnailCount: number;
+    pixelWidth: number;
+    pixelHeight: number;
+}
+
+interface VideoEditorWaveform {
+    jobId: number;
+    waveform: string | null;
+    pixelWidth: number;
+    pixelHeight: number;
+}
+
+interface VideoEditorAssetProfile {
+    timelineWidth: number;
+    trackHeight: number;
+    pixelRatio: number;
+}
+
+interface VideoEditExportRequest {
+    inputFile: string;
+    outputFile?: string;
+    trimStart: number;
+    trimEnd: number;
+    cuts: Array<{ id: string; start: number; end: number }>;
 }
 
 interface ClipDialogData {
@@ -375,6 +418,12 @@ interface ApiBridge {
     onAutoVodScanCompleted(callback: (info: { queuedCount: number }) => void): void;
     getVideoInfo(filePath: string): Promise<VideoInfo | null>;
     extractFrame(filePath: string, timeSeconds: number): Promise<string | null>;
+    prepareVideoEditorMedia(filePath: string): Promise<VideoEditorMedia | null>;
+    prepareVideoEditorWaveform(filePath: string, jobId: number): Promise<VideoEditorWaveform | null>;
+    prepareVideoEditorAssets(filePath: string, jobId: number, profile: VideoEditorAssetProfile): Promise<VideoEditorAssets | null>;
+    cancelVideoEditorAssets(jobId: number): Promise<boolean>;
+    exportVideoEdit(request: VideoEditExportRequest): Promise<{ success: boolean; outputFile: string | null; cancelled?: boolean }>;
+    cancelVideoEdit(): Promise<boolean>;
     cutVideo(inputFile: string, startTime: number, endTime: number): Promise<{ success: boolean; outputFile: string | null }>;
     mergeVideos(inputFiles: string[], outputFile: string): Promise<{ success: boolean; outputFile: string | null }>;
     getVersion(): Promise<string>;

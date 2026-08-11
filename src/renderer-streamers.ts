@@ -485,13 +485,16 @@ function initCutterDragDrop(): void {
 
         const files = Array.from(e.dataTransfer.files || []);
         if (files.length === 0) return;
-        // First video-ish file wins
-        const allowed = /\.(mp4|mkv|ts|mov|avi)$/i;
-        const file = files.find((f) => allowed.test(f.name)) || files[0];
+        const allowed = /\.(mp4|m4v|mov|webm|mkv|ts|avi)$/i;
+        const file = files.find((entry) => allowed.test(entry.name));
+        if (!file) {
+            showAppToast(UI_TEXT.cutter.unsupportedFile, 'warn');
+            return;
+        }
         const filePath = window.api.getPathForFile(file);
         if (!filePath) return;
 
-        const loader = (window as unknown as { loadCutterFromPath?: (p: string) => Promise<void> }).loadCutterFromPath;
+        const loader = (window as unknown as { requestCutterVideoReplacement?: (p: string) => Promise<void> }).requestCutterVideoReplacement;
         if (typeof loader === 'function') {
             await loader(filePath);
         }

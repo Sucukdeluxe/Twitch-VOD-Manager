@@ -75,6 +75,7 @@ async function init(): Promise<void> {
     loadVodScrollPositions();
     initVodScrollTracking();
     initCutterDragDrop();
+    initCutterEditor();
 
     // Restore last active tab from previous session (default 'vods')
     initTopNavActiveIndicator();
@@ -531,6 +532,12 @@ function renderChatViewerList(messages: ChatViewerMessage[]): void {
 
 function closeTopmostOpenModal(): boolean {
     // Try each known modal in priority order
+    const cutterDiscardModal = document.getElementById('cutterDiscardModal');
+    if (cutterDiscardModal?.classList.contains('show')) {
+        resolveCutterDiscard(false);
+        return true;
+    }
+
     const commandPaletteModal = document.getElementById('commandPaletteModal');
     if (commandPaletteModal?.classList.contains('show')) {
         const closeCp = (window as unknown as { closeCommandPalette?: () => void }).closeCommandPalette;
@@ -974,6 +981,7 @@ function focusWorkspaceTarget(id: string, source?: HTMLElement): void {
 }
 
 function showTab(tab: string): void {
+    if (tab !== 'cutter' && byId('cutterTab').classList.contains('active') && typeof deactivateCutterEditor === 'function') deactivateCutterEditor();
     queryAll('.nav-item').forEach((i) => {
         i.classList.remove('active');
         i.removeAttribute('aria-current');
@@ -990,6 +998,7 @@ function showTab(tab: string): void {
     navItem.setAttribute('aria-current', 'page');
     syncTopNavActiveIndicator();
     byId(tab + 'Tab').classList.add('active');
+    if (tab === 'cutter' && typeof activateCutterEditor === 'function') activateCutterEditor();
     syncWorkspaceChrome(tab);
     scheduleSegmentedIndicatorsSync();
 
@@ -1669,146 +1678,6 @@ function initSegmentedIndicators(): void {
         syncSegmentedIndicator(control);
     });
     window.addEventListener('resize', scheduleSegmentedIndicatorsSync);
-}
-
-async function loadCutterFromPath(filePath: string): Promise<void> {
-    if (!filePath) return;
-
-    cutterFile = filePath;
-    byId<HTMLInputElement>('cutterFilePath').value = filePath;
-
-    const info = await window.api.getVideoInfo(filePath);
-    if (!info) {
-        alert(UI_TEXT.cutter.videoInfoFailed);
-        return;
-    }
-
-    cutterVideoInfo = info;
-    cutterStartTime = 0;
-    cutterEndTime = info.duration;
-
-    byId('cutterInfo').classList.add('shown');
-    byId('timelineContainer').classList.add('shown');
-    byId('btnCut').disabled = false;
-
-    byId('infoDuration').textContent = formatTime(info.duration);
-    byId('infoResolution').textContent = `${info.width}x${info.height}`;
-    byId('infoFps').textContent = Math.round(info.fps);
-    byId('infoSelection').textContent = formatTime(info.duration);
-
-    byId<HTMLInputElement>('startTime').value = '00:00:00';
-    byId<HTMLInputElement>('endTime').value = formatTime(info.duration);
-
-    updateTimeline();
-    await updatePreview(0);
-}
-
-async function selectCutterVideo(): Promise<void> {
-    const filePath = await window.api.selectVideoFile();
-    if (!filePath) return;
-    await loadCutterFromPath(filePath);
-}
-
-function formatTime(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
-
-function parseTime(timeStr: string): number {
-    const parts = timeStr.split(':').map((p: string) => parseInt(p, 10) || 0);
-    if (parts.length === 3) {
-        return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    }
-
-    return 0;
-}
-
-function updateTimeline(): void {
-    if (!cutterVideoInfo) {
-        return;
-    }
-
-    const selection = byId('timelineSelection');
-    const startPercent = (cutterStartTime / cutterVideoInfo.duration) * 100;
-    const endPercent = (cutterEndTime / cutterVideoInfo.duration) * 100;
-
-    selection.style.left = startPercent + '%';
-    selection.style.width = (endPercent - startPercent) + '%';
-
-    const duration = cutterEndTime - cutterStartTime;
-    byId('infoSelection').textContent = formatTime(duration);
-}
-
-function updateTimeFromInput(): void {
-    const startStr = byId<HTMLInputElement>('startTime').value;
-    const endStr = byId<HTMLInputElement>('endTime').value;
-
-    cutterStartTime = Math.max(0, parseTime(startStr));
-    cutterEndTime = Math.min(cutterVideoInfo?.duration || 0, parseTime(endStr));
-
-    if (cutterEndTime <= cutterStartTime) {
-        cutterEndTime = cutterStartTime + 1;
-    }
-
-    updateTimeline();
-}
-
-async function seekTimeline(event: MouseEvent): Promise<void> {
-    if (!cutterVideoInfo) {
-        return;
-    }
-
-    const timeline = byId<HTMLElement>('timeline');
-    const rect = timeline.getBoundingClientRect();
-    const percent = (event.clientX - rect.left) / rect.width;
-    const time = percent * cutterVideoInfo.duration;
-
-    byId('timelineCurrent').style.left = (percent * 100) + '%';
-    await updatePreview(time);
-}
-
-async function updatePreview(time: number): Promise<void> {
-    if (!cutterFile) {
-        return;
-    }
-
-    const preview = byId('cutterPreview');
-    applyHtml(preview, `<div class="placeholder"><p>${escapeHtml(UI_TEXT.cutter.previewLoading)}</p></div>`);
-
-    const frame = await window.api.extractFrame(cutterFile, time);
-    if (frame) {
-        applyHtml(preview, `<img src="${escapeHtml(frame)}" alt="${escapeHtml(UI_TEXT.cutter.previewAlt)}">`);
-        return;
-    }
-
-    applyHtml(preview, `<div class="placeholder"><p>${escapeHtml(UI_TEXT.cutter.previewUnavailable)}</p></div>`);
-}
-
-async function startCutting(): Promise<void> {
-    if (!cutterFile || isCutting) {
-        return;
-    }
-
-    isCutting = true;
-    byId('btnCut').disabled = true;
-    byId('btnCut').textContent = UI_TEXT.cutter.cutting;
-    byId('cutProgress').classList.add('show');
-
-    const result = await window.api.cutVideo(cutterFile, cutterStartTime, cutterEndTime);
-
-    isCutting = false;
-    byId('btnCut').disabled = false;
-    byId('btnCut').textContent = UI_TEXT.cutter.cut;
-    byId('cutProgress').classList.remove('show');
-
-    if (result.success) {
-        alert(`${UI_TEXT.cutter.cutSuccess}\n\n${result.outputFile}`);
-        return;
-    }
-
-    alert(UI_TEXT.cutter.cutFailed);
 }
 
 async function addMergeFiles(): Promise<void> {

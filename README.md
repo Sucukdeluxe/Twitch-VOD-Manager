@@ -33,7 +33,8 @@ The application works in public mode without a Twitch login. Connecting a Twitch
 ### Download and process
 
 - Download complete VODs or selected time ranges
-- Trim, split and merge recordings with dedicated tools
+- Edit local videos with frame-accurate trimming, removable ranges, timeline zoom, waveform guidance and undo or redo
+- Split and merge recordings with dedicated tools
 - Queue multiple jobs and follow real progress, speed and remaining time
 - Pause and continue an active download without restarting it
 - Save optional chat replays and stream events alongside recordings
@@ -60,7 +61,7 @@ The application works in public mode without a Twitch login. Connecting a Twitch
 ## Installation
 
 1. Open the [latest GitHub release](https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/latest).
-2. Download `Twitch-VOD-Manager-Setup-1.0.4.exe`.
+2. Download `Twitch-VOD-Manager-Setup-1.0.5.exe`.
 3. Run the installer and choose the installation directory.
 4. Start Twitch VOD Manager and add a streamer.
 

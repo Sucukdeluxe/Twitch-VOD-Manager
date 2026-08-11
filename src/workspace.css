@@ -190,6 +190,16 @@ a:focus-visible {
     box-shadow: none;
 }
 
+input.cutter-volume:focus-visible {
+    outline: none;
+    box-shadow: none;
+}
+
+.cutter-volume-control:has(.cutter-volume:focus-visible) .cutter-player-button {
+    background: rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 0 0 2px var(--workspace-primary);
+}
+
 button:disabled,
 input:disabled,
 select:disabled,
@@ -1817,9 +1827,12 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
 }
 
 .clip-input,
-.cutter-container,
 .merge-container {
     max-width: 760px;
+}
+
+.cutter-container {
+    max-width: none;
 }
 
 .clip-input {
@@ -2166,6 +2179,44 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
     justify-content: flex-end;
     gap: 7px;
     margin-top: 18px;
+}
+
+.cutter-discard-modal {
+    max-width: 460px;
+}
+
+.cutter-discard-modal h2 {
+    margin: 0 0 10px;
+}
+
+.cutter-discard-modal p {
+    margin: 0;
+    color: var(--workspace-text-muted);
+    line-height: 1.5;
+}
+
+#cutterDiscardCancelBtn {
+    color: #000;
+    background: var(--workspace-primary);
+    border-color: var(--workspace-primary);
+}
+
+#cutterDiscardCancelBtn:hover:not(:disabled) {
+    color: #000;
+    background: var(--workspace-primary-hover);
+    border-color: var(--workspace-primary-hover);
+}
+
+#cutterDiscardConfirmBtn {
+    color: #000;
+    background: var(--workspace-danger);
+    border-color: var(--workspace-danger);
+}
+
+#cutterDiscardConfirmBtn:hover:not(:disabled) {
+    color: #000;
+    background: #f38d8d;
+    border-color: #f38d8d;
 }
 
 .update-modal {
@@ -2586,6 +2637,15 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
         transition-delay: 0s !important;
     }
 
+    .cutter-volume {
+        transition: width 220ms cubic-bezier(0.2, 0.75, 0.25, 1), margin 220ms cubic-bezier(0.2, 0.75, 0.25, 1), opacity 150ms ease, visibility 0s linear 220ms !important;
+    }
+
+    .cutter-volume-control:hover .cutter-volume,
+    .cutter-volume-control:focus-within .cutter-volume {
+        transition-delay: 0s !important;
+    }
+
     .top-nav::before {
         transition: transform 420ms cubic-bezier(0.22, 0.76, 0.22, 1), width 420ms cubic-bezier(0.22, 0.76, 0.22, 1), height 420ms cubic-bezier(0.22, 0.76, 0.22, 1) !important;
     }
@@ -2951,8 +3011,9 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
 }
 
 #settingsTab .language-picker .lang-option > span:not(.flag-icon) {
-    color: #fff;
-    mix-blend-mode: difference;
+    color: var(--workspace-text-muted);
+    mix-blend-mode: normal;
+    transition: color 120ms ease;
 }
 
 #settingsTab .language-picker .lang-option:hover {
@@ -2964,6 +3025,10 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
     background: transparent;
     border-color: transparent;
     box-shadow: none;
+}
+
+#settingsTab .language-picker .lang-option.active > span:not(.flag-icon) {
+    color: var(--workspace-primary-text);
 }
 
 #settingsTab .language-picker .lang-option.active:hover {

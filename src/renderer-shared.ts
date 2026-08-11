@@ -70,8 +70,6 @@ let queueDragDropInitialized = false;
 
 let cutterFile: string | null = null;
 let cutterVideoInfo: VideoInfo | null = null;
-let cutterStartTime = 0;
-let cutterEndTime = 0;
 let isCutting = false;
 
 let mergeFiles: string[] = [];

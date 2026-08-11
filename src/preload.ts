@@ -46,6 +46,49 @@ interface VideoInfo {
     width: number;
     height: number;
     fps: number;
+    hasAudio: boolean;
+    videoCodec: string;
+    audioCodec: string | null;
+    previewCompatible: boolean;
+    variableFrameRate: boolean;
+}
+
+interface VideoEditorMedia {
+    sourceUrl: string;
+    info: VideoInfo;
+    jobId: number;
+    thumbnails: string[];
+    waveform: string | null;
+}
+
+interface VideoEditorAssets {
+    jobId: number;
+    thumbnails: string[];
+    thumbnailSprite: string | null;
+    thumbnailCount: number;
+    pixelWidth: number;
+    pixelHeight: number;
+}
+
+interface VideoEditorWaveform {
+    jobId: number;
+    waveform: string | null;
+    pixelWidth: number;
+    pixelHeight: number;
+}
+
+interface VideoEditorAssetProfile {
+    timelineWidth: number;
+    trackHeight: number;
+    pixelRatio: number;
+}
+
+interface VideoEditExportRequest {
+    inputFile: string;
+    outputFile?: string;
+    trimStart: number;
+    trimEnd: number;
+    cuts: Array<{ id: string; start: number; end: number }>;
 }
 
 // Expose protected methods to renderer
@@ -112,6 +155,12 @@ contextBridge.exposeInMainWorld('api', {
     // Video Cutter
     getVideoInfo: (filePath: string): Promise<VideoInfo | null> => ipcRenderer.invoke('get-video-info', filePath),
     extractFrame: (filePath: string, timeSeconds: number): Promise<string | null> => ipcRenderer.invoke('extract-frame', filePath, timeSeconds),
+    prepareVideoEditorMedia: (filePath: string): Promise<VideoEditorMedia | null> => ipcRenderer.invoke('prepare-video-editor-media', filePath),
+    prepareVideoEditorWaveform: (filePath: string, jobId: number): Promise<VideoEditorWaveform | null> => ipcRenderer.invoke('prepare-video-editor-waveform', filePath, jobId),
+    prepareVideoEditorAssets: (filePath: string, jobId: number, profile: VideoEditorAssetProfile): Promise<VideoEditorAssets | null> => ipcRenderer.invoke('prepare-video-editor-assets', filePath, jobId, profile),
+    cancelVideoEditorAssets: (jobId: number): Promise<boolean> => ipcRenderer.invoke('cancel-video-editor-assets', jobId),
+    exportVideoEdit: (request: VideoEditExportRequest): Promise<{ success: boolean; outputFile: string | null; cancelled?: boolean }> => ipcRenderer.invoke('export-video-edit', request),
+    cancelVideoEdit: (): Promise<boolean> => ipcRenderer.invoke('cancel-video-edit'),
     cutVideo: (inputFile: string, startTime: number, endTime: number): Promise<{ success: boolean; outputFile: string | null }> =>
         ipcRenderer.invoke('cut-video', inputFile, startTime, endTime),
 

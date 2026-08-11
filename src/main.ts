@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, Notification, type IpcMainInvokeEvent } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, ChildProcess, execSync, spawnSync } from 'child_process';
 import { connect as tlsConnect, TLSSocket } from 'node:tls';
+import { pathToFileURL } from 'node:url';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
 import { compareUpdateVersions, isNewerUpdateVersion, normalizeUpdateVersion } from './main/domain/update-version-utils';
@@ -36,6 +37,8 @@ import {
 import { CustomClip, MergeGroupItem, MergeGroup, QueueItem, DownloadProgress, DownloadResult } from './types';
 import { buildVodPreviewFrameUrls } from './main/domain/vod-preview';
 import { getWindowsAppIdentity } from './main/domain/app-identity';
+import { addCutAt, createVideoEditorState, getPlayableSegments, setTrimRange, type EditorCut } from './main/domain/video-editor';
+import { calculateCutterExportProgress, createCutterExportPlan } from './main/domain/cutter-export';
 import {
     setDebugLogFn, initToolDirs,
     getStreamlinkPath, getStreamlinkCommand, getFFmpegPath, getFFprobePath,
@@ -250,6 +253,49 @@ interface VideoInfo {
     width: number;
     height: number;
     fps: number;
+    hasAudio: boolean;
+    videoCodec: string;
+    audioCodec: string | null;
+    previewCompatible: boolean;
+    variableFrameRate: boolean;
+}
+
+interface VideoEditorMedia {
+    sourceUrl: string;
+    info: VideoInfo;
+    jobId: number;
+    thumbnails: string[];
+    waveform: string | null;
+}
+
+interface VideoEditorAssets {
+    jobId: number;
+    thumbnails: string[];
+    thumbnailSprite: string | null;
+    thumbnailCount: number;
+    pixelWidth: number;
+    pixelHeight: number;
+}
+
+interface VideoEditorWaveform {
+    jobId: number;
+    waveform: string | null;
+    pixelWidth: number;
+    pixelHeight: number;
+}
+
+interface VideoEditorAssetProfile {
+    timelineWidth: number;
+    trackHeight: number;
+    pixelRatio: number;
+}
+
+interface VideoEditExportRequest {
+    inputFile: string;
+    outputFile?: string;
+    trimStart: number;
+    trimEnd: number;
+    cuts: EditorCut[];
 }
 
 interface ReleaseUpdateInfo {
@@ -685,6 +731,31 @@ let queuePaused = false;
 // and clip downloads via activeClipProcesses. Keeping these separate
 // prevents cancel-download from killing an unrelated cutter ffmpeg.
 let currentEditorProcess: ChildProcess | null = null;
+let currentCutterProcess: ChildProcess | null = null;
+let currentCutterPartialFile: string | null = null;
+let cutterExportActive = false;
+let cutterExportCancelled = false;
+let cutterPreparedInput: { path: string; size: number; mtimeMs: number; dev: number; ino: number } | null = null;
+let cutterMediaGeneration = 0;
+let cutterMediaRequestGeneration = 0;
+let cutterAssetRunGeneration = 0;
+let cutterWaveformGeneration = 0;
+let cutterMediaJob: {
+    jobId: number;
+    path: string;
+    identity: { path: string; size: number; mtimeMs: number; dev: number; ino: number };
+    info: VideoInfo;
+    waveform: VideoEditorWaveform | null;
+    waveformPromise: Promise<VideoEditorWaveform | null> | null;
+    previewDirectory: string | null;
+} | null = null;
+let appShutdownStarted = false;
+const currentCutterMediaProcesses = new Set<ChildProcess>();
+const currentCutterWaveformProcesses = new Set<ChildProcess>();
+const currentCutterProbeProcesses = new Set<ChildProcess>();
+const currentCutterInfoProcesses = new Set<ChildProcess>();
+const currentCutterExportProcesses = new Set<ChildProcess>();
+const currentCutterPreviewProcesses = new Set<ChildProcess>();
 // Per-item cancellation lives in `cancelledItemIds`. The previous global
 // `currentDownloadCancelled` flag was redundant once pause/cancel/remove
 // started iterating activeDownloads and adding each item to that Set; it
@@ -2677,7 +2748,20 @@ async function getClipInfo(clipId: string): Promise<any | null> {
 // ==========================================
 // VIDEO INFO (for cutter)
 // ==========================================
-async function getVideoInfo(filePath: string): Promise<VideoInfo | null> {
+function isVideoEditorPreviewCompatible(filePath: string, videoCodec: string, audioCodec: string | null): boolean {
+    const extension = path.extname(filePath).toLowerCase();
+    const audioCompatible = !audioCodec || ['aac', 'mp3', 'opus', 'vorbis'].includes(audioCodec);
+    if (['.mp4', '.m4v', '.mov'].includes(extension)) return ['h264', 'av1', 'vp9'].includes(videoCodec) && audioCompatible;
+    if (extension === '.webm') return ['vp8', 'vp9', 'av1'].includes(videoCodec) && audioCompatible;
+    if (extension === '.mkv') return ['h264', 'av1', 'vp8', 'vp9'].includes(videoCodec) && audioCompatible;
+    return false;
+}
+
+function isSupportedVideoEditorInput(filePath: string): boolean {
+    return ['.mp4', '.m4v', '.mov', '.webm', '.mkv', '.ts', '.avi'].includes(path.extname(filePath).toLowerCase());
+}
+
+async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProcess>, timeoutMs = 30000): Promise<VideoInfo | null> {
     const ffmpegReady = await ensureFfmpegInstalled();
     if (!ffmpegReady) {
         appendDebugLog('get-video-info-missing-ffmpeg');
@@ -2695,7 +2779,29 @@ async function getVideoInfo(filePath: string): Promise<VideoInfo | null> {
         ];
 
         const proc = spawn(ffprobe, args, { windowsHide: true });
+        trackedProcesses?.add(proc);
+        proc.stderr?.resume();
         let output = '';
+        let resolved = false;
+        let forceResolveTimer: NodeJS.Timeout | null = null;
+
+        const resolveOnce = (value: VideoInfo | null): void => {
+            if (resolved) return;
+            resolved = true;
+            resolve(value);
+        };
+
+        const finish = (value: VideoInfo | null): void => {
+            clearTimeout(timeoutTimer);
+            if (forceResolveTimer) clearTimeout(forceResolveTimer);
+            trackedProcesses?.delete(proc);
+            resolveOnce(value);
+        };
+
+        const timeoutTimer = setTimeout(() => {
+            try { proc.kill(); } catch { }
+            forceResolveTimer = setTimeout(() => resolveOnce(null), 2000);
+        }, timeoutMs);
 
         proc.stdout?.on('data', (data) => {
             output += data.toString();
@@ -2703,27 +2809,445 @@ async function getVideoInfo(filePath: string): Promise<VideoInfo | null> {
 
         proc.on('close', (code) => {
             if (code !== 0) {
-                resolve(null);
+                finish(null);
                 return;
             }
 
             try {
                 const info = JSON.parse(output);
                 const videoStream = info.streams?.find((s: any) => s.codec_type === 'video');
+                const audioStream = info.streams?.find((s: any) => s.codec_type === 'audio');
+                const duration = parseFloat(info.format?.duration || videoStream?.duration || '0');
+                const averageFps = parseFrameRate(videoStream?.avg_frame_rate);
+                const realFps = parseFrameRate(videoStream?.r_frame_rate);
+                const fps = averageFps > 0 ? averageFps : realFps;
 
-                resolve({
-                    duration: parseFloat(info.format?.duration || '0'),
-                    width: videoStream?.width || 0,
-                    height: videoStream?.height || 0,
-                    fps: parseFrameRate(videoStream?.r_frame_rate)
+                if (!videoStream || !Number.isFinite(duration) || duration <= 0 || !videoStream.width || !videoStream.height || !Number.isFinite(fps) || fps <= 0) {
+                    finish(null);
+                    return;
+                }
+
+                const videoCodec = String(videoStream.codec_name || '').toLowerCase();
+                const audioCodec = audioStream ? String(audioStream.codec_name || '').toLowerCase() : null;
+                const variableFrameRate = averageFps > 0 && realFps > 0 && Math.abs(averageFps - realFps) / Math.max(averageFps, realFps) > 0.005;
+                finish({
+                    duration,
+                    width: videoStream.width,
+                    height: videoStream.height,
+                    fps,
+                    hasAudio: Boolean(audioStream),
+                    videoCodec,
+                    audioCodec,
+                    previewCompatible: isVideoEditorPreviewCompatible(filePath, videoCodec, audioCodec),
+                    variableFrameRate,
                 });
             } catch {
-                resolve(null);
+                finish(null);
             }
         });
 
-        proc.on('error', () => resolve(null));
+        proc.on('error', () => finish(null));
     });
+}
+
+function cancelCutterMediaPreparation(): void {
+    cutterAssetRunGeneration += 1;
+    for (const process of currentCutterMediaProcesses) {
+        try { process.kill(); } catch { }
+    }
+}
+
+function cancelCutterMetadataPreparation(): void {
+    for (const process of currentCutterProbeProcesses) {
+        try { process.kill(); } catch { }
+    }
+}
+
+function cancelCutterPreviewPreparation(): void {
+    for (const process of currentCutterPreviewProcesses) {
+        try { process.kill(); } catch { }
+    }
+}
+
+function cancelCutterWaveformPreparation(): void {
+    cutterWaveformGeneration += 1;
+    for (const process of currentCutterWaveformProcesses) {
+        try { process.kill(); } catch { }
+    }
+}
+
+function runEditorMediaProcess(args: string[], runGeneration: number): Promise<boolean> {
+    return new Promise((resolve) => {
+        if (runGeneration !== cutterAssetRunGeneration || appShutdownStarted) {
+            resolve(false);
+            return;
+        }
+        const proc = spawn(getFFmpegPath(), args, { windowsHide: true });
+        currentCutterMediaProcesses.add(proc);
+        proc.stderr?.resume();
+        let settled = false;
+        const finish = (success: boolean): void => {
+            if (settled) return;
+            settled = true;
+            currentCutterMediaProcesses.delete(proc);
+            resolve(success && runGeneration === cutterAssetRunGeneration && !appShutdownStarted);
+        };
+        proc.on('close', (code) => finish(code === 0));
+        proc.on('error', () => finish(false));
+    });
+}
+
+function runEditorWaveformProcess(args: string[], runGeneration: number): Promise<boolean> {
+    return new Promise((resolve) => {
+        if (runGeneration !== cutterWaveformGeneration || appShutdownStarted) {
+            resolve(false);
+            return;
+        }
+        const proc = spawn(getFFmpegPath(), args, { windowsHide: true });
+        currentCutterWaveformProcesses.add(proc);
+        proc.stderr?.resume();
+        let settled = false;
+        const finish = (success: boolean): void => {
+            if (settled) return;
+            settled = true;
+            currentCutterWaveformProcesses.delete(proc);
+            resolve(success && runGeneration === cutterWaveformGeneration && !appShutdownStarted);
+        };
+        proc.on('close', (code) => finish(code === 0));
+        proc.on('error', () => finish(false));
+    });
+}
+
+function runEditorPreviewProcess(args: string[], requestGeneration: number): Promise<boolean> {
+    return new Promise((resolve) => {
+        if (requestGeneration !== cutterMediaRequestGeneration || appShutdownStarted) {
+            resolve(false);
+            return;
+        }
+        const proc = spawn(getFFmpegPath(), args, { windowsHide: true });
+        currentCutterPreviewProcesses.add(proc);
+        proc.stderr?.resume();
+        let settled = false;
+        const finish = (success: boolean): void => {
+            if (settled) return;
+            settled = true;
+            currentCutterPreviewProcesses.delete(proc);
+            resolve(success && requestGeneration === cutterMediaRequestGeneration && !appShutdownStarted);
+        };
+        proc.on('close', (code) => finish(code === 0));
+        proc.on('error', () => finish(false));
+    });
+}
+
+function removeCutterPreviewDirectory(directory: string | null): void {
+    if (!directory) return;
+    try { fs.rmSync(directory, { recursive: true, force: true }); } catch { }
+}
+
+function createVideoEditorPreview(filePath: string, info: VideoInfo, requestGeneration: number): Promise<{ sourceUrl: string; directory: string } | null> {
+    const directory = fs.mkdtempSync(path.join(app.getPath('temp'), `tvm-editor-preview-${process.pid}-`));
+    const previewFile = path.join(directory, 'preview.mp4');
+    const copyVideo = ['h264', 'av1', 'vp9'].includes(info.videoCodec);
+    const copyAudio = !info.audioCodec || ['aac', 'mp3'].includes(info.audioCodec);
+    const args = ['-fflags', '+genpts', '-i', filePath, '-map', '0:v:0', '-map', '0:a:0?'];
+    if (copyVideo) args.push('-c:v', 'copy');
+    else args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p');
+    if (info.hasAudio) {
+        if (copyAudio) args.push('-c:a', 'copy');
+        else args.push('-c:a', 'aac', '-b:a', '160k');
+    } else {
+        args.push('-an');
+    }
+    args.push('-movflags', '+faststart', '-avoid_negative_ts', 'make_zero', '-y', previewFile);
+    return runEditorPreviewProcess(args, requestGeneration).then((success) => {
+        if (!success || !fs.existsSync(previewFile) || fs.statSync(previewFile).size <= 256) {
+            removeCutterPreviewDirectory(directory);
+            return null;
+        }
+        return { sourceUrl: pathToFileURL(previewFile).href, directory };
+    });
+}
+
+function readImageDataUrl(filePath: string): string | null {
+    if (!fs.existsSync(filePath)) return null;
+    const extension = path.extname(filePath).toLowerCase();
+    const mediaType = extension === '.png' ? 'image/png' : 'image/jpeg';
+    return `data:${mediaType};base64,${fs.readFileSync(filePath).toString('base64')}`;
+}
+
+async function prepareVideoEditorMedia(filePath: string): Promise<VideoEditorMedia | null> {
+    if (appShutdownStarted || typeof filePath !== 'string' || !path.isAbsolute(filePath) || !isSupportedVideoEditorInput(filePath) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return null;
+    const requestGeneration = ++cutterMediaRequestGeneration;
+    cancelCutterPreviewPreparation();
+    cancelCutterMetadataPreparation();
+    const identityBefore = getCutterInputIdentity(filePath);
+    if (!identityBefore) return null;
+    const info = await getVideoInfo(filePath, currentCutterProbeProcesses);
+    const identityAfter = getCutterInputIdentity(filePath);
+    if (!info || info.variableFrameRate || requestGeneration !== cutterMediaRequestGeneration || !cutterInputIdentitiesMatch(identityBefore, identityAfter) || appShutdownStarted) return null;
+    const preview = info.previewCompatible
+        ? { sourceUrl: pathToFileURL(filePath).href, directory: null }
+        : await createVideoEditorPreview(filePath, info, requestGeneration);
+    if (!preview || requestGeneration !== cutterMediaRequestGeneration || !cutterInputIdentitiesMatch(identityBefore, getCutterInputIdentity(filePath)) || appShutdownStarted) {
+        removeCutterPreviewDirectory(preview?.directory || null);
+        return null;
+    }
+    cancelCutterMediaPreparation();
+    cancelCutterWaveformPreparation();
+    removeCutterPreviewDirectory(cutterMediaJob?.previewDirectory || null);
+    const jobId = ++cutterMediaGeneration;
+    cutterMediaJob = { jobId, path: identityAfter!.path, identity: identityAfter!, info, waveform: null, waveformPromise: null, previewDirectory: preview.directory };
+    return {
+        sourceUrl: preview.sourceUrl,
+        info,
+        jobId,
+        thumbnails: [],
+        waveform: null,
+    };
+}
+
+async function prepareVideoEditorWaveform(filePath: string, jobId: number): Promise<VideoEditorWaveform | null> {
+    const job = cutterMediaJob;
+    if (appShutdownStarted || typeof filePath !== 'string' || !path.isAbsolute(filePath) || !Number.isInteger(jobId) || !job || jobId !== job.jobId || normalizeComparablePath(filePath) !== job.path || !cutterInputIdentitiesMatch(getCutterInputIdentity(filePath), job.identity)) return null;
+    if (!job.info.hasAudio) return { jobId, waveform: null, pixelWidth: 32000, pixelHeight: 240 };
+    if (job.waveform) return job.waveform;
+    if (job.waveformPromise) return await job.waveformPromise;
+    const runGeneration = cutterWaveformGeneration;
+    const promise = (async (): Promise<VideoEditorWaveform | null> => {
+        const tempDir = fs.mkdtempSync(path.join(app.getPath('temp'), `tvm-editor-waveform-${process.pid}-`));
+        const waveformFile = path.join(tempDir, 'waveform.png');
+        try {
+            const success = await runEditorWaveformProcess([
+                '-i', filePath,
+                '-filter_complex', 'aformat=channel_layouts=mono,showwavespic=s=32000x240:colors=white',
+                '-frames:v', '1',
+                '-y', waveformFile,
+            ], runGeneration);
+            if (!success || runGeneration !== cutterWaveformGeneration || cutterMediaJob !== job || !cutterInputIdentitiesMatch(getCutterInputIdentity(filePath), job.identity) || appShutdownStarted) return null;
+            const waveform = readImageDataUrl(waveformFile);
+            if (!waveform) return null;
+            const result = { jobId, waveform, pixelWidth: 32000, pixelHeight: 240 };
+            job.waveform = result;
+            return result;
+        } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    })();
+    job.waveformPromise = promise;
+    const result = await promise;
+    if (cutterMediaJob === job && job.waveformPromise === promise) job.waveformPromise = null;
+    return result;
+}
+
+async function prepareVideoEditorAssets(filePath: string, jobId: number, profile: VideoEditorAssetProfile): Promise<VideoEditorAssets | null> {
+    if (appShutdownStarted || typeof filePath !== 'string' || !path.isAbsolute(filePath) || !Number.isInteger(jobId) || !profile || !Number.isFinite(profile.timelineWidth) || profile.timelineWidth <= 0 || !Number.isFinite(profile.trackHeight) || profile.trackHeight <= 0 || !Number.isFinite(profile.pixelRatio) || profile.pixelRatio <= 0 || !cutterMediaJob || jobId !== cutterMediaJob.jobId || normalizeComparablePath(filePath) !== cutterMediaJob.path || !cutterInputIdentitiesMatch(getCutterInputIdentity(filePath), cutterMediaJob.identity)) return null;
+    cancelCutterMediaPreparation();
+    const runGeneration = cutterAssetRunGeneration;
+    const info = cutterMediaJob.info;
+    const tempDir = fs.mkdtempSync(path.join(app.getPath('temp'), `tvm-editor-media-${process.pid}-`));
+    const pixelRatio = Math.min(3, Math.max(1, profile.pixelRatio));
+    const pixelWidth = info.duration <= 120 ? 32000 : Math.round(Math.min(32000, Math.max(1800, Math.ceil(profile.timelineWidth * pixelRatio))));
+    const thumbnailCount = info.duration <= 120 ? 200 : Math.round(Math.min(100, Math.max(30, Math.ceil(pixelWidth / 320))));
+    const thumbnailTileWidth = Math.max(428, Math.ceil(pixelWidth / thumbnailCount / 2) * 2);
+    const thumbnailTileHeight = 240;
+    try {
+        const thumbnailsReady = await runEditorMediaProcess([
+            '-i', filePath,
+            '-vf', `fps=${thumbnailCount / info.duration},scale=${thumbnailTileWidth}:${thumbnailTileHeight}:force_original_aspect_ratio=increase:flags=lanczos,crop=${thumbnailTileWidth}:${thumbnailTileHeight}`,
+            '-frames:v', String(thumbnailCount),
+            '-q:v', '2',
+            '-start_number', '1',
+            '-y', path.join(tempDir, 'thumb-%03d.jpg'),
+        ], runGeneration);
+        if (runGeneration !== cutterAssetRunGeneration || !cutterMediaJob || jobId !== cutterMediaJob.jobId || !cutterInputIdentitiesMatch(getCutterInputIdentity(filePath), cutterMediaJob.identity) || appShutdownStarted) return null;
+        if (!thumbnailsReady) return null;
+        const thumbnails = fs.readdirSync(tempDir)
+            .filter((name) => /^thumb-\d+\.jpg$/i.test(name))
+            .sort()
+            .map((name) => readImageDataUrl(path.join(tempDir, name)))
+            .filter((value): value is string => Boolean(value));
+        if (thumbnails.length < Math.floor(thumbnailCount * 0.95)) return null;
+        return {
+            jobId,
+            thumbnails,
+            thumbnailSprite: null,
+            thumbnailCount: thumbnails.length,
+            pixelWidth,
+            pixelHeight: thumbnailTileHeight,
+        };
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+}
+
+function getCutterInputIdentity(filePath: string): { path: string; size: number; mtimeMs: number; dev: number; ino: number } | null {
+    try {
+        const stat = fs.statSync(filePath);
+        if (!stat.isFile()) return null;
+        return { path: normalizeComparablePath(filePath), size: stat.size, mtimeMs: stat.mtimeMs, dev: stat.dev, ino: stat.ino };
+    } catch {
+        return null;
+    }
+}
+
+function cutterInputIdentityMatches(filePath: string): boolean {
+    const current = getCutterInputIdentity(filePath);
+    return cutterInputIdentitiesMatch(current, cutterPreparedInput);
+}
+
+function cutterInputIdentitiesMatch(
+    left: { path: string; size: number; mtimeMs: number; dev: number; ino: number } | null,
+    right: { path: string; size: number; mtimeMs: number; dev: number; ino: number } | null,
+): boolean {
+    return Boolean(left && right
+        && left.path === right.path
+        && left.size === right.size
+        && left.mtimeMs === right.mtimeMs
+        && left.dev === right.dev
+        && left.ino === right.ino);
+}
+
+function normalizeComparablePath(filePath: string): string {
+    const resolved = path.resolve(filePath);
+    let canonical = resolved;
+    try { canonical = fs.realpathSync.native(resolved); } catch {
+        try {
+            const parent = fs.realpathSync.native(path.dirname(resolved));
+            canonical = path.join(parent, path.basename(resolved));
+        } catch { }
+    }
+    return process.platform === 'win32' ? canonical.toLocaleLowerCase('en-US') : canonical;
+}
+
+function pathsReferToSameFile(left: string, right: string): boolean {
+    if (normalizeComparablePath(left) === normalizeComparablePath(right)) return true;
+    if (!fs.existsSync(left) || !fs.existsSync(right)) return false;
+    try {
+        const leftStat = fs.statSync(left);
+        const rightStat = fs.statSync(right);
+        return leftStat.dev === rightStat.dev && leftStat.ino !== 0 && leftStat.ino === rightStat.ino;
+    } catch {
+        return false;
+    }
+}
+
+function publishVideoEditorOutput(partialFile: string, outputFile: string): void {
+    const backupFile = `${outputFile}.${process.pid}.${Date.now()}.tvm-backup`;
+    const hadExistingOutput = fs.existsSync(outputFile);
+    if (hadExistingOutput) fs.renameSync(outputFile, backupFile);
+    try {
+        fs.renameSync(partialFile, outputFile);
+        if (hadExistingOutput) {
+            try { fs.rmSync(backupFile, { force: true }); } catch { }
+        }
+    } catch (error) {
+        if (hadExistingOutput && fs.existsSync(backupFile) && !fs.existsSync(outputFile)) fs.renameSync(backupFile, outputFile);
+        throw error;
+    }
+}
+
+async function performVideoEditExport(request: VideoEditExportRequest, onProgress: (percent: number) => void): Promise<boolean> {
+    if (appShutdownStarted) return false;
+    if (!request || typeof request.inputFile !== 'string' || typeof request.outputFile !== 'string') return false;
+    if (!path.isAbsolute(request.inputFile) || !path.isAbsolute(request.outputFile) || !fs.existsSync(request.inputFile)) return false;
+    if (path.extname(request.outputFile).toLowerCase() !== '.mp4' || pathsReferToSameFile(request.inputFile, request.outputFile)) return false;
+    if (!Number.isFinite(request.trimStart) || !Number.isFinite(request.trimEnd) || !Array.isArray(request.cuts) || request.cuts.length > 64) return false;
+    if (request.cuts.some((cut) => !isPlainObject(cut) || typeof cut.id !== 'string' || !Number.isFinite(cut.start) || !Number.isFinite(cut.end))) return false;
+    const inputIdentity = getCutterInputIdentity(request.inputFile);
+    if (!cutterInputIdentitiesMatch(inputIdentity, cutterPreparedInput)) return false;
+    const info = await getVideoInfo(request.inputFile, currentCutterExportProcesses);
+    if (!info || cutterExportCancelled) return false;
+    let state = setTrimRange(createVideoEditorState(info.duration, info.fps), request.trimStart, request.trimEnd);
+    if (Math.abs(state.trimStart - request.trimStart) > 1 / info.fps || Math.abs(state.trimEnd - request.trimEnd) > 1 / info.fps) return false;
+    try {
+        for (const cut of request.cuts) {
+            state = addCutAt(state, cut.start, cut.end - cut.start).state;
+        }
+    } catch {
+        return false;
+    }
+    const segments = getPlayableSegments(state);
+    if (segments.length === 0) return false;
+    const outputDir = path.dirname(request.outputFile);
+    if (!fs.existsSync(outputDir) || !fs.statSync(outputDir).isDirectory()) return false;
+    const inputBytes = fs.statSync(request.inputFile).size;
+    const diskCheck = ensureDiskSpace(outputDir, Math.max(128 * 1024 * 1024, Math.ceil(inputBytes * 1.25)), 'Video-Editor');
+    if (!diskCheck.success) return false;
+    const partialFile = path.join(outputDir, `.${path.basename(request.outputFile, '.mp4')}.${process.pid}.${Date.now()}.tvm-edit.mp4`);
+    const plan = createCutterExportPlan({ inputFile: request.inputFile, outputFile: partialFile, segments, hasAudio: info.hasAudio });
+    if (plan.filterComplex.length > 24000 || cutterExportCancelled) return false;
+    currentCutterPartialFile = partialFile;
+    const success = await new Promise<boolean>((resolve) => {
+        const proc = spawn(getFFmpegPath(), plan.ffmpegArgs, { windowsHide: true });
+        currentCutterProcess = proc;
+        currentCutterExportProcesses.add(proc);
+        proc.stderr?.resume();
+        let stdout = '';
+        proc.stdout?.on('data', (data) => {
+            stdout += data.toString();
+            const lines = stdout.split(/\r?\n/);
+            stdout = lines.pop() || '';
+            for (const line of lines) {
+                const match = line.match(/^out_time_(?:us|ms)=(\d+)$/);
+                if (match) onProgress(calculateCutterExportProgress(Number(match[1]) / 1_000_000, plan));
+            }
+        });
+        proc.on('close', (code) => {
+            currentCutterExportProcesses.delete(proc);
+            if (currentCutterProcess === proc) currentCutterProcess = null;
+            resolve(code === 0 && !cutterExportCancelled);
+        });
+        proc.on('error', () => {
+            currentCutterExportProcesses.delete(proc);
+            if (currentCutterProcess === proc) currentCutterProcess = null;
+            resolve(false);
+        });
+    });
+    if (!success || !fs.existsSync(partialFile) || fs.statSync(partialFile).size <= 256) {
+        fs.rmSync(partialFile, { force: true });
+        currentCutterPartialFile = null;
+        return false;
+    }
+    if (cutterExportCancelled) {
+        fs.rmSync(partialFile, { force: true });
+        currentCutterPartialFile = null;
+        return false;
+    }
+    const outputInfo = await getVideoInfo(partialFile, currentCutterExportProcesses);
+    if (cutterExportCancelled || !outputInfo || Math.abs(outputInfo.duration - plan.remainingDuration) > Math.max(0.12, 3 / info.fps)) {
+        fs.rmSync(partialFile, { force: true });
+        currentCutterPartialFile = null;
+        return false;
+    }
+    if (cutterExportCancelled || pathsReferToSameFile(request.inputFile, request.outputFile) || !cutterInputIdentitiesMatch(getCutterInputIdentity(request.inputFile), inputIdentity)) {
+        fs.rmSync(partialFile, { force: true });
+        currentCutterPartialFile = null;
+        return false;
+    }
+    publishVideoEditorOutput(partialFile, request.outputFile);
+    currentCutterPartialFile = null;
+    onProgress(100);
+    return true;
+}
+
+async function exportVideoEdit(request: VideoEditExportRequest, onProgress: (percent: number) => void): Promise<{ success: boolean; cancelled: boolean }> {
+    if (cutterExportActive || appShutdownStarted) return { success: false, cancelled: false };
+    cutterExportActive = true;
+    cutterExportCancelled = false;
+    try {
+        const success = await performVideoEditExport(request, onProgress);
+        return { success, cancelled: !success && cutterExportCancelled };
+    } catch (error) {
+        appendDebugLog('video-editor-export-failed', String(error));
+        return { success: false, cancelled: cutterExportCancelled };
+    } finally {
+        cutterExportActive = false;
+        cutterExportCancelled = false;
+        if (currentCutterPartialFile && !currentCutterProcess) {
+            try { fs.rmSync(currentCutterPartialFile, { force: true }); } catch { }
+            currentCutterPartialFile = null;
+        }
+    }
 }
 
 // ==========================================
@@ -2750,6 +3274,7 @@ async function extractFrame(filePath: string, timeSeconds: number): Promise<stri
         ];
 
         const proc = spawn(ffmpeg, args, { windowsHide: true });
+        proc.stderr?.resume();
 
         proc.on('close', (code) => {
             if (code === 0 && fs.existsSync(tempFile)) {
@@ -6190,7 +6715,13 @@ function createWindow(): void {
         mainWindow.removeMenu();
     }
 
-    mainWindow.loadFile(path.join(__dirname, '../src/index.html'));
+    const rendererFile = path.join(__dirname, '../src/index.html');
+    const rendererUrl = pathToFileURL(rendererFile).href;
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+        if (url.split(/[?#]/, 1)[0] !== rendererUrl) event.preventDefault();
+    });
+    mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    mainWindow.loadFile(rendererFile);
 
     mainWindow.webContents.on('did-finish-load', () => {
         emitQueueUpdated(true);
@@ -6971,7 +7502,7 @@ ipcMain.handle('select-video-file', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
         properties: ['openFile'],
         filters: [
-            { name: 'Video Files', extensions: ['mp4', 'mkv', 'ts', 'mov', 'avi'] }
+            { name: 'Video Files', extensions: ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'ts', 'avi'] }
         ]
     });
     return result.filePaths[0] || null;
@@ -7433,13 +7964,83 @@ ipcMain.handle('import-config', async () => {
     }
 });
 
+function isTrustedRendererEvent(event: IpcMainInvokeEvent): boolean {
+    if (!mainWindow || event.sender.id !== mainWindow.webContents.id) return false;
+    const rendererUrl = pathToFileURL(path.join(__dirname, '../src/index.html')).href;
+    const senderUrl = event.senderFrame?.url || event.sender.getURL();
+    return senderUrl.split(/[?#]/, 1)[0] === rendererUrl;
+}
+
+function isPathInsideDirectory(rootDirectory: string, candidate: string): boolean {
+    const root = normalizeComparablePath(rootDirectory);
+    const target = normalizeComparablePath(candidate);
+    const relative = path.relative(root, target);
+    return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
 // Video Cutter IPC
-ipcMain.handle('get-video-info', async (_, filePath: string) => {
-    return await getVideoInfo(filePath);
+ipcMain.handle('get-video-info', async (event, filePath: string) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    return await getVideoInfo(filePath, currentCutterInfoProcesses);
 });
 
-ipcMain.handle('extract-frame', async (_, filePath: string, timeSeconds: number) => {
+ipcMain.handle('extract-frame', async (event, filePath: string, timeSeconds: number) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
     return await extractFrame(filePath, timeSeconds);
+});
+
+ipcMain.handle('prepare-video-editor-media', async (event, filePath: string) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    const media = await prepareVideoEditorMedia(filePath);
+    if (media && cutterMediaJob?.jobId === media.jobId) cutterPreparedInput = cutterMediaJob.identity;
+    return media;
+});
+
+ipcMain.handle('prepare-video-editor-waveform', async (event, filePath: string, jobId: number) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    return await prepareVideoEditorWaveform(filePath, jobId);
+});
+
+ipcMain.handle('prepare-video-editor-assets', async (event, filePath: string, jobId: number, profile: VideoEditorAssetProfile) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    return await prepareVideoEditorAssets(filePath, jobId, profile);
+});
+
+ipcMain.handle('cancel-video-editor-assets', (event, jobId: number) => {
+    if (!isTrustedRendererEvent(event) || !Number.isInteger(jobId) || cutterMediaJob?.jobId !== jobId) return false;
+    cancelCutterMediaPreparation();
+    return true;
+});
+
+ipcMain.handle('export-video-edit', async (event, request: VideoEditExportRequest) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted || !request || typeof request.inputFile !== 'string') return { success: false, outputFile: null };
+    if (!cutterInputIdentityMatches(request.inputFile)) return { success: false, outputFile: null };
+    let outputFile: string | null = null;
+    const testRoot = process.env.TWITCH_VOD_MANAGER_E2E_CUTTER_OUTPUT_ROOT;
+    if (testRoot && typeof request.outputFile === 'string' && isPathInsideDirectory(testRoot, request.outputFile)) {
+        outputFile = request.outputFile;
+    } else {
+        const defaultName = path.join(path.dirname(request.inputFile), `${path.basename(request.inputFile, path.extname(request.inputFile))}_edited.mp4`);
+        const result = await dialog.showSaveDialog(mainWindow!, {
+            defaultPath: defaultName,
+            filters: [{ name: 'MP4 Video', extensions: ['mp4'] }],
+        });
+        if (result.canceled || !result.filePath) return { success: false, outputFile: null, cancelled: true };
+        outputFile = result.filePath;
+    }
+    const outcome = await exportVideoEdit({ ...request, outputFile }, (percent) => {
+        mainWindow?.webContents.send('cut-progress', percent);
+    });
+    return { success: outcome.success, outputFile: outcome.success ? outputFile : null, cancelled: outcome.cancelled || undefined };
+});
+
+ipcMain.handle('cancel-video-edit', (event) => {
+    if (!isTrustedRendererEvent(event) || !cutterExportActive) return false;
+    cutterExportCancelled = true;
+    for (const process of currentCutterExportProcesses) {
+        try { process.kill(); } catch { }
+    }
+    return true;
 });
 
 ipcMain.handle('cut-video', async (_, inputFile: string, startTime: number, endTime: number) => {
@@ -7495,11 +8096,40 @@ ipcMain.handle('save-video-dialog', async (_, defaultName: string) => {
 let appDb: DbHandle | null = null;
 export function getAppDb(): DbHandle | null { return appDb; }
 
+function cleanupStaleCutterMediaDirectories(): number {
+    const tempRoot = path.resolve(app.getPath('temp'));
+    let removed = 0;
+    try {
+        for (const name of fs.readdirSync(tempRoot)) {
+            if (!/^tvm-editor-(?:media|waveform|preview)-[A-Za-z0-9_-]+$/.test(name)) continue;
+            const candidate = path.resolve(tempRoot, name);
+            if (path.dirname(candidate) !== tempRoot) continue;
+            const processMatch = name.match(/^tvm-editor-(?:media|waveform|preview)-(\d+)-/);
+            if (processMatch) {
+                const ownerPid = Number(processMatch[1]);
+                if (ownerPid === process.pid) continue;
+                try {
+                    process.kill(ownerPid, 0);
+                    continue;
+                } catch { }
+            } else {
+                const ageMs = Date.now() - fs.statSync(candidate).mtimeMs;
+                if (ageMs < 24 * 60 * 60 * 1000) continue;
+            }
+            fs.rmSync(candidate, { recursive: true, force: true });
+            removed += 1;
+        }
+    } catch { }
+    return removed;
+}
+
 app.whenReady().then(() => {
     const removedPartialDownloads = partialDownloadRegistry.cleanup();
     if (removedPartialDownloads.length > 0) {
         appendDebugLog('partial-downloads-cleaned-on-startup', { count: removedPartialDownloads.length });
     }
+    const removedCutterMediaDirectories = cleanupStaleCutterMediaDirectories();
+    if (removedCutterMediaDirectories > 0) appendDebugLog('cutter-media-cleaned-on-startup', { count: removedCutterMediaDirectories });
     refreshBundledToolPaths(true);
     startMetadataCacheCleanup();
     startDebugLogFlushTimer();
@@ -7544,9 +8174,26 @@ let shutdownCleanupDone = false;
 let quitAfterCleanup = false;
 let shutdownPromise: Promise<void> | null = null;
 
+function waitForChildProcessClose(process: ChildProcess | null, timeoutMs = 5000): Promise<void> {
+    if (!process || process.exitCode !== null || process.signalCode !== null) return Promise.resolve();
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (): void => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve();
+        };
+        const timer = setTimeout(finish, timeoutMs);
+        process.once('close', finish);
+        process.once('error', finish);
+    });
+}
+
 async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Promise<void> {
     if (shutdownCleanupDone) return;
     shutdownCleanupDone = true;
+    appShutdownStarted = true;
 
     appendDebugLog('shutdown-cleanup', { reason });
 
@@ -7579,8 +8226,32 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
     activeClipProcesses.clear();
 
     if (currentEditorProcess) {
-        try { currentEditorProcess.kill(); } catch { /* already exited */ }
+        const editorProcess = currentEditorProcess;
+        try { editorProcess.kill(); } catch { /* already exited */ }
+        await waitForChildProcessClose(editorProcess);
         currentEditorProcess = null;
+    }
+
+    if (cutterExportActive) cutterExportCancelled = true;
+    const exportProcesses = [...currentCutterExportProcesses];
+    for (const process of exportProcesses) {
+        try { process.kill(); } catch { }
+    }
+    await Promise.all(exportProcesses.map((process) => waitForChildProcessClose(process)));
+    if (currentCutterProcess && exportProcesses.includes(currentCutterProcess)) currentCutterProcess = null;
+    const mediaProcesses = [...currentCutterMediaProcesses, ...currentCutterWaveformProcesses, ...currentCutterProbeProcesses, ...currentCutterInfoProcesses, ...currentCutterPreviewProcesses];
+    cancelCutterMediaPreparation();
+    cancelCutterWaveformPreparation();
+    cancelCutterMetadataPreparation();
+    cancelCutterPreviewPreparation();
+    for (const process of currentCutterInfoProcesses) {
+        try { process.kill(); } catch { }
+    }
+    await Promise.all(mediaProcesses.map((process) => waitForChildProcessClose(process)));
+    removeCutterPreviewDirectory(cutterMediaJob?.previewDirectory || null);
+    if (currentCutterPartialFile) {
+        try { fs.rmSync(currentCutterPartialFile, { force: true }); } catch { }
+        currentCutterPartialFile = null;
     }
 
     saveConfig(config);
