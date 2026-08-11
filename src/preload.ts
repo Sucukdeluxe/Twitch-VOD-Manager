@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { CustomClip, MergeGroupItem, MergeGroup, QueueItem, DownloadProgress } from './types';
 
+let chatReadSequence = 0;
+
 // Types
 interface RuntimeMetricsSnapshot {
     cacheHits: number;
@@ -164,11 +166,18 @@ contextBridge.exposeInMainWorld('api', {
     },
     searchArchive: (filter: Record<string, unknown>) => ipcRenderer.invoke('search-archive', filter),
     runStorageCleanup: (options?: { dryRun?: boolean }) => ipcRenderer.invoke('run-storage-cleanup', options),
-    readChatFile: async (filePath: string) => {
+    readChatFile: async (filePath: string, signal?: AbortSignal) => {
         const capability = await ipcRenderer.invoke('authorize-managed-path', 'chat-input', filePath);
-        return capability
-            ? ipcRenderer.invoke('read-chat-file', capability.token)
-            : { success: false, error: 'File access denied' };
+        if (!capability) return { success: false, error: 'File access denied' };
+        if (signal?.aborted) return { success: false, cancelled: true };
+        const requestId = `chat-${Date.now()}-${++chatReadSequence}`;
+        const cancel = () => ipcRenderer.send('cancel-chat-read', requestId);
+        signal?.addEventListener('abort', cancel, { once: true });
+        try {
+            return await ipcRenderer.invoke('read-chat-file', capability.token, requestId);
+        } finally {
+            signal?.removeEventListener('abort', cancel);
+        }
     },
     getAutomationStatus: () => ipcRenderer.invoke('get-automation-status'),
     triggerAutoVodScan: () => ipcRenderer.invoke('trigger-auto-vod-scan'),

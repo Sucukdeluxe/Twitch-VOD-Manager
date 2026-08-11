@@ -420,12 +420,12 @@ function refreshUpdateModalTexts(): void {
 function openUpdateModal(info?: UpdateInfo): void {
     rememberUpdateInfo(info);
     updateChangelogExpanded = false;
-    byId('updateModal').classList.add('show');
+    RendererAccessibility.openDialog('updateModal', { onEscape: dismissUpdateModal });
     refreshUpdateModalTexts();
 }
 
 function dismissUpdateModal(): void {
-    byId('updateModal').classList.remove('show');
+    RendererAccessibility.closeDialog('updateModal');
 }
 
 function skipUpdateVersion(): void {

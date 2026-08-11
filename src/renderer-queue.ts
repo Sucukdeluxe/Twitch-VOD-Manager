@@ -157,11 +157,15 @@ async function retryQueueItem(id: string): Promise<void> {
 
 let queueContextMenuInitialized = false;
 let activeQueueContextMenu: HTMLElement | null = null;
+let activeQueueContextMenuInvoker: HTMLElement | null = null;
 
-function closeQueueContextMenu(): void {
+function closeQueueContextMenu(restoreFocus = false): void {
     if (!activeQueueContextMenu) return;
     activeQueueContextMenu.remove();
     activeQueueContextMenu = null;
+    const invoker = activeQueueContextMenuInvoker;
+    activeQueueContextMenuInvoker = null;
+    if (restoreFocus && invoker?.isConnected) invoker.focus();
 }
 
 function initQueueContextMenu(): void {
@@ -177,26 +181,42 @@ function initQueueContextMenu(): void {
         const item = queue.find((i) => i.id === id);
         if (!item) return;
         e.preventDefault();
-        showQueueContextMenu(e.clientX, e.clientY, item);
+        showQueueContextMenu(e.clientX, e.clientY, item, e.target as HTMLElement);
+    });
+    list.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key !== 'ContextMenu' && !(e.shiftKey && e.key === 'F10')) return;
+        const target = e.target as HTMLElement;
+        const itemEl = target.closest('.queue-item') as HTMLElement | null;
+        const id = itemEl?.dataset.id;
+        const item = id ? queue.find((candidate) => candidate.id === id) : null;
+        if (!item || !itemEl) return;
+        e.preventDefault();
+        const rect = itemEl.getBoundingClientRect();
+        showQueueContextMenu(rect.left + 12, rect.top + 12, item, target);
     });
 }
 
-function showQueueContextMenu(x: number, y: number, item: QueueItem): void {
+function showQueueContextMenu(x: number, y: number, item: QueueItem, invoker: HTMLElement | null): void {
     closeQueueContextMenu();
 
     const menu = document.createElement('div');
     menu.className = 'context-menu';
     menu.setAttribute('role', 'menu');
 
+    let cleanup = (restoreFocus = false): void => closeQueueContextMenu(restoreFocus);
     const makeItem = (label: string, onClick: () => void, disabled = false): HTMLElement => {
-        const el = document.createElement('div');
+        const el = document.createElement('button');
+        el.type = 'button';
         el.textContent = label;
         el.className = 'context-menu-item' + (disabled ? ' disabled' : '');
         el.setAttribute('role', 'menuitem');
-        if (disabled) el.setAttribute('aria-disabled', 'true');
+        if (disabled) {
+            el.setAttribute('aria-disabled', 'true');
+            el.disabled = true;
+        }
         if (!disabled) {
             el.addEventListener('click', () => {
-                try { onClick(); } finally { closeQueueContextMenu(); }
+                try { onClick(); } finally { cleanup(); }
             });
         }
         return el;
@@ -260,6 +280,7 @@ function showQueueContextMenu(x: number, y: number, item: QueueItem): void {
 
     document.body.appendChild(menu);
     activeQueueContextMenu = menu;
+    activeQueueContextMenuInvoker = invoker;
 
     const rect = menu.getBoundingClientRect();
     let left = x;
@@ -274,19 +295,16 @@ function showQueueContextMenu(x: number, y: number, item: QueueItem): void {
         if (ev.target instanceof Node && activeQueueContextMenu.contains(ev.target)) return;
         cleanup();
     };
-    const dismissOnEscape = (ev: KeyboardEvent) => {
-        if (ev.key === 'Escape') cleanup();
-    };
     const dismissOnScroll = () => cleanup();
-    const cleanup = (): void => {
-        closeQueueContextMenu();
+    cleanup = (restoreFocus = false): void => {
+        closeQueueContextMenu(restoreFocus);
         document.removeEventListener('mousedown', dismissOnClick, true);
-        document.removeEventListener('keydown', dismissOnEscape, true);
         document.removeEventListener('scroll', dismissOnScroll, true);
     };
     document.addEventListener('mousedown', dismissOnClick, true);
-    document.addEventListener('keydown', dismissOnEscape, true);
     document.addEventListener('scroll', dismissOnScroll, true);
+    RendererAccessibility.installMenuKeyboardNavigation(menu, () => cleanup(true));
+    RendererAccessibility.focusFirstMenuItem(menu);
 }
 
 async function moveQueueItemTo(id: string, where: 'top' | 'bottom'): Promise<void> {

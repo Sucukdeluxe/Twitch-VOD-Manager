@@ -99,6 +99,7 @@ interface PaletteCommand {
         clearList(list);
         STORE.filtered.forEach((cmd, idx) => {
             const li = document.createElement('li');
+            li.id = `commandPaletteOption-${idx}`;
             li.className = 'cp-item' + (idx === STORE.activeIndex ? ' cp-active' : '');
             li.dataset.cmdId = cmd.id;
             li.setAttribute('role', 'option');
@@ -124,6 +125,8 @@ interface PaletteCommand {
 
             list.appendChild(li);
         });
+        const input = getInput();
+        if (input) input.setAttribute('aria-activedescendant', STORE.filtered[STORE.activeIndex] ? `commandPaletteOption-${STORE.activeIndex}` : '');
     }
 
     function applyFilter(query: string) {
@@ -133,9 +136,7 @@ interface PaletteCommand {
         } else {
             STORE.filtered = STORE.commands.filter(c => c.keywords.includes(q));
         }
-        if (STORE.activeIndex >= STORE.filtered.length) {
-            STORE.activeIndex = STORE.filtered.length > 0 ? STORE.filtered.length - 1 : 0;
-        }
+        STORE.activeIndex = 0;
         render();
     }
 
@@ -158,15 +159,17 @@ interface PaletteCommand {
         STORE.filtered = STORE.commands.slice();
         STORE.activeIndex = 0;
         input.value = '';
-        modal.classList.add('show');
-        requestAnimationFrame(() => input.focus());
         render();
+        input.setAttribute('aria-expanded', 'true');
+        RendererAccessibility.openDialog('commandPaletteModal', { initialFocus: input, onEscape: close });
     }
 
     function close() {
         const modal = getModal();
         if (!modal) return;
-        modal.classList.remove('show');
+        getInput()?.setAttribute('aria-expanded', 'false');
+        getInput()?.removeAttribute('aria-activedescendant');
+        RendererAccessibility.closeDialog('commandPaletteModal');
     }
 
     function onKeydown(e: KeyboardEvent) {

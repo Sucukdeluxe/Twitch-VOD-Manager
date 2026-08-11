@@ -309,13 +309,12 @@ interface EventLogEntry {
 }
 
 async function openEventsViewer(filePath: string, title: string): Promise<void> {
-    const modal = byId('eventsViewerModal');
     const list = byId('eventsViewerList');
     const status = byId('eventsViewerStatus');
     byId('eventsViewerTitle').textContent = title || UI_TEXT.queue.viewEvents;
     list.replaceChildren();
     status.textContent = UI_TEXT.queue.viewChatLoading;
-    modal.classList.add('show');
+    RendererAccessibility.openDialog('eventsViewerModal', { onEscape: closeEventsViewer });
 
     const result = await window.api.readChatFile(filePath);
     if (!result.success || !Array.isArray(result.messages)) {
@@ -328,7 +327,7 @@ async function openEventsViewer(filePath: string, title: string): Promise<void> 
 }
 
 function closeEventsViewer(): void {
-    byId('eventsViewerModal').classList.remove('show');
+    RendererAccessibility.closeDialog('eventsViewerModal');
 }
 
 function formatEventTime(iso?: string): string {
@@ -411,8 +410,17 @@ interface ChatViewerMessage {
 
 let chatViewerMessages: ChatViewerMessage[] = [];
 let chatViewerFormat: 'replay' | 'live' = 'replay';
+let chatViewerSessionGeneration = 0;
+let chatViewerReadAbort: AbortController | null = null;
+const chatViewerRenderGeneration = new RendererAccessibility.RenderGeneration();
+const CHAT_VIEWER_ROW_HEIGHT = 29;
+const CHAT_VIEWER_OVERSCAN = 12;
 
 async function openChatViewer(filePath: string, title: string): Promise<void> {
+    const sessionGeneration = ++chatViewerSessionGeneration;
+    chatViewerReadAbort?.abort();
+    const abortController = new AbortController();
+    chatViewerReadAbort = abortController;
     const modal = byId('chatViewerModal');
     const list = byId('chatViewerList');
     const status = byId('chatViewerStatus');
@@ -421,10 +429,12 @@ async function openChatViewer(filePath: string, title: string): Promise<void> {
     list.replaceChildren();
     filterInput.value = '';
     status.textContent = UI_TEXT.queue.viewChatLoading;
-    modal.classList.add('show');
+    RendererAccessibility.openDialog('chatViewerModal', { initialFocus: filterInput, onEscape: closeChatViewer });
 
-    const result = await window.api.readChatFile(filePath);
+    const result = await window.api.readChatFile(filePath, abortController.signal);
+    if (sessionGeneration !== chatViewerSessionGeneration || abortController.signal.aborted || !modal.classList.contains('show')) return;
     if (!result.success || !Array.isArray(result.messages)) {
+        if (result.cancelled) return;
         status.textContent = UI_TEXT.queue.viewChatFailed + (result.error ? `: ${result.error}` : '');
         return;
     }
@@ -433,26 +443,114 @@ async function openChatViewer(filePath: string, title: string): Promise<void> {
     chatViewerFormat = result.format === 'live' ? 'live' : 'replay';
     status.textContent = UI_TEXT.queue.viewChatCount.replace('{count}', String(result.total ?? chatViewerMessages.length))
         + (result.truncated ? UI_TEXT.queue.viewChatTruncatedSuffix : '');
-    renderChatViewerList(chatViewerMessages);
+    onChatViewerFilterChange();
 }
 
 function closeChatViewer(): void {
-    byId('chatViewerModal').classList.remove('show');
+    chatViewerSessionGeneration++;
+    chatViewerReadAbort?.abort();
+    chatViewerReadAbort = null;
+    chatViewerRenderGeneration.cancel();
+    RendererAccessibility.closeDialog('chatViewerModal');
     chatViewerMessages = [];
 }
 
 function onChatViewerFilterChange(): void {
+    const generation = chatViewerRenderGeneration.next();
+    const list = byId('chatViewerList');
+    list.scrollTop = 0;
+    list.replaceChildren();
     const filter = byId<HTMLInputElement>('chatViewerFilter').value.trim().toLowerCase();
     if (!filter) {
-        renderChatViewerList(chatViewerMessages);
+        renderChatViewerList(chatViewerMessages, generation);
         return;
     }
-    const filtered = chatViewerMessages.filter((m) => {
-        const u = (m.u || m.user || m.login || '').toLowerCase();
-        const text = (m.msg || m.text || '').toLowerCase();
-        return u.includes(filter) || text.includes(filter);
-    });
-    renderChatViewerList(filtered);
+    list.setAttribute('aria-busy', 'true');
+    const filtered: ChatViewerMessage[] = [];
+    let index = 0;
+    const filterChunk = (): void => {
+        if (!chatViewerRenderGeneration.isCurrent(generation) || !RendererAccessibility.isDialogOpen('chatViewerModal')) return;
+        const deadline = performance.now() + 8;
+        while (index < chatViewerMessages.length && performance.now() < deadline) {
+            const m = chatViewerMessages[index++];
+            const u = (m.u || m.user || m.login || '').toLowerCase();
+            const text = (m.msg || m.text || '').toLowerCase();
+            if (u.includes(filter) || text.includes(filter)) filtered.push(m);
+        }
+        if (index < chatViewerMessages.length) {
+            window.setTimeout(filterChunk, 0);
+            return;
+        }
+        list.removeAttribute('aria-busy');
+        renderChatViewerList(filtered, generation);
+    };
+    filterChunk();
+}
+
+function createChatViewerRow(m: ChatViewerMessage): HTMLElement {
+    const row = document.createElement('div');
+    const isMessageType = m.type === 'msg' || !m.type;
+    row.className = 'chat-viewer-row' + (!isMessageType ? ' is-system' : '');
+
+    if (!isMessageType) {
+        const tag = document.createElement('span');
+        tag.className = 'chat-viewer-tag';
+        tag.textContent = m.type || 'event';
+        row.appendChild(tag);
+    }
+
+    const time = formatChatTimeMarker(m);
+    if (time) {
+        const timeElement = document.createElement('span');
+        timeElement.className = 'chat-viewer-time';
+        timeElement.textContent = time;
+        row.appendChild(timeElement);
+    }
+
+    const user = m.u || m.user || m.login || '';
+    if (user) {
+        const userElement = document.createElement('span');
+        userElement.className = 'chat-viewer-user';
+        if (m.color) userElement.style.color = m.color;
+        userElement.textContent = `${user}:`;
+        row.appendChild(userElement);
+    }
+
+    const message = document.createElement('span');
+    message.textContent = ' ' + (m.msg || m.text || '');
+    row.appendChild(message);
+    return row;
+}
+
+function renderChatViewerList(messages: ChatViewerMessage[], generation: number): void {
+    if (!chatViewerRenderGeneration.isCurrent(generation) || !RendererAccessibility.isDialogOpen('chatViewerModal')) return;
+    const list = byId('chatViewerList');
+    list.replaceChildren();
+    const canvas = document.createElement('div');
+    canvas.className = 'chat-viewer-virtual-canvas';
+    canvas.style.height = `${messages.length * CHAT_VIEWER_ROW_HEIGHT}px`;
+    const rows = document.createElement('div');
+    rows.className = 'chat-viewer-virtual-rows';
+    canvas.appendChild(rows);
+    list.appendChild(canvas);
+    let scheduled = false;
+    const renderVisibleRows = (): void => {
+        if (!chatViewerRenderGeneration.isCurrent(generation) || !RendererAccessibility.isDialogOpen('chatViewerModal')) return;
+        const range = RendererAccessibility.getVirtualRange(list.scrollTop, list.clientHeight, messages.length, CHAT_VIEWER_ROW_HEIGHT, CHAT_VIEWER_OVERSCAN);
+        rows.style.transform = `translateY(${range.start * CHAT_VIEWER_ROW_HEIGHT}px)`;
+        const fragment = document.createDocumentFragment();
+        for (let index = range.start; index < range.end; index++) fragment.appendChild(createChatViewerRow(messages[index]));
+        rows.replaceChildren(fragment);
+    };
+    list.addEventListener('scroll', () => {
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+            scheduled = false;
+            renderVisibleRows();
+        });
+    }, { passive: true });
+    renderVisibleRows();
 }
 
 function formatChatTimeMarker(m: ChatViewerMessage): string {
@@ -473,64 +571,6 @@ function formatChatTimeMarker(m: ChatViewerMessage): string {
         } catch { /* ignore */ }
     }
     return '';
-}
-
-function renderChatViewerList(messages: ChatViewerMessage[]): void {
-    const list = byId('chatViewerList');
-    list.replaceChildren();
-    // Render in chunks to keep main thread responsive on big files.
-    const CHUNK = 500;
-    let idx = 0;
-    const renderChunk = (): void => {
-        if (idx >= messages.length) return;
-        const fragment = document.createDocumentFragment();
-        const end = Math.min(idx + CHUNK, messages.length);
-        for (let i = idx; i < end; i++) {
-            const m = messages[i];
-            const isMessageType = m.type === 'msg' || !m.type;
-            const row = document.createElement('div');
-            row.className = 'chat-viewer-row' + (!isMessageType ? ' is-system' : '');
-
-            // System events (subs, raids, deletions) lead with a faint tag.
-            if (!isMessageType) {
-                const tag = document.createElement('span');
-                tag.className = 'chat-viewer-tag';
-                tag.textContent = m.type || 'event';
-                row.appendChild(tag);
-            }
-
-            const time = formatChatTimeMarker(m);
-            if (time) {
-                const tSpan = document.createElement('span');
-                tSpan.className = 'chat-viewer-time';
-                tSpan.textContent = time;
-                row.appendChild(tSpan);
-            }
-
-            const user = m.u || m.user || m.login || '';
-            if (user) {
-                const uSpan = document.createElement('span');
-                uSpan.className = 'chat-viewer-user';
-                // Per-user IRC color overrides the default accent colour
-                // supplied by .chat-viewer-user; the class also sets weight.
-                if (m.color) uSpan.style.color = m.color;
-                uSpan.textContent = `${user}:`;
-                row.appendChild(uSpan);
-            }
-
-            const msgSpan = document.createElement('span');
-            msgSpan.textContent = ' ' + (m.msg || m.text || '');
-            row.appendChild(msgSpan);
-
-            fragment.appendChild(row);
-        }
-        list.appendChild(fragment);
-        idx = end;
-        if (idx < messages.length) {
-            window.setTimeout(renderChunk, 0);
-        }
-    };
-    renderChunk();
 }
 
 function closeTopmostOpenModal(): boolean {
@@ -1336,13 +1376,13 @@ function refreshTemplateGuideTexts(): void {
 
 function openTemplateGuide(source: TemplateGuideSource = 'vod'): void {
     templateGuideSource = source;
-    byId('templateGuideModal').classList.add('show');
+    RendererAccessibility.openDialog('templateGuideModal', { onEscape: closeTemplateGuide });
     refreshTemplateGuideTexts();
     setTemplateGuidePreset(source);
 }
 
 function closeTemplateGuide(): void {
-    byId('templateGuideModal').classList.remove('show');
+    RendererAccessibility.closeDialog('templateGuideModal');
 }
 
 function setTemplateGuidePreset(source: TemplateGuideSource): void {
@@ -1392,11 +1432,11 @@ function openClipDialog(url: string, title: string, date: string, streamer: stri
 
     updateClipDuration();
     updateFilenameExamples();
-    byId('clipModal').classList.add('show');
+    RendererAccessibility.openDialog('clipModal', { onEscape: closeClipDialog });
 }
 
 function closeClipDialog(): void {
-    byId('clipModal').classList.remove('show');
+    RendererAccessibility.closeDialog('clipModal');
     clipDialogData = null;
 }
 

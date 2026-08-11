@@ -67,6 +67,7 @@ function setAriaLabel(id: string, value: string): void {
 
 function setLanguage(lang: string): LanguageCode {
     currentLanguage = lang === 'en' ? 'en' : 'de';
+    RendererAccessibility.setDocumentLanguage(currentLanguage);
     UI_TEXT = UI_TEXTS[currentLanguage];
     applyLanguageToStaticUI();
     return currentLanguage;

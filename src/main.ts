@@ -57,6 +57,7 @@ import { commitQueueMutation, persistStateChange } from './main/domain/persisten
 import { resolveSecretInputUpdate } from './main/domain/secret-input';
 import { createSecretStore, type SecretStore } from './main/domain/secret-store';
 import { createElectronSecureStorage } from './main/infra/secure-storage';
+import { readChatFile } from './main/domain/chat-reader';
 import {
     setDebugLogFn, initToolDirs,
     getStreamlinkPath, getStreamlinkCommand, getFFmpegPath, getFFprobePath,
@@ -7668,6 +7669,7 @@ ipcMain.handle('cancel-download', async (event) => {
 const fileCapabilities = new FileCapabilityStore();
 const VIDEO_FILE_EXTENSIONS = ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'ts', 'avi'];
 const knownRendererPaths = new Map<FileCapabilityPurpose, Set<string>>();
+const activeChatReadControllers = new Map<number, Map<string, AbortController>>();
 
 function issueFileCapability(event: IpcMainInvokeEvent, purpose: FileCapabilityPurpose, filePath: string, kind: 'input-file' | 'output-file' | 'directory', extensions: string[] = [], ttlMs?: number): FileCapabilityReference {
     return fileCapabilities.issue({ ownerId: event.sender.id, purpose, path: filePath, kind, extensions, ttlMs });
@@ -8073,52 +8075,31 @@ ipcMain.handle('run-storage-cleanup', (event, options?: { dryRun?: boolean }): C
 // Read a chat-replay (.chat.json) or live-chat (.chat.jsonl) file and
 // return a normalized message list the renderer can display directly.
 // Caps at 50k messages to stop a runaway file from killing the renderer.
-ipcMain.handle('read-chat-file', (event, capability: string): { success: boolean; error?: string; format?: 'replay' | 'live'; messages?: Array<Record<string, unknown>>; truncated?: boolean; total?: number } => {
+ipcMain.on('cancel-chat-read', (event, requestId: string) => {
+    if (!isTrustedRendererEvent(event) || typeof requestId !== 'string') return;
+    activeChatReadControllers.get(event.sender.id)?.get(requestId)?.abort();
+});
+
+ipcMain.handle('read-chat-file', async (event, capability: string, requestId?: string) => {
     const filePath = resolveFileCapability(event, capability, 'chat-input', true);
     if (!filePath) return { success: false, error: 'File access denied' };
-
-    const MAX_MESSAGES = 50000;
+    const controller = new AbortController();
+    const validRequestId = typeof requestId === 'string' && requestId.length > 0 && requestId.length <= 128
+        ? requestId
+        : null;
+    if (validRequestId) {
+        const controllers = activeChatReadControllers.get(event.sender.id) ?? new Map<string, AbortController>();
+        controllers.set(validRequestId, controller);
+        activeChatReadControllers.set(event.sender.id, controllers);
+    }
     try {
-        const raw = fs.readFileSync(filePath, 'utf-8');
-        if (filePath.toLowerCase().endsWith('.jsonl')) {
-            // JSON Lines (live chat): one object per line, first line may be header
-            const messages: Array<Record<string, unknown>> = [];
-            let truncated = false;
-            const lines = raw.split('\n');
-            let total = 0;
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed) continue;
-                try {
-                    const obj = JSON.parse(trimmed);
-                    if (obj && typeof obj === 'object' && obj.type !== 'header') {
-                        total++;
-                        if (messages.length < MAX_MESSAGES) messages.push(obj);
-                        else truncated = true;
-                    }
-                } catch { /* skip bad lines */ }
-            }
-            return { success: true, format: 'live', messages, truncated, total };
+        return await readChatFile(filePath, { signal: controller.signal });
+    } finally {
+        if (validRequestId) {
+            const controllers = activeChatReadControllers.get(event.sender.id);
+            controllers?.delete(validRequestId);
+            if (controllers?.size === 0) activeChatReadControllers.delete(event.sender.id);
         }
-
-        // .chat.json (VOD replay) — single object with messages array
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.messages)) {
-            return { success: false, error: 'Unsupported chat file format' };
-        }
-        const total = parsed.messages.length;
-        const messages = parsed.messages.length > MAX_MESSAGES
-            ? parsed.messages.slice(0, MAX_MESSAGES)
-            : parsed.messages;
-        return {
-            success: true,
-            format: 'replay',
-            messages,
-            truncated: total > MAX_MESSAGES,
-            total
-        };
-    } catch (e) {
-        return { success: false, error: String(e) };
     }
 });
 

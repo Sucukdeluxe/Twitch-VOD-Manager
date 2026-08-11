@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="./workspace.css">
 </head>
 <body class="theme-twitch">
-    <div class="modal-overlay" id="updateModal" role="dialog" aria-modal="true" aria-labelledby="updateModalTitle" onclick="handleUpdateModalOverlayClick(event)">
+    <div class="modal-overlay" id="updateModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="updateModalTitle" onclick="handleUpdateModalOverlayClick(event)">
         <div class="modal update-modal">
             <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="dismissUpdateModal()">x</button>
             <div class="update-modal-eyebrow" id="updateModalEyebrow">Updates</div>
@@ -48,7 +48,7 @@
     </div>
 
     <!-- Clip Dialog Modal -->
-    <div class="modal-overlay" id="clipModal" role="dialog" aria-modal="true" aria-labelledby="clipDialogTitle">
+    <div class="modal-overlay" id="clipModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="clipDialogTitle">
         <div class="modal clip-modal">
             <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="closeClipDialog()">x</button>
             <h2 class="clip-modal-title" id="clipDialogTitle">VOD zuschneiden</h2>
@@ -116,7 +116,7 @@
     </div>
 
     <!-- Events Viewer Modal -->
-    <div class="modal-overlay" id="eventsViewerModal" role="dialog" aria-modal="true" aria-labelledby="eventsViewerTitle">
+    <div class="modal-overlay" id="eventsViewerModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="eventsViewerTitle">
         <div class="modal viewer-modal viewer-modal-events">
             <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="closeEventsViewer()">x</button>
             <h2 id="eventsViewerTitle" class="viewer-modal-title"></h2>
@@ -126,7 +126,7 @@
     </div>
 
     <!-- Chat Replay Viewer Modal -->
-    <div class="modal-overlay" id="chatViewerModal" role="dialog" aria-modal="true" aria-labelledby="chatViewerTitle">
+    <div class="modal-overlay" id="chatViewerModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="chatViewerTitle">
         <div class="modal viewer-modal viewer-modal-chat">
             <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="closeChatViewer()">x</button>
             <h2 id="chatViewerTitle" class="viewer-modal-title"></h2>
@@ -139,7 +139,7 @@
     </div>
 
     <!-- Template Guide Modal -->
-    <div class="modal-overlay" id="templateGuideModal" role="dialog" aria-modal="true" aria-labelledby="templateGuideTitle">
+    <div class="modal-overlay" id="templateGuideModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="templateGuideTitle">
         <div class="modal template-guide-modal">
             <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="closeTemplateGuide()">x</button>
             <h2 id="templateGuideTitle">Template Guide</h2>
@@ -1058,7 +1058,7 @@
         </main>
     </div>
 
-    <div class="modal-overlay" id="commandPaletteModal" role="dialog" aria-modal="true" aria-labelledby="commandPaletteTitle">
+    <div class="modal-overlay" id="commandPaletteModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="commandPaletteTitle">
         <div class="modal command-palette">
             <h2 id="commandPaletteTitle" class="cp-title">Befehlspalette</h2>
             <input
@@ -1069,6 +1069,10 @@
                 autocomplete="off"
                 spellcheck="false"
                 aria-label="Befehlspalette"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls="commandPaletteList"
+                aria-expanded="false"
             />
             <ul id="commandPaletteList" class="cp-list" role="listbox" aria-label="Befehlsergebnisse"></ul>
             <p class="cp-hint" id="commandPaletteHint">Up/Down zum Navigieren, Enter zum Ausführen, Esc zum Schließen</p>
@@ -1079,6 +1083,7 @@
     <script src="../dist/renderer-locale-en.js"></script>
     <script src="../dist/renderer-texts.js"></script>
     <script src="../dist/renderer-shared.js"></script>
+    <script src="../dist/renderer-accessibility.js"></script>
     <script src="../dist/renderer-settings.js"></script>
     <script src="../dist/renderer-streamers.js"></script>
     <script src="../dist/renderer-queue.js"></script>

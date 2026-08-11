@@ -437,7 +437,7 @@ interface ApiBridge {
         limit?: number;
     }): Promise<ArchiveSearchResult>;
     runStorageCleanup(options?: { dryRun?: boolean }): Promise<CleanupReport>;
-    readChatFile(filePath: string): Promise<{ success: boolean; error?: string; format?: 'replay' | 'live'; messages?: Array<Record<string, unknown>>; truncated?: boolean; total?: number }>;
+    readChatFile(filePath: string, signal?: AbortSignal): Promise<{ success: boolean; error?: string; cancelled?: boolean; format?: 'replay' | 'live'; messages?: Array<Record<string, unknown>>; truncated?: boolean; total?: number }>;
     getAutomationStatus(): Promise<{
         autoRecord: { watching: number; lastRunAt: number; nextRunAt: number; lastTriggeredCount: number; inFlight: boolean };
         autoVod: { watching: number; lastRunAt: number; nextRunAt: number; lastQueuedCount: number; inFlight: boolean };

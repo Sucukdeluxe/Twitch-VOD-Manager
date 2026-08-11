@@ -1064,15 +1064,23 @@ function initVodGridSelectionDelegation(): void {
         const ctx = readVodCardContext(card);
         if (!ctx) return;
         e.preventDefault();
-        showVodContextMenu(e.clientX, e.clientY, ctx);
+        showVodContextMenu(e.clientX, e.clientY, ctx, card);
     });
 
     grid.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
         const target = e.target as HTMLElement | null;
         if (!target) return;
         const card = target.closest('.vod-card') as HTMLElement | null;
         if (!card || card !== target) return;
+        if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+            const ctx = readVodCardContext(card);
+            if (!ctx) return;
+            e.preventDefault();
+            const rect = card.getBoundingClientRect();
+            showVodContextMenu(rect.left + 12, rect.top + 12, ctx, card);
+            return;
+        }
+        if (e.key !== 'Enter' && e.key !== ' ') return;
         e.preventDefault();
         toggleVodCardSelection(card);
     });
@@ -1096,14 +1104,18 @@ function toggleVodCardSelection(card: HTMLElement): void {
 }
 
 let activeVodContextMenu: HTMLElement | null = null;
+let activeVodContextMenuInvoker: HTMLElement | null = null;
 
-function closeVodContextMenu(): void {
+function closeVodContextMenu(restoreFocus = false): void {
     if (!activeVodContextMenu) return;
     activeVodContextMenu.remove();
     activeVodContextMenu = null;
+    const invoker = activeVodContextMenuInvoker;
+    activeVodContextMenuInvoker = null;
+    if (restoreFocus && invoker?.isConnected) invoker.focus();
 }
 
-function showVodContextMenu(x: number, y: number, ctx: VodCardContext): void {
+function showVodContextMenu(x: number, y: number, ctx: VodCardContext, invoker: HTMLElement | null): void {
     closeVodContextMenu();
 
     const menu = document.createElement('div');
@@ -1117,13 +1129,15 @@ function showVodContextMenu(x: number, y: number, ctx: VodCardContext): void {
     );
     const isMarkedDownloaded = downloadedIds.has(ctx.id);
 
+    let cleanup = (restoreFocus = false): void => closeVodContextMenu(restoreFocus);
     const makeItem = (label: string, onClick: () => void): HTMLElement => {
-        const el = document.createElement('div');
+        const el = document.createElement('button');
+        el.type = 'button';
         el.textContent = label;
         el.className = 'context-menu-item';
         el.setAttribute('role', 'menuitem');
         el.addEventListener('click', () => {
-            try { onClick(); } finally { closeVodContextMenu(); }
+            try { onClick(); } finally { cleanup(); }
         });
         return el;
     };
@@ -1151,6 +1165,7 @@ function showVodContextMenu(x: number, y: number, ctx: VodCardContext): void {
 
     document.body.appendChild(menu);
     activeVodContextMenu = menu;
+    activeVodContextMenuInvoker = invoker;
 
     // Reposition if it would clip off the viewport
     const rect = menu.getBoundingClientRect();
@@ -1161,31 +1176,21 @@ function showVodContextMenu(x: number, y: number, ctx: VodCardContext): void {
     menu.style.left = `${left}px`;
     menu.style.top = `${top}px`;
 
-    // Close on click anywhere else / Escape / scroll
     const dismissOnClick = (ev: MouseEvent) => {
         if (!activeVodContextMenu) return;
         if (ev.target instanceof Node && activeVodContextMenu.contains(ev.target)) return;
-        closeVodContextMenu();
-        document.removeEventListener('mousedown', dismissOnClick, true);
-        document.removeEventListener('keydown', dismissOnEscape, true);
-        document.removeEventListener('scroll', dismissOnScroll, true);
+        cleanup();
     };
-    const dismissOnEscape = (ev: KeyboardEvent) => {
-        if (ev.key !== 'Escape') return;
-        closeVodContextMenu();
+    const dismissOnScroll = () => cleanup();
+    cleanup = (restoreFocus = false): void => {
+        closeVodContextMenu(restoreFocus);
         document.removeEventListener('mousedown', dismissOnClick, true);
-        document.removeEventListener('keydown', dismissOnEscape, true);
-        document.removeEventListener('scroll', dismissOnScroll, true);
-    };
-    const dismissOnScroll = () => {
-        closeVodContextMenu();
-        document.removeEventListener('mousedown', dismissOnClick, true);
-        document.removeEventListener('keydown', dismissOnEscape, true);
         document.removeEventListener('scroll', dismissOnScroll, true);
     };
     document.addEventListener('mousedown', dismissOnClick, true);
-    document.addEventListener('keydown', dismissOnEscape, true);
     document.addEventListener('scroll', dismissOnScroll, true);
+    RendererAccessibility.installMenuKeyboardNavigation(menu, () => cleanup(true));
+    RendererAccessibility.focusFirstMenuItem(menu);
 }
 
 async function toggleVodDownloadedMark(vodId: string, mark: boolean): Promise<void> {

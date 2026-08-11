@@ -61,7 +61,6 @@ let cutterScrubSeekInFlight = false;
 let cutterScrubResumePlayback = false;
 let cutterScrubGeneration = 0;
 let cutterDiscardResolver: ((discard: boolean) => void) | null = null;
-let cutterDiscardReturnFocus: HTMLElement | null = null;
 const cutterMaximumCuts = 64;
 const cutterFrameTolerance = 1e-8;
 
@@ -905,17 +904,10 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
 }
 
 function resolveCutterDiscard(discard: boolean): void {
-    const modal = byId('cutterDiscardModal');
-    modal.classList.remove('show');
-    modal.setAttribute('aria-hidden', 'true');
-    const shell = document.querySelector<HTMLElement>('.workspace-shell');
-    if (shell) shell.inert = false;
+    RendererAccessibility.closeDialog('cutterDiscardModal');
     const resolver = cutterDiscardResolver;
-    const returnFocus = cutterDiscardReturnFocus;
     cutterDiscardResolver = null;
-    cutterDiscardReturnFocus = null;
     resolver?.(discard);
-    if (returnFocus?.isConnected) requestAnimationFrame(() => returnFocus.focus());
 }
 
 function handleCutterDiscardOverlayClick(event: MouseEvent): void {
@@ -938,15 +930,10 @@ function trapCutterDiscardFocus(event: KeyboardEvent): void {
 function confirmCutterReplacement(file: FileCapabilityReference): Promise<boolean> {
     if (!cutterFile || !cutterEditorState || cutterFile.token === file.token) return Promise.resolve(true);
     if (cutterDiscardResolver) resolveCutterDiscard(false);
-    const modal = byId('cutterDiscardModal');
-    cutterDiscardReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
-        ? document.activeElement
-        : null;
-    const shell = document.querySelector<HTMLElement>('.workspace-shell');
-    if (shell) shell.inert = true;
-    modal.classList.add('show');
-    modal.setAttribute('aria-hidden', 'false');
-    requestAnimationFrame(() => byId<HTMLButtonElement>('cutterDiscardCancelBtn').focus());
+    RendererAccessibility.openDialog('cutterDiscardModal', {
+        initialFocus: byId<HTMLButtonElement>('cutterDiscardCancelBtn'),
+        onEscape: () => resolveCutterDiscard(false)
+    });
     return new Promise((resolve) => { cutterDiscardResolver = resolve; });
 }
 
