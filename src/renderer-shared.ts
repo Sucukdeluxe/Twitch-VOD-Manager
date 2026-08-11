@@ -68,11 +68,11 @@ let selectedQueueIds: string[] = [];
 let expandedQueueIds: Set<string> = new Set();
 let queueDragDropInitialized = false;
 
-let cutterFile: string | null = null;
+let cutterFile: FileCapabilityReference | null = null;
 let cutterVideoInfo: VideoInfo | null = null;
 let isCutting = false;
 
-let mergeFiles: string[] = [];
+let mergeFiles: FileCapabilityReference[] = [];
 let isMerging = false;
 
 let clipDialogData: ClipDialogData | null = null;

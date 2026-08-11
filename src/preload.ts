@@ -84,18 +84,24 @@ interface VideoEditorAssetProfile {
 }
 
 interface VideoEditExportRequest {
-    inputFile: string;
-    outputFile?: string;
+    inputCapability: string;
+    outputName?: string;
     trimStart: number;
     trimEnd: number;
     cuts: Array<{ id: string; start: number; end: number }>;
+}
+
+interface FileCapabilityReference {
+    token: string;
+    name: string;
+    displayPath?: string;
 }
 
 // Expose protected methods to renderer
 contextBridge.exposeInMainWorld('api', {
     // Config
     getConfig: () => ipcRenderer.invoke('get-config'),
-    saveConfig: (config: any) => ipcRenderer.invoke('save-config', config),
+    saveConfig: (config: any, fileCapability?: string) => ipcRenderer.invoke('save-config', config, fileCapability),
 
     // Auth
     login: () => ipcRenderer.invoke('login'),
@@ -126,13 +132,22 @@ contextBridge.exposeInMainWorld('api', {
     selectFolder: () => ipcRenderer.invoke('select-folder'),
     selectVideoFile: () => ipcRenderer.invoke('select-video-file'),
     selectMultipleVideos: () => ipcRenderer.invoke('select-multiple-videos'),
-    getPathForFile: (file: File): string => webUtils.getPathForFile(file),
+    selectDroppedVideo: (file: File) => ipcRenderer.invoke('grant-dropped-video', webUtils.getPathForFile(file)),
     saveVideoDialog: (defaultName: string) => ipcRenderer.invoke('save-video-dialog', defaultName),
-    openFolder: (path: string) => ipcRenderer.invoke('open-folder', path),
-    openFile: (path: string) => ipcRenderer.invoke('open-file', path),
-    showInFolder: (path: string) => ipcRenderer.invoke('show-in-folder', path),
+    openFolder: async (pathOrCapability: string) => {
+        const capability = await ipcRenderer.invoke('authorize-managed-path', 'selected-folder', pathOrCapability);
+        if (capability) return ipcRenderer.invoke('open-folder', capability.token);
+    },
+    openFile: async (pathOrCapability: string) => {
+        const capability = await ipcRenderer.invoke('authorize-managed-path', 'open-file', pathOrCapability);
+        return capability ? ipcRenderer.invoke('open-file', capability.token) : false;
+    },
+    showInFolder: async (pathOrCapability: string) => {
+        const capability = await ipcRenderer.invoke('authorize-managed-path', 'show-in-folder', pathOrCapability);
+        return capability ? ipcRenderer.invoke('show-in-folder', capability.token) : false;
+    },
     openDebugLogFile: () => ipcRenderer.invoke('open-debug-log-file'),
-    checkFolderWritable: (path: string) => ipcRenderer.invoke('check-folder-writable', path),
+    checkFolderWritable: (capability: string) => ipcRenderer.invoke('check-folder-writable', capability),
     getStorageStats: () => ipcRenderer.invoke('get-storage-stats'),
     getArchiveStats: () => ipcRenderer.invoke('get-archive-stats'),
     getStreamerProfile: (login: string, forceRefresh?: boolean) => ipcRenderer.invoke('get-streamer-profile', login, forceRefresh),
@@ -144,7 +159,12 @@ contextBridge.exposeInMainWorld('api', {
     },
     searchArchive: (filter: Record<string, unknown>) => ipcRenderer.invoke('search-archive', filter),
     runStorageCleanup: (options?: { dryRun?: boolean }) => ipcRenderer.invoke('run-storage-cleanup', options),
-    readChatFile: (filePath: string) => ipcRenderer.invoke('read-chat-file', filePath),
+    readChatFile: async (filePath: string) => {
+        const capability = await ipcRenderer.invoke('authorize-managed-path', 'chat-input', filePath);
+        return capability
+            ? ipcRenderer.invoke('read-chat-file', capability.token)
+            : { success: false, error: 'File access denied' };
+    },
     getAutomationStatus: () => ipcRenderer.invoke('get-automation-status'),
     triggerAutoVodScan: () => ipcRenderer.invoke('trigger-auto-vod-scan'),
     triggerAutoRecordScan: () => ipcRenderer.invoke('trigger-auto-record-scan'),
@@ -153,20 +173,20 @@ contextBridge.exposeInMainWorld('api', {
     },
 
     // Video Cutter
-    getVideoInfo: (filePath: string): Promise<VideoInfo | null> => ipcRenderer.invoke('get-video-info', filePath),
-    extractFrame: (filePath: string, timeSeconds: number): Promise<string | null> => ipcRenderer.invoke('extract-frame', filePath, timeSeconds),
-    prepareVideoEditorMedia: (filePath: string): Promise<VideoEditorMedia | null> => ipcRenderer.invoke('prepare-video-editor-media', filePath),
-    prepareVideoEditorWaveform: (filePath: string, jobId: number): Promise<VideoEditorWaveform | null> => ipcRenderer.invoke('prepare-video-editor-waveform', filePath, jobId),
-    prepareVideoEditorAssets: (filePath: string, jobId: number, profile: VideoEditorAssetProfile): Promise<VideoEditorAssets | null> => ipcRenderer.invoke('prepare-video-editor-assets', filePath, jobId, profile),
+    getVideoInfo: (capability: string): Promise<VideoInfo | null> => ipcRenderer.invoke('get-video-info', capability),
+    extractFrame: (capability: string, timeSeconds: number): Promise<string | null> => ipcRenderer.invoke('extract-frame', capability, timeSeconds),
+    prepareVideoEditorMedia: (capability: string): Promise<VideoEditorMedia | null> => ipcRenderer.invoke('prepare-video-editor-media', capability),
+    prepareVideoEditorWaveform: (capability: string, jobId: number): Promise<VideoEditorWaveform | null> => ipcRenderer.invoke('prepare-video-editor-waveform', capability, jobId),
+    prepareVideoEditorAssets: (capability: string, jobId: number, profile: VideoEditorAssetProfile): Promise<VideoEditorAssets | null> => ipcRenderer.invoke('prepare-video-editor-assets', capability, jobId, profile),
     cancelVideoEditorAssets: (jobId: number): Promise<boolean> => ipcRenderer.invoke('cancel-video-editor-assets', jobId),
-    exportVideoEdit: (request: VideoEditExportRequest): Promise<{ success: boolean; outputFile: string | null; cancelled?: boolean }> => ipcRenderer.invoke('export-video-edit', request),
+    exportVideoEdit: (request: VideoEditExportRequest): Promise<{ success: boolean; outputCapability?: string; outputName: string | null; cancelled?: boolean }> => ipcRenderer.invoke('export-video-edit', request),
     cancelVideoEdit: (): Promise<boolean> => ipcRenderer.invoke('cancel-video-edit'),
-    cutVideo: (inputFile: string, startTime: number, endTime: number): Promise<{ success: boolean; outputFile: string | null }> =>
-        ipcRenderer.invoke('cut-video', inputFile, startTime, endTime),
+    cutVideo: (inputCapability: string, startTime: number, endTime: number): Promise<{ success: boolean; outputName: string | null }> =>
+        ipcRenderer.invoke('cut-video', inputCapability, startTime, endTime),
 
     // Merge Videos
-    mergeVideos: (inputFiles: string[], outputFile: string): Promise<{ success: boolean; outputFile: string | null }> =>
-        ipcRenderer.invoke('merge-videos', inputFiles, outputFile),
+    mergeVideos: (inputCapabilities: string[], outputCapability: string): Promise<{ success: boolean; outputName: string | null }> =>
+        ipcRenderer.invoke('merge-videos', inputCapabilities, outputCapability),
 
     // App
     getVersion: () => ipcRenderer.invoke('get-version'),

@@ -1715,12 +1715,12 @@ function renderMergeFiles(): void {
         return;
     }
 
-    list.innerHTML = mergeFiles.map((file: string, index: number) => {
-        const name = file.split(/[/\\]/).pop();
+    list.innerHTML = mergeFiles.map((file: FileCapabilityReference, index: number) => {
+        const name = file.name;
         return `
             <div class="file-item" draggable="true" data-index="${index}">
                 <div class="file-order">${index + 1}</div>
-                <div class="file-name" title="${file}">${name}</div>
+                <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
                 <div class="file-actions">
                     <button type="button" class="file-btn" aria-label="${escapeHtml(UI_TEXT.merge.moveUpAria)}" title="${escapeHtml(UI_TEXT.merge.moveUpAria)}" onclick="moveMergeFile(${index}, -1)" ${index === 0 ? 'disabled' : ''}>&#9650;</button>
                     <button type="button" class="file-btn" aria-label="${escapeHtml(UI_TEXT.merge.moveDownAria)}" title="${escapeHtml(UI_TEXT.merge.moveDownAria)}" onclick="moveMergeFile(${index}, 1)" ${index === mergeFiles.length - 1 ? 'disabled' : ''}>&#9660;</button>
@@ -1753,8 +1753,8 @@ async function startMerging(): Promise<void> {
         return;
     }
 
-    const outputFile = await window.api.saveVideoDialog('merged_video.mp4');
-    if (!outputFile) {
+    const output = await window.api.saveVideoDialog('merged_video.mp4');
+    if (!output) {
         return;
     }
 
@@ -1763,7 +1763,7 @@ async function startMerging(): Promise<void> {
     byId('btnMerge').textContent = UI_TEXT.merge.merging;
     byId('mergeProgress').classList.add('show');
 
-    const result = await window.api.mergeVideos(mergeFiles, outputFile);
+    const result = await window.api.mergeVideos(mergeFiles.map((file) => file.token), output.token);
 
     isMerging = false;
     byId('btnMerge').disabled = false;
@@ -1771,7 +1771,7 @@ async function startMerging(): Promise<void> {
     byId('mergeProgress').classList.remove('show');
 
     if (result.success) {
-        alert(`${UI_TEXT.merge.success}\n\n${result.outputFile}`);
+        alert(`${UI_TEXT.merge.success}\n\n${result.outputName || output.name}`);
         mergeFiles = [];
         renderMergeFiles();
         return;

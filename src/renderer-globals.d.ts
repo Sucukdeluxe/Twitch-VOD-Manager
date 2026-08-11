@@ -203,11 +203,17 @@ interface VideoEditorAssetProfile {
 }
 
 interface VideoEditExportRequest {
-    inputFile: string;
-    outputFile?: string;
+    inputCapability: string;
+    outputName?: string;
     trimStart: number;
     trimEnd: number;
     cuts: Array<{ id: string; start: number; end: number }>;
+}
+
+interface FileCapabilityReference {
+    token: string;
+    name: string;
+    displayPath?: string;
 }
 
 interface ClipDialogData {
@@ -363,7 +369,7 @@ interface ArchiveStats {
 
 interface ApiBridge {
     getConfig(): Promise<AppConfig>;
-    saveConfig(config: Partial<AppConfig>): Promise<AppConfig>;
+    saveConfig(config: Partial<AppConfig>, fileCapability?: string): Promise<AppConfig>;
     login(): Promise<boolean>;
     getUserId(username: string): Promise<string | null>;
     getVODs(userId: string, forceRefresh?: boolean): Promise<VOD[]>;
@@ -381,16 +387,16 @@ interface ApiBridge {
     cancelDownload(): Promise<boolean>;
     isDownloading(): Promise<boolean>;
     downloadClip(url: string): Promise<{ success: boolean; error?: string }>;
-    selectFolder(): Promise<string | null>;
-    selectVideoFile(): Promise<string | null>;
-    selectMultipleVideos(): Promise<string[] | null>;
-    getPathForFile(file: File): string;
-    saveVideoDialog(defaultName: string): Promise<string | null>;
-    openFolder(path: string): Promise<void>;
-    openFile(path: string): Promise<boolean>;
-    showInFolder(path: string): Promise<boolean>;
+    selectFolder(): Promise<(FileCapabilityReference & { displayPath: string }) | null>;
+    selectVideoFile(): Promise<FileCapabilityReference | null>;
+    selectMultipleVideos(): Promise<FileCapabilityReference[] | null>;
+    selectDroppedVideo(file: File): Promise<FileCapabilityReference | null>;
+    saveVideoDialog(defaultName: string): Promise<FileCapabilityReference | null>;
+    openFolder(pathOrCapability: string): Promise<void>;
+    openFile(pathOrCapability: string): Promise<boolean>;
+    showInFolder(pathOrCapability: string): Promise<boolean>;
     openDebugLogFile(): Promise<boolean>;
-    checkFolderWritable(path: string): Promise<boolean>;
+    checkFolderWritable(capability: string): Promise<boolean>;
     getStorageStats(): Promise<StorageStatsResult>;
     getArchiveStats(): Promise<ArchiveStats>;
     getStreamerProfile(login: string, forceRefresh?: boolean): Promise<StreamerProfile | null>;
@@ -416,16 +422,16 @@ interface ApiBridge {
     triggerAutoVodScan(): Promise<{ queuedCount: number }>;
     triggerAutoRecordScan(): Promise<{ triggered: number }>;
     onAutoVodScanCompleted(callback: (info: { queuedCount: number }) => void): void;
-    getVideoInfo(filePath: string): Promise<VideoInfo | null>;
-    extractFrame(filePath: string, timeSeconds: number): Promise<string | null>;
-    prepareVideoEditorMedia(filePath: string): Promise<VideoEditorMedia | null>;
-    prepareVideoEditorWaveform(filePath: string, jobId: number): Promise<VideoEditorWaveform | null>;
-    prepareVideoEditorAssets(filePath: string, jobId: number, profile: VideoEditorAssetProfile): Promise<VideoEditorAssets | null>;
+    getVideoInfo(capability: string): Promise<VideoInfo | null>;
+    extractFrame(capability: string, timeSeconds: number): Promise<string | null>;
+    prepareVideoEditorMedia(capability: string): Promise<VideoEditorMedia | null>;
+    prepareVideoEditorWaveform(capability: string, jobId: number): Promise<VideoEditorWaveform | null>;
+    prepareVideoEditorAssets(capability: string, jobId: number, profile: VideoEditorAssetProfile): Promise<VideoEditorAssets | null>;
     cancelVideoEditorAssets(jobId: number): Promise<boolean>;
-    exportVideoEdit(request: VideoEditExportRequest): Promise<{ success: boolean; outputFile: string | null; cancelled?: boolean }>;
+    exportVideoEdit(request: VideoEditExportRequest): Promise<{ success: boolean; outputCapability?: string; outputName: string | null; cancelled?: boolean }>;
     cancelVideoEdit(): Promise<boolean>;
-    cutVideo(inputFile: string, startTime: number, endTime: number): Promise<{ success: boolean; outputFile: string | null }>;
-    mergeVideos(inputFiles: string[], outputFile: string): Promise<{ success: boolean; outputFile: string | null }>;
+    cutVideo(inputCapability: string, startTime: number, endTime: number): Promise<{ success: boolean; outputName: string | null }>;
+    mergeVideos(inputCapabilities: string[], outputCapability: string): Promise<{ success: boolean; outputName: string | null }>;
     getVersion(): Promise<string>;
     checkUpdate(): Promise<{ checking?: boolean; error?: boolean; skipped?: 'ready-to-install' | 'in-progress' | 'throttled' | 'error' | string }>;
     downloadUpdate(): Promise<{ downloading?: boolean; error?: boolean; skipped?: 'ready-to-install' | 'in-progress' | 'error' | string }>;

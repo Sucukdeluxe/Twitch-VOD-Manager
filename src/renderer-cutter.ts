@@ -758,7 +758,7 @@ function animateCutterWorkspaceReveal(previousPreviewRect: DOMRect): void {
 
 async function requestCutterAssets(): Promise<void> {
     if (!cutterFile || cutterMediaJobId === null || !byId('cutterTab').classList.contains('active')) return;
-    const filePath = cutterFile;
+    const file = cutterFile;
     const jobId = cutterMediaJobId;
     const profile = getCutterAssetProfile();
     const requestedPixelWidth = getCutterAssetPixelWidth(profile);
@@ -771,7 +771,7 @@ async function requestCutterAssets(): Promise<void> {
         cutterAssetsInFlightPixelWidth = 0;
         cutterAssetsInFlightPixelHeight = 0;
         await window.api.cancelVideoEditorAssets(jobId);
-        if (cutterFile !== filePath || cutterMediaJobId !== jobId || !byId('cutterTab').classList.contains('active')) return;
+        if (cutterFile !== file || cutterMediaJobId !== jobId || !byId('cutterTab').classList.contains('active')) return;
     }
     const requestGeneration = ++cutterAssetsRequestGeneration;
     cutterAssetsInFlightJobId = jobId;
@@ -779,14 +779,14 @@ async function requestCutterAssets(): Promise<void> {
     cutterAssetsInFlightPixelHeight = requestedPixelHeight;
     let assets: VideoEditorAssets | null = null;
     try {
-        assets = await window.api.prepareVideoEditorAssets(filePath, jobId, profile);
+        assets = await window.api.prepareVideoEditorAssets(file.token, jobId, profile);
     } catch { }
     if (requestGeneration === cutterAssetsRequestGeneration && cutterAssetsInFlightJobId === jobId) {
         cutterAssetsInFlightJobId = null;
         cutterAssetsInFlightPixelWidth = 0;
         cutterAssetsInFlightPixelHeight = 0;
     }
-    if (!assets || requestGeneration !== cutterAssetsRequestGeneration || assets.jobId !== jobId || cutterFile !== filePath || cutterMediaJobId !== jobId) return;
+    if (!assets || requestGeneration !== cutterAssetsRequestGeneration || assets.jobId !== jobId || cutterFile !== file || cutterMediaJobId !== jobId) return;
     const currentPixelWidth = getCutterAssetPixelWidth();
     const currentPixelHeight = getCutterAssetPixelHeight();
     if (assets.pixelWidth < currentPixelWidth * 0.95 || assets.pixelHeight < currentPixelHeight) {
@@ -799,12 +799,12 @@ async function requestCutterAssets(): Promise<void> {
     if (getCutterAssetPixelWidth() > cutterAssetsPixelWidth * 1.05 || getCutterAssetPixelHeight() > cutterAssetsPixelHeight) scheduleCutterAssetRefresh();
 }
 
-async function requestCutterWaveform(filePath: string, jobId: number, loadGeneration: number): Promise<void> {
+async function requestCutterWaveform(file: FileCapabilityReference, jobId: number, loadGeneration: number): Promise<void> {
     let result: VideoEditorWaveform | null = null;
     try {
-        result = await window.api.prepareVideoEditorWaveform(filePath, jobId);
+        result = await window.api.prepareVideoEditorWaveform(file.token, jobId);
     } catch { }
-    if (loadGeneration !== cutterLoadGeneration || cutterFile !== filePath || cutterMediaJobId !== jobId || !result || result.jobId !== jobId) return;
+    if (loadGeneration !== cutterLoadGeneration || cutterFile !== file || cutterMediaJobId !== jobId || !result || result.jobId !== jobId) return;
     const waveform = byId<HTMLImageElement>('cutterWaveform');
     waveform.hidden = !result.waveform;
     if (result.waveform) {
@@ -815,8 +815,8 @@ async function requestCutterWaveform(filePath: string, jobId: number, loadGenera
     byId('cutterAudioEmpty').hidden = Boolean(result.waveform);
 }
 
-async function loadCutterFromPath(filePath: string): Promise<void> {
-    if (!filePath || isCutting) return;
+async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> {
+    if (!file || isCutting) return;
     const generation = ++cutterLoadGeneration;
     const video = getCutterVideo();
     const hadEditor = Boolean(cutterEditorState && cutterFile);
@@ -832,7 +832,7 @@ async function loadCutterFromPath(filePath: string): Promise<void> {
     byId<HTMLButtonElement>('btnCut').disabled = true;
     let media: VideoEditorMedia | null = null;
     try {
-        media = await window.api.prepareVideoEditorMedia(filePath);
+        media = await window.api.prepareVideoEditorMedia(file.token);
     } catch { }
     if (generation !== cutterLoadGeneration) return;
     byId('cutterPlayerLoading').hidden = true;
@@ -851,7 +851,7 @@ async function loadCutterFromPath(filePath: string): Promise<void> {
     }
     video.removeAttribute('src');
     video.load();
-    cutterFile = filePath;
+    cutterFile = file;
     cutterMediaJobId = media.jobId;
     cutterAssetsPixelWidth = 0;
     cutterAssetsPixelHeight = 0;
@@ -875,7 +875,7 @@ async function loadCutterFromPath(filePath: string): Promise<void> {
     cutterActiveCutId = null;
     cutterZoom = getInitialCutterZoom(media.info.duration);
     byId<HTMLInputElement>('cutterZoom').value = String(cutterZoom);
-    byId<HTMLInputElement>('cutterFilePath').value = filePath;
+    byId<HTMLInputElement>('cutterFilePath').value = file.name;
     const previousPreviewRect = hadEditor ? null : byId('cutterPreview').getBoundingClientRect();
     byId('cutterWorkspace').classList.add('shown');
     byId('cutterInfo').classList.add('shown');
@@ -900,7 +900,7 @@ async function loadCutterFromPath(filePath: string): Promise<void> {
     updateCutterZoom(cutterZoom);
     renderCutterEditor();
     updateCutterPlayhead(0);
-    void requestCutterWaveform(filePath, media.jobId, generation);
+    void requestCutterWaveform(file, media.jobId, generation);
     void requestCutterAssets();
 }
 
@@ -935,8 +935,8 @@ function trapCutterDiscardFocus(event: KeyboardEvent): void {
     }
 }
 
-function confirmCutterReplacement(filePath: string): Promise<boolean> {
-    if (!cutterFile || !cutterEditorState || cutterFile === filePath) return Promise.resolve(true);
+function confirmCutterReplacement(file: FileCapabilityReference): Promise<boolean> {
+    if (!cutterFile || !cutterEditorState || cutterFile.token === file.token) return Promise.resolve(true);
     if (cutterDiscardResolver) resolveCutterDiscard(false);
     const modal = byId('cutterDiscardModal');
     cutterDiscardReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
@@ -950,15 +950,15 @@ function confirmCutterReplacement(filePath: string): Promise<boolean> {
     return new Promise((resolve) => { cutterDiscardResolver = resolve; });
 }
 
-async function requestCutterVideoReplacement(filePath: string): Promise<void> {
-    if (!filePath || isCutting) return;
-    if (!await confirmCutterReplacement(filePath)) return;
-    await loadCutterFromPath(filePath);
+async function requestCutterVideoReplacement(file: FileCapabilityReference): Promise<void> {
+    if (!file || isCutting) return;
+    if (!await confirmCutterReplacement(file)) return;
+    await loadCutterFromPath(file);
 }
 
 async function selectCutterVideo(): Promise<void> {
-    const filePath = await window.api.selectVideoFile();
-    if (filePath) await requestCutterVideoReplacement(filePath);
+    const file = await window.api.selectVideoFile();
+    if (file) await requestCutterVideoReplacement(file);
 }
 
 function updateTimeFromInput(): void {
@@ -1406,14 +1406,14 @@ async function startCutting(): Promise<void> {
     byId('cutProgress').classList.add('show');
     try {
         const result = await window.api.exportVideoEdit({
-            inputFile: cutterFile,
+            inputCapability: cutterFile.token,
             trimStart: cutterEditorState.trimStart,
             trimEnd: cutterEditorState.trimEnd,
             cuts: cutterEditorState.cuts.map((cut) => ({ ...cut })),
         });
         if (result.success) {
             showAppToast(UI_TEXT.cutter.exportSuccess, 'info');
-            if (result.outputFile) await window.api.showInFolder(result.outputFile);
+            if (result.outputCapability) await window.api.showInFolder(result.outputCapability);
         } else if (!result.cancelled) {
             showAppToast(UI_TEXT.cutter.exportFailed, 'warn');
         }

@@ -491,12 +491,12 @@ function initCutterDragDrop(): void {
             showAppToast(UI_TEXT.cutter.unsupportedFile, 'warn');
             return;
         }
-        const filePath = window.api.getPathForFile(file);
-        if (!filePath) return;
+        const selection = await window.api.selectDroppedVideo(file);
+        if (!selection) return;
 
-        const loader = (window as unknown as { requestCutterVideoReplacement?: (p: string) => Promise<void> }).requestCutterVideoReplacement;
+        const loader = (window as unknown as { requestCutterVideoReplacement?: (selection: FileCapabilityReference) => Promise<void> }).requestCutterVideoReplacement;
         if (typeof loader === 'function') {
-            await loader(filePath);
+            await loader(selection);
         }
     });
 }

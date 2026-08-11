@@ -41,6 +41,13 @@ import { getWindowsAppIdentity } from './main/domain/app-identity';
 import { addCutAt, createVideoEditorState, getPlayableSegments, setTrimRange, type EditorCut } from './main/domain/video-editor';
 import { calculateCutterExportProgress, createCutterExportPlan } from './main/domain/cutter-export';
 import {
+    FileCapabilityStore,
+    isTrustedFileIpcSender,
+    publishCapabilityOutput,
+    type FileCapabilityPurpose,
+    type FileCapabilityReference,
+} from './main/domain/file-capability';
+import {
     setDebugLogFn, initToolDirs,
     getStreamlinkPath, getStreamlinkCommand, getFFmpegPath, getFFprobePath,
     refreshBundledToolPaths, ensureStreamlinkInstalled, ensureFfmpegInstalled,
@@ -293,7 +300,15 @@ interface VideoEditorAssetProfile {
 
 interface VideoEditExportRequest {
     inputFile: string;
-    outputFile?: string;
+    outputFile: string;
+    trimStart: number;
+    trimEnd: number;
+    cuts: EditorCut[];
+}
+
+interface RendererVideoEditExportRequest {
+    inputCapability: string;
+    outputName?: string;
     trimStart: number;
     trimEnd: number;
     cuts: EditorCut[];
@@ -1560,6 +1575,7 @@ function emitQueueUpdated(force = false): void {
     }
 
     lastQueueBroadcastFingerprint = nextFingerprint;
+    rememberQueueFilePaths(downloadQueue);
     mainWindow?.webContents.send('queue-updated', downloadQueue);
     updateTaskbarProgress();
 }
@@ -7216,7 +7232,8 @@ ipcMain.handle('trigger-auto-vod-scan', async () => {
     return { queuedCount };
 });
 
-ipcMain.handle('save-config', (_, newConfig: Partial<Config>) => {
+ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability?: string) => {
+    if (!isTrustedRendererEvent(event)) return config;
     const previousClientId = config.client_id;
     const previousClientSecret = config.client_secret;
     const previousCacheMinutes = config.metadata_cache_minutes;
@@ -7228,7 +7245,16 @@ ipcMain.handle('save-config', (_, newConfig: Partial<Config>) => {
     const previousAutoVodMinutes = config.auto_vod_download_poll_minutes;
     const previousStreamerList = JSON.stringify(config.streamers || []);
 
-    config = normalizeConfigTemplates({ ...config, ...newConfig });
+    const acceptedConfig = { ...newConfig };
+    if (typeof acceptedConfig.download_path === 'string' && acceptedConfig.download_path !== config.download_path) {
+        const selectedPath = typeof fileCapability === 'string'
+            ? resolveFileCapability(event, fileCapability, 'selected-folder')
+            : null;
+        if (!selectedPath || normalizeComparablePath(selectedPath) !== normalizeComparablePath(acceptedConfig.download_path)) {
+            delete acceptedConfig.download_path;
+        }
+    }
+    config = normalizeConfigTemplates({ ...config, ...acceptedConfig });
 
     if (config.client_id !== previousClientId || config.client_secret !== previousClientSecret) {
         accessToken = null;
@@ -7303,7 +7329,11 @@ ipcMain.handle('get-vods', async (_, userId: string, forceRefresh: boolean = fal
     return await getVODs(userId, forceRefresh);
 });
 
-ipcMain.handle('get-queue', () => downloadQueue);
+ipcMain.handle('get-queue', (event) => {
+    if (!isTrustedRendererEvent(event)) return [];
+    rememberQueueFilePaths(downloadQueue);
+    return downloadQueue;
+});
 
 ipcMain.handle('start-live-recording', async (_, streamerName: string) => {
     if (typeof streamerName !== 'string' || !streamerName) {
@@ -7618,27 +7648,104 @@ ipcMain.handle('cancel-download', async () => {
     return true;
 });
 
-ipcMain.handle('select-folder', async () => {
+const fileCapabilities = new FileCapabilityStore();
+const VIDEO_FILE_EXTENSIONS = ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'ts', 'avi'];
+const knownRendererPaths = new Map<FileCapabilityPurpose, Set<string>>();
+
+function issueFileCapability(event: IpcMainInvokeEvent, purpose: FileCapabilityPurpose, filePath: string, kind: 'input-file' | 'output-file' | 'directory', extensions: string[] = []): FileCapabilityReference {
+    return fileCapabilities.issue({ ownerId: event.sender.id, purpose, path: filePath, kind, extensions });
+}
+
+function resolveFileCapability(event: IpcMainInvokeEvent, token: string, purpose: FileCapabilityPurpose, consume = false, protectedPaths: string[] = []): string | null {
+    if (!isTrustedRendererEvent(event)) return null;
+    try {
+        return consume
+            ? fileCapabilities.consume(token, event.sender.id, purpose, protectedPaths)
+            : fileCapabilities.resolve(token, event.sender.id, purpose);
+    } catch (error) {
+        appendDebugLog('file-capability-rejected', { purpose, error: String(error) });
+        return null;
+    }
+}
+
+function rememberRendererPath(purpose: FileCapabilityPurpose, filePath: string): void {
+    if (typeof filePath !== 'string' || !filePath || !path.isAbsolute(filePath) || !fs.existsSync(filePath)) return;
+    const normalized = normalizeComparablePath(filePath);
+    const paths = knownRendererPaths.get(purpose) ?? new Set<string>();
+    paths.delete(normalized);
+    paths.add(normalized);
+    while (paths.size > 4096) paths.delete(paths.values().next().value as string);
+    knownRendererPaths.set(purpose, paths);
+}
+
+function rememberQueueFilePaths(queueItems: QueueItem[]): void {
+    for (const item of queueItems) {
+        for (const filePath of item.outputFiles ?? []) {
+            rememberRendererPath('open-file', filePath);
+            rememberRendererPath('show-in-folder', filePath);
+            if (/\.(?:chat\.json|chat\.jsonl|events\.jsonl)$/i.test(filePath)) rememberRendererPath('chat-input', filePath);
+        }
+    }
+}
+
+function isKnownRendererPath(purpose: FileCapabilityPurpose, candidate: string): boolean {
+    if (typeof candidate !== 'string' || !candidate || !path.isAbsolute(candidate) || !fs.existsSync(candidate)) return false;
+    const normalized = normalizeComparablePath(candidate);
+    if (purpose === 'selected-folder' && normalized === normalizeComparablePath(config.download_path)) return true;
+    return knownRendererPaths.get(purpose)?.has(normalized) === true;
+}
+
+ipcMain.handle('select-folder', async (event) => {
+    if (!isTrustedRendererEvent(event)) return null;
     const result = await dialog.showOpenDialog(mainWindow!, {
         properties: ['openDirectory']
     });
-    return result.filePaths[0] || null;
+    const selectedPath = result.filePaths[0];
+    if (!selectedPath) return null;
+    const capability = issueFileCapability(event, 'selected-folder', selectedPath, 'directory');
+    return { ...capability, displayPath: selectedPath };
 });
 
-ipcMain.handle('select-video-file', async () => {
+ipcMain.handle('select-video-file', async (event) => {
+    if (!isTrustedRendererEvent(event)) return null;
     const result = await dialog.showOpenDialog(mainWindow!, {
         properties: ['openFile'],
         filters: [
-            { name: 'Video Files', extensions: ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'ts', 'avi'] }
+            { name: 'Video Files', extensions: VIDEO_FILE_EXTENSIONS }
         ]
     });
-    return result.filePaths[0] || null;
+    return result.filePaths[0]
+        ? issueFileCapability(event, 'cutter-input', result.filePaths[0], 'input-file', VIDEO_FILE_EXTENSIONS)
+        : null;
 });
 
-ipcMain.handle('open-folder', (_, folderPath: string) => {
-    if (fs.existsSync(folderPath)) {
-        shell.openPath(folderPath);
+ipcMain.handle('grant-dropped-video', (event, filePath: string): FileCapabilityReference | null => {
+    if (!isTrustedRendererEvent(event)) return null;
+    try {
+        return issueFileCapability(event, 'cutter-input', filePath, 'input-file', VIDEO_FILE_EXTENSIONS);
+    } catch {
+        return null;
     }
+});
+
+ipcMain.handle('authorize-managed-path', (event, purpose: FileCapabilityPurpose, pathOrCapability: string): FileCapabilityReference | null => {
+    if (!isTrustedRendererEvent(event) || !['selected-folder', 'chat-input', 'open-file', 'show-in-folder'].includes(purpose)) return null;
+    try {
+        const existingPath = fileCapabilities.resolve(pathOrCapability, event.sender.id, purpose);
+        return { token: pathOrCapability, name: path.basename(existingPath) };
+    } catch { }
+    if (!isKnownRendererPath(purpose, pathOrCapability)) return null;
+    if (purpose === 'selected-folder') {
+        if (!fs.statSync(pathOrCapability).isDirectory()) return null;
+        return issueFileCapability(event, purpose, pathOrCapability, 'directory');
+    }
+    const extensions = purpose === 'chat-input' ? ['.chat.json', '.chat.jsonl', '.events.jsonl'] : [];
+    return issueFileCapability(event, purpose, pathOrCapability, 'input-file', extensions);
+});
+
+ipcMain.handle('open-folder', async (event, capability: string) => {
+    const folderPath = resolveFileCapability(event, capability, 'selected-folder', true);
+    if (folderPath) await shell.openPath(folderPath);
 });
 
 // Extensions that shell.openPath would happily execute via the system
@@ -7651,9 +7758,9 @@ const OPEN_FILE_BLOCKED_EXTENSIONS = new Set([
     '.lnk', '.cpl', '.reg', '.hta', '.jar', '.application'
 ]);
 
-ipcMain.handle('open-file', async (_, filePath: string): Promise<boolean> => {
-    if (typeof filePath !== 'string' || !filePath) return false;
-    if (!fs.existsSync(filePath)) return false;
+ipcMain.handle('open-file', async (event, capability: string): Promise<boolean> => {
+    const filePath = resolveFileCapability(event, capability, 'open-file', true);
+    if (!filePath) return false;
     const ext = path.extname(filePath).toLowerCase();
     if (OPEN_FILE_BLOCKED_EXTENSIONS.has(ext)) {
         appendDebugLog('open-file-rejected-extension', { ext, path: filePath.slice(0, 200) });
@@ -7664,9 +7771,9 @@ ipcMain.handle('open-file', async (_, filePath: string): Promise<boolean> => {
     return result === '';
 });
 
-ipcMain.handle('show-in-folder', (_, filePath: string): boolean => {
-    if (typeof filePath !== 'string' || !filePath) return false;
-    if (!fs.existsSync(filePath)) return false;
+ipcMain.handle('show-in-folder', (event, capability: string): boolean => {
+    const filePath = resolveFileCapability(event, capability, 'show-in-folder', true);
+    if (!filePath) return false;
     shell.showItemInFolder(filePath);
     return true;
 });
@@ -7856,13 +7963,15 @@ ipcMain.handle('get-debug-log', async (_, lines: number = 200) => {
     return readDebugLog(safeLines);
 });
 
-ipcMain.handle('open-debug-log-file', (): boolean => {
+ipcMain.handle('open-debug-log-file', (event): boolean => {
+    if (!isTrustedRendererEvent(event)) return false;
     if (!fs.existsSync(DEBUG_LOG_FILE)) return false;
     shell.showItemInFolder(DEBUG_LOG_FILE);
     return true;
 });
 
-ipcMain.handle('get-archive-stats', (): ArchiveStats => {
+ipcMain.handle('get-archive-stats', (event): ArchiveStats => {
+    if (!isTrustedRendererEvent(event)) throw new Error('File access denied');
     return computeArchiveStats();
 });
 
@@ -7884,7 +7993,8 @@ ipcMain.handle('get-live-status-snapshot', (): Record<string, boolean> => {
     return snap;
 });
 
-ipcMain.handle('search-archive', (_, filter: Partial<ArchiveSearchFilter>): ArchiveSearchResult => {
+ipcMain.handle('search-archive', (event, filter: Partial<ArchiveSearchFilter>): ArchiveSearchResult => {
+    if (!isTrustedRendererEvent(event)) throw new Error('File access denied');
     const normalized: ArchiveSearchFilter = {
         query: typeof filter?.query === 'string' ? filter.query.trim() : '',
         type: (['all', 'live', 'vod', 'chat', 'events'] as const).includes(filter?.type as 'all' | 'live' | 'vod' | 'chat' | 'events')
@@ -7898,23 +8008,38 @@ ipcMain.handle('search-archive', (_, filter: Partial<ArchiveSearchFilter>): Arch
             : 'date_desc',
         limit: Number.isFinite(filter?.limit as number) ? Number(filter?.limit) : 200
     };
-    return searchArchive(normalized);
+    const result = searchArchive(normalized);
+    for (const hit of result.hits) {
+        rememberRendererPath('open-file', hit.fullPath);
+        rememberRendererPath('show-in-folder', hit.fullPath);
+        for (const sidecar of [hit.chatPath, hit.eventsPath]) {
+            if (!sidecar) continue;
+            rememberRendererPath('open-file', sidecar);
+            rememberRendererPath('show-in-folder', sidecar);
+            rememberRendererPath('chat-input', sidecar);
+        }
+    }
+    return result;
 });
 
-ipcMain.handle('get-storage-stats', (): StorageStatsResult => {
-    return computeStorageStats();
+ipcMain.handle('get-storage-stats', (event): StorageStatsResult => {
+    if (!isTrustedRendererEvent(event)) throw new Error('File access denied');
+    const result = computeStorageStats();
+    for (const row of [...result.streamers, ...result.extras]) rememberRendererPath('selected-folder', row.folderPath);
+    return result;
 });
 
-ipcMain.handle('run-storage-cleanup', (_, options?: { dryRun?: boolean }): CleanupReport => {
+ipcMain.handle('run-storage-cleanup', (event, options?: { dryRun?: boolean }): CleanupReport => {
+    if (!isTrustedRendererEvent(event)) throw new Error('File access denied');
     return runStorageCleanup({ dryRun: options?.dryRun === true });
 });
 
 // Read a chat-replay (.chat.json) or live-chat (.chat.jsonl) file and
 // return a normalized message list the renderer can display directly.
 // Caps at 50k messages to stop a runaway file from killing the renderer.
-ipcMain.handle('read-chat-file', (_, filePath: string): { success: boolean; error?: string; format?: 'replay' | 'live'; messages?: Array<Record<string, unknown>>; truncated?: boolean; total?: number } => {
-    if (typeof filePath !== 'string' || !filePath) return { success: false, error: 'No path' };
-    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' };
+ipcMain.handle('read-chat-file', (event, capability: string): { success: boolean; error?: string; format?: 'replay' | 'live'; messages?: Array<Record<string, unknown>>; truncated?: boolean; total?: number } => {
+    const filePath = resolveFileCapability(event, capability, 'chat-input', true);
+    if (!filePath) return { success: false, error: 'File access denied' };
 
     const MAX_MESSAGES = 50000;
     try {
@@ -7961,8 +8086,9 @@ ipcMain.handle('read-chat-file', (_, filePath: string): { success: boolean; erro
     }
 });
 
-ipcMain.handle('check-folder-writable', (_, folderPath: string): boolean => {
-    if (typeof folderPath !== 'string' || !folderPath) return false;
+ipcMain.handle('check-folder-writable', (event, capability: string): boolean => {
+    const folderPath = resolveFileCapability(event, capability, 'selected-folder', true);
+    if (!folderPath) return false;
     return isDownloadPathWritable(folderPath);
 });
 
@@ -7970,7 +8096,8 @@ ipcMain.handle('is-downloading', () => isDownloading && !queuePaused);
 
 ipcMain.handle('get-runtime-metrics', () => getRuntimeMetricsSnapshot());
 
-ipcMain.handle('export-runtime-metrics', async () => {
+ipcMain.handle('export-runtime-metrics', async (event) => {
+    if (!isTrustedRendererEvent(event)) return { success: false, error: 'File access denied' };
     try {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const defaultName = `runtime-metrics-${timestamp}.json`;
@@ -7985,12 +8112,15 @@ ipcMain.handle('export-runtime-metrics', async () => {
             return { success: false, cancelled: true };
         }
 
+        const outputCapability = issueFileCapability(event, 'runtime-export', dialogResult.filePath, 'output-file', ['json']);
+        const outputFile = resolveFileCapability(event, outputCapability.token, 'runtime-export', true);
+        if (!outputFile) return { success: false, error: 'File access denied' };
         const snapshot = getRuntimeMetricsSnapshot();
         // Atomic write: same fsync+rename pattern used for config/queue
         // (cycle 1) so a power loss mid-export can't leave a half-written
         // metrics file at the user's chosen path.
-        writeFileAtomicSync(dialogResult.filePath, JSON.stringify(snapshot, null, 2));
-        return { success: true, filePath: dialogResult.filePath };
+        writeFileAtomicSync(outputFile, JSON.stringify(snapshot, null, 2));
+        return { success: true, filePath: outputFile };
     } catch (e) {
         appendDebugLog('runtime-metrics-export-failed', String(e));
         return { success: false, error: String(e) };
@@ -8021,7 +8151,8 @@ ipcMain.handle('reset-downloaded-vod-ids', () => {
     return { success: true, removedCount: count };
 });
 
-ipcMain.handle('export-config', async () => {
+ipcMain.handle('export-config', async (event) => {
+    if (!isTrustedRendererEvent(event)) return { success: false, error: 'File access denied' };
     try {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const defaultName = `twitch-vod-manager-config-${timestamp}.json`;
@@ -8039,21 +8170,25 @@ ipcMain.handle('export-config', async () => {
         // Strip the secrets from the export — Client Secret should not
         // travel as plain text across machines / cloud sync. The user
         // re-enters it on the new machine after import.
+        const outputCapability = issueFileCapability(event, 'config-export', dialogResult.filePath, 'output-file', ['json']);
+        const outputFile = resolveFileCapability(event, outputCapability.token, 'config-export', true);
+        if (!outputFile) return { success: false, error: 'File access denied' };
         const exportable = {
             ...config,
             client_secret: '',
             __exportVersion: 1,
             __exportedAt: new Date().toISOString()
         };
-        writeFileAtomicSync(dialogResult.filePath, JSON.stringify(exportable, null, 2));
-        return { success: true, filePath: dialogResult.filePath };
+        writeFileAtomicSync(outputFile, JSON.stringify(exportable, null, 2));
+        return { success: true, filePath: outputFile };
     } catch (e) {
         appendDebugLog('config-export-failed', String(e));
         return { success: false, error: String(e) };
     }
 });
 
-ipcMain.handle('import-config', async () => {
+ipcMain.handle('import-config', async (event) => {
+    if (!isTrustedRendererEvent(event)) return { success: false, error: 'File access denied' };
     try {
         const dialogResult = await dialog.showOpenDialog(mainWindow!, {
             properties: ['openFile'],
@@ -8063,7 +8198,9 @@ ipcMain.handle('import-config', async () => {
             return { success: false, cancelled: true };
         }
 
-        const importPath = dialogResult.filePaths[0];
+        const importCapability = issueFileCapability(event, 'config-import', dialogResult.filePaths[0], 'input-file', ['json']);
+        const importPath = resolveFileCapability(event, importCapability.token, 'config-import', true);
+        if (!importPath) return { success: false, error: 'File access denied' };
         const raw = fs.readFileSync(importPath, 'utf-8');
         const parsed = JSON.parse(raw);
         if (!isPlainObject(parsed)) {
@@ -8092,10 +8229,10 @@ ipcMain.handle('import-config', async () => {
 });
 
 function isTrustedRendererEvent(event: IpcMainInvokeEvent): boolean {
-    if (!mainWindow || event.sender.id !== mainWindow.webContents.id) return false;
+    if (!mainWindow) return false;
     const rendererUrl = pathToFileURL(path.join(__dirname, '../src/index.html')).href;
     const senderUrl = event.senderFrame?.url || event.sender.getURL();
-    return senderUrl.split(/[?#]/, 1)[0] === rendererUrl;
+    return isTrustedFileIpcSender(mainWindow.webContents.id, rendererUrl, event.sender.id, senderUrl);
 }
 
 function isPathInsideDirectory(rootDirectory: string, candidate: string): boolean {
@@ -8106,30 +8243,40 @@ function isPathInsideDirectory(rootDirectory: string, candidate: string): boolea
 }
 
 // Video Cutter IPC
-ipcMain.handle('get-video-info', async (event, filePath: string) => {
+ipcMain.handle('get-video-info', async (event, capability: string) => {
     if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    const filePath = resolveFileCapability(event, capability, 'cutter-input');
+    if (!filePath) return null;
     return await getVideoInfo(filePath, currentCutterInfoProcesses);
 });
 
-ipcMain.handle('extract-frame', async (event, filePath: string, timeSeconds: number) => {
+ipcMain.handle('extract-frame', async (event, capability: string, timeSeconds: number) => {
     if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    const filePath = resolveFileCapability(event, capability, 'cutter-input');
+    if (!filePath) return null;
     return await extractFrame(filePath, timeSeconds);
 });
 
-ipcMain.handle('prepare-video-editor-media', async (event, filePath: string) => {
+ipcMain.handle('prepare-video-editor-media', async (event, capability: string) => {
     if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    const filePath = resolveFileCapability(event, capability, 'cutter-input');
+    if (!filePath) return null;
     const media = await prepareVideoEditorMedia(filePath);
     if (media && cutterMediaJob?.jobId === media.jobId) cutterPreparedInput = cutterMediaJob.identity;
     return media;
 });
 
-ipcMain.handle('prepare-video-editor-waveform', async (event, filePath: string, jobId: number) => {
+ipcMain.handle('prepare-video-editor-waveform', async (event, capability: string, jobId: number) => {
     if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    const filePath = resolveFileCapability(event, capability, 'cutter-input');
+    if (!filePath) return null;
     return await prepareVideoEditorWaveform(filePath, jobId);
 });
 
-ipcMain.handle('prepare-video-editor-assets', async (event, filePath: string, jobId: number, profile: VideoEditorAssetProfile) => {
+ipcMain.handle('prepare-video-editor-assets', async (event, capability: string, jobId: number, profile: VideoEditorAssetProfile) => {
     if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    const filePath = resolveFileCapability(event, capability, 'cutter-input');
+    if (!filePath) return null;
     return await prepareVideoEditorAssets(filePath, jobId, profile);
 });
 
@@ -8139,26 +8286,34 @@ ipcMain.handle('cancel-video-editor-assets', (event, jobId: number) => {
     return true;
 });
 
-ipcMain.handle('export-video-edit', async (event, request: VideoEditExportRequest) => {
-    if (!isTrustedRendererEvent(event) || appShutdownStarted || !request || typeof request.inputFile !== 'string') return { success: false, outputFile: null };
-    if (!cutterInputIdentityMatches(request.inputFile)) return { success: false, outputFile: null };
+ipcMain.handle('export-video-edit', async (event, request: RendererVideoEditExportRequest) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted || !request || typeof request.inputCapability !== 'string') return { success: false, outputName: null };
+    const inputFile = resolveFileCapability(event, request.inputCapability, 'cutter-input');
+    if (!inputFile || !cutterInputIdentityMatches(inputFile)) return { success: false, outputName: null };
     let outputFile: string | null = null;
     const testRoot = process.env.TWITCH_VOD_MANAGER_E2E_CUTTER_OUTPUT_ROOT;
-    if (testRoot && typeof request.outputFile === 'string' && isPathInsideDirectory(testRoot, request.outputFile)) {
-        outputFile = request.outputFile;
+    if (testRoot && typeof request.outputName === 'string' && path.basename(request.outputName) === request.outputName) {
+        const candidate = path.join(testRoot, request.outputName);
+        if (isPathInsideDirectory(testRoot, candidate)) {
+            const outputCapability = issueFileCapability(event, 'cutter-output', candidate, 'output-file', ['mp4']);
+            outputFile = resolveFileCapability(event, outputCapability.token, 'cutter-output', true, [inputFile]);
+        }
     } else {
-        const defaultName = path.join(path.dirname(request.inputFile), `${path.basename(request.inputFile, path.extname(request.inputFile))}_edited.mp4`);
+        const defaultName = path.join(path.dirname(inputFile), `${path.basename(inputFile, path.extname(inputFile))}_edited.mp4`);
         const result = await dialog.showSaveDialog(mainWindow!, {
             defaultPath: defaultName,
             filters: [{ name: 'MP4 Video', extensions: ['mp4'] }],
         });
-        if (result.canceled || !result.filePath) return { success: false, outputFile: null, cancelled: true };
-        outputFile = result.filePath;
+        if (result.canceled || !result.filePath) return { success: false, outputName: null, cancelled: true };
+        const outputCapability = issueFileCapability(event, 'cutter-output', result.filePath, 'output-file', ['mp4']);
+        outputFile = resolveFileCapability(event, outputCapability.token, 'cutter-output', true, [inputFile]);
     }
-    const outcome = await exportVideoEdit({ ...request, outputFile }, (percent) => {
+    if (!outputFile) return { success: false, outputName: null };
+    const outcome = await exportVideoEdit({ inputFile, outputFile, trimStart: request.trimStart, trimEnd: request.trimEnd, cuts: request.cuts }, (percent) => {
         mainWindow?.webContents.send('cut-progress', percent);
     });
-    return { success: outcome.success, outputFile: outcome.success ? outputFile : null, cancelled: outcome.cancelled || undefined };
+    const outputCapability = outcome.success ? issueFileCapability(event, 'show-in-folder', outputFile, 'input-file', ['mp4']) : null;
+    return { success: outcome.success, outputCapability: outputCapability?.token, outputName: outcome.success ? path.basename(outputFile) : null, cancelled: outcome.cancelled || undefined };
 });
 
 ipcMain.handle('cancel-video-edit', (event) => {
@@ -8170,7 +8325,9 @@ ipcMain.handle('cancel-video-edit', (event) => {
     return true;
 });
 
-ipcMain.handle('cut-video', async (_, inputFile: string, startTime: number, endTime: number) => {
+ipcMain.handle('cut-video', async (event, inputCapability: string, startTime: number, endTime: number) => {
+    const inputFile = resolveFileCapability(event, inputCapability, 'cutter-input', true);
+    if (!inputFile) return { success: false, outputName: null };
     const dir = path.dirname(inputFile);
     const baseName = path.basename(inputFile, path.extname(inputFile));
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(11, 19);
@@ -8182,36 +8339,45 @@ ipcMain.handle('cut-video', async (_, inputFile: string, startTime: number, endT
         mainWindow?.webContents.send('cut-progress', percent);
     });
 
-    return { success, outputFile: success ? outputFile : null };
+    return { success, outputName: success ? path.basename(outputFile) : null };
 });
 
 // Merge IPC
-ipcMain.handle('merge-videos', async (_, inputFiles: string[], outputFile: string) => {
-    const success = await mergeVideos(inputFiles, outputFile, (percent) => {
+ipcMain.handle('merge-videos', async (event, inputCapabilities: string[], outputCapability: string) => {
+    if (!isTrustedRendererEvent(event) || !Array.isArray(inputCapabilities) || inputCapabilities.length < 2) return { success: false, outputName: null };
+    const inputFiles = inputCapabilities.map((capability) => resolveFileCapability(event, capability, 'merge-input'));
+    const outputFile = resolveFileCapability(event, outputCapability, 'merge-output');
+    if (inputFiles.some((file): file is null => !file) || !outputFile) return { success: false, outputName: null };
+    for (const capability of inputCapabilities) {
+        if (!resolveFileCapability(event, capability, 'merge-input', true)) return { success: false, outputName: null };
+    }
+    if (!resolveFileCapability(event, outputCapability, 'merge-output', true, inputFiles as string[])) return { success: false, outputName: null };
+    const success = await publishCapabilityOutput(outputFile, async (partialFile) => await mergeVideos(inputFiles as string[], partialFile, (percent) => {
         mainWindow?.webContents.send('merge-progress', percent);
-    });
-
-    return { success, outputFile: success ? outputFile : null };
+    }));
+    return { success, outputName: success ? path.basename(outputFile) : null };
 });
 
-ipcMain.handle('select-multiple-videos', async () => {
+ipcMain.handle('select-multiple-videos', async (event) => {
+    if (!isTrustedRendererEvent(event)) return null;
     const result = await dialog.showOpenDialog(mainWindow!, {
         properties: ['openFile', 'multiSelections'],
         filters: [
             { name: 'Video Files', extensions: ['mp4', 'mkv', 'ts', 'mov', 'avi'] }
         ]
     });
-    return result.filePaths;
+    return result.filePaths.map((filePath) => issueFileCapability(event, 'merge-input', filePath, 'input-file', VIDEO_FILE_EXTENSIONS));
 });
 
-ipcMain.handle('save-video-dialog', async (_, defaultName: string) => {
+ipcMain.handle('save-video-dialog', async (event, defaultName: string) => {
+    if (!isTrustedRendererEvent(event)) return null;
     const result = await dialog.showSaveDialog(mainWindow!, {
         defaultPath: defaultName,
         filters: [
             { name: 'MP4 Video', extensions: ['mp4'] }
         ]
     });
-    return result.filePath || null;
+    return result.filePath ? issueFileCapability(event, 'merge-output', result.filePath, 'output-file', ['mp4']) : null;
 });
 
 // ==========================================

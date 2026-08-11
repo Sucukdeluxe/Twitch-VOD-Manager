@@ -936,15 +936,15 @@ async function selectFolder(): Promise<void> {
         return;
     }
 
-    byId<HTMLInputElement>('downloadPath').value = folder;
-    config = await window.api.saveConfig({ download_path: folder });
+    byId<HTMLInputElement>('downloadPath').value = folder.displayPath;
+    config = await window.api.saveConfig({ download_path: folder.displayPath }, folder.token);
 
     // Warn-only validation — the user explicitly chose this folder, so don't
     // refuse to save (they might be picking a path on a USB stick that's
     // currently disconnected). Just surface the writability problem early
     // instead of letting the next download fail with a cryptic error.
     try {
-        const writable = await window.api.checkFolderWritable(folder);
+        const writable = await window.api.checkFolderWritable(folder.token);
         if (!writable) {
             const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
             if (toast) toast(UI_TEXT.static.downloadPathNotWritable, 'warn');
