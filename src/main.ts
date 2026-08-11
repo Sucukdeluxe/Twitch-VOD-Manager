@@ -19,6 +19,7 @@ import { tBackend as tBackendCore, type BackendMessageKey } from './main/domain/
 import { watchRendererChanges } from './main/dev-reload';
 import { createPausableOutput, type PausableOutput } from './main/domain/pausable-output';
 import { PartialDownloadRegistry } from './main/domain/partial-download';
+import { QueueProcessRegistry, QueueRunLifecycle } from './main/queue/process-registry';
 import type { DbHandle } from './main/infra/db';
 import {
     normalizeLogin,
@@ -669,6 +670,14 @@ function saveQueue(queue: QueueItem[], force = false): void {
 
     pendingQueueSnapshot = queue;
 
+    if (appShutdownStarted && !force) {
+        if (queueSaveTimer) {
+            clearTimeout(queueSaveTimer);
+            queueSaveTimer = null;
+        }
+        return;
+    }
+
     if (force) {
         if (queueSaveTimer) {
             clearTimeout(queueSaveTimer);
@@ -774,6 +783,14 @@ interface ActiveDownloadTracking {
 }
 const activeDownloads = new Map<string, ActiveDownloadTracking>();
 const cancelledItemIds = new Set<string>();
+const queueProcessRegistry = new QueueProcessRegistry();
+const queueRunLifecycle = new QueueRunLifecycle(queueProcessRegistry);
+
+function registerQueuePartialFile(itemId: string, filePath: string): void {
+    queueProcessRegistry.register(itemId, 'post-processing', {
+        cleanup: () => { try { fs.rmSync(filePath, { force: true }); } catch { } },
+    });
+}
 // userId -> login reverse map. Bounded via Map insertion-order eviction so
 // a long-running session doesn't grow it unbounded across thousands of
 // streamer lookups. Values are short (~20 char each) but accumulate.
@@ -3296,7 +3313,7 @@ async function extractFrame(filePath: string, timeSeconds: number): Promise<stri
 // what we want for resumed-recording parts (same streamlink, same codec
 // settings, just split across files). Returns false on any error so the
 // caller can keep the original parts.
-async function concatVideoFiles(inputFiles: string[], outputFile: string): Promise<boolean> {
+async function concatVideoFiles(inputFiles: string[], outputFile: string, itemId: string | null = null): Promise<boolean> {
     if (inputFiles.length < 2) return false;
     const ffmpegReady = await ensureFfmpegInstalled();
     if (!ffmpegReady) return false;
@@ -3333,11 +3350,22 @@ async function concatVideoFiles(inputFiles: string[], outputFile: string): Promi
 
     return await new Promise<boolean>((resolve) => {
         const proc = spawn(ffmpeg, args, { windowsHide: true });
+        const registration = itemId
+            ? queueProcessRegistry.register(itemId, 'post-processing', {
+                kill: () => proc.kill(),
+                wait: waitForChildProcessClose(proc),
+                cleanup: () => {
+                    try { fs.rmSync(outputFile, { force: true }); } catch { }
+                    try { fs.rmSync(listFile, { force: true }); } catch { }
+                },
+            })
+            : null;
         let stderrBuf = '';
         proc.stderr?.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString(); });
         proc.on('close', (code) => {
+            registration?.release();
             try { fs.unlinkSync(listFile); } catch { /* ignore */ }
-            if (code === 0 && fs.existsSync(outputFile) && fs.statSync(outputFile).size > 0) {
+            if (code === 0 && (!itemId || !queueProcessRegistry.isCancelled(itemId)) && fs.existsSync(outputFile) && fs.statSync(outputFile).size > 0) {
                 appendDebugLog('concat-ok', { output: outputFile, parts: inputFiles.length });
                 resolve(true);
             } else {
@@ -3349,6 +3377,7 @@ async function concatVideoFiles(inputFiles: string[], outputFile: string): Promi
             }
         });
         proc.on('error', (err) => {
+            registration?.release();
             try { fs.unlinkSync(listFile); } catch { /* ignore */ }
             appendDebugLog('concat-spawn-error', String(err));
             resolve(false);
@@ -3469,7 +3498,8 @@ async function mergeVideos(
     inputFiles: string[],
     outputFile: string,
     onProgress: (percent: number) => void,
-    totalDurationSec?: number
+    totalDurationSec?: number,
+    itemId: string | null = null
 ): Promise<boolean> {
     const ffmpegReady = await ensureFfmpegInstalled();
     if (!ffmpegReady) {
@@ -3557,7 +3587,18 @@ async function mergeVideos(
 
         return await new Promise((resolve) => {
             const proc = spawn(ffmpeg, args, { windowsHide: true });
-            currentEditorProcess = proc;
+            const registration = itemId
+                ? queueProcessRegistry.register(itemId, 'merge', {
+                    kill: () => proc.kill(),
+                    wait: waitForChildProcessClose(proc),
+                    pause: () => proc.kill(),
+                    cleanup: () => {
+                        try { fs.rmSync(outputFile, { force: true }); } catch { }
+                        try { fs.rmSync(concatFile, { force: true }); } catch { }
+                    },
+                })
+                : null;
+            if (!itemId) currentEditorProcess = proc;
 
             proc.stdout?.on('data', (data) => {
                 const line = data.toString();
@@ -3573,8 +3614,9 @@ async function mergeVideos(
             });
 
             proc.on('close', (code) => {
-                currentEditorProcess = null;
-                const success = code === 0 && fs.existsSync(outputFile);
+                registration?.release();
+                if (!itemId && currentEditorProcess === proc) currentEditorProcess = null;
+                const success = code === 0 && (!itemId || !queueProcessRegistry.isCancelled(itemId)) && fs.existsSync(outputFile);
                 if (success) {
                     onProgress(100);
                 }
@@ -3582,7 +3624,8 @@ async function mergeVideos(
             });
 
             proc.on('error', () => {
-                currentEditorProcess = null;
+                registration?.release();
+                if (!itemId && currentEditorProcess === proc) currentEditorProcess = null;
                 resolve(false);
             });
         });
@@ -3594,12 +3637,21 @@ async function mergeVideos(
             return true;
         }
 
+        if (itemId && (queueProcessRegistry.isCancelled(itemId) || queueProcessRegistry.isPaused(itemId))) {
+            try { fs.rmSync(outputFile, { force: true }); } catch { }
+            return false;
+        }
+
         appendDebugLog('merge-video-copy-failed-fallback-reencode', { outputFile, files: inputFiles.length });
         try {
             if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
         } catch { }
 
-        return await runMergeAttempt(false);
+        const reencodeSuccess = await runMergeAttempt(false);
+        if (!reencodeSuccess) {
+            try { fs.rmSync(outputFile, { force: true }); } catch { }
+        }
+        return reencodeSuccess;
     } finally {
         try {
             fs.unlinkSync(concatFile);
@@ -3652,25 +3704,37 @@ async function splitMergedFile(
 
         const success = await new Promise<boolean>((resolve) => {
             const proc = spawn(ffmpeg, args, { windowsHide: true });
-            currentEditorProcess = proc;
+            const registration = itemId
+                ? queueProcessRegistry.register(itemId, 'split', {
+                    kill: () => proc.kill(),
+                    wait: waitForChildProcessClose(proc),
+                    pause: () => proc.kill(),
+                    cleanup: () => { try { fs.rmSync(outputFile, { force: true }); } catch { } },
+                })
+                : null;
+            if (!itemId) currentEditorProcess = proc;
 
             proc.on('close', (code) => {
-                currentEditorProcess = null;
-                resolve(code === 0 && fs.existsSync(outputFile));
+                registration?.release();
+                if (!itemId && currentEditorProcess === proc) currentEditorProcess = null;
+                resolve(code === 0 && (!itemId || !queueProcessRegistry.isCancelled(itemId)) && fs.existsSync(outputFile));
             });
 
             proc.on('error', () => {
-                currentEditorProcess = null;
+                registration?.release();
+                if (!itemId && currentEditorProcess === proc) currentEditorProcess = null;
                 resolve(false);
             });
         });
 
         if (!success) {
             appendDebugLog('split-merged-part-failed', { part: i + 1, outputFile });
+            try { fs.rmSync(outputFile, { force: true }); } catch { }
             return { success: false, files: splitFiles };
         }
 
         splitFiles.push(outputFile);
+        if (itemId) registerQueuePartialFile(itemId, outputFile);
     }
 
     return { success: true, files: splitFiles };
@@ -3740,6 +3804,14 @@ function downloadVODPart(
         }
         const output = createPausableOutput(proc.stdout, outputStream);
         const outputFinished = output.finished.then(() => null, (error) => error);
+        const processRegistration = queueProcessRegistry.register(itemId, 'streamlink', {
+            kill: () => proc.kill(),
+            wait: waitForChildProcessClose(proc),
+            pause: () => output.pause(),
+            resume: () => output.resume(),
+            cancel: () => output.cancel(),
+            cleanup: () => partialDownloadRegistry.discard(partialFilename),
+        });
 
         // Register in per-item tracking map for parallel downloads
         // (no longer mirrored on a global — currentEditorProcess is editor-only)
@@ -3866,6 +3938,7 @@ function downloadVODPart(
         proc.on('close', async (code) => {
             clearInterval(progressInterval);
             const outputError = await outputFinished;
+            processRegistration.release();
             activeDownloads.delete(itemId);
 
             if (outputError) {
@@ -3948,6 +4021,7 @@ function downloadVODPart(
         proc.on('error', async (err) => {
             clearInterval(progressInterval);
             await output.cancel();
+            processRegistration.release();
             partialDownloadRegistry.discard(partialFilename);
             console.error('Process error:', err);
             activeDownloads.delete(itemId);
@@ -4053,7 +4127,7 @@ async function runAutoRecordPoll(): Promise<number> {
             appendDebugLog('auto-record-triggered', { streamer, title: liveItem.title });
 
             if (!isDownloading) {
-                void processQueue();
+                scheduleQueueProcessing();
             }
         }
     } catch (e) {
@@ -4189,7 +4263,7 @@ async function runAutoVodPoll(): Promise<number> {
         emitQueueUpdated();
 
         if (!isDownloading && downloadQueue.some((it) => it.status === 'pending')) {
-            void processQueue();
+            scheduleQueueProcessing();
         }
     } catch (e) {
         appendDebugLog('auto-vod-poll-failed', String(e));
@@ -5794,7 +5868,7 @@ async function downloadLiveStream(
             baseFilename.replace(/\.mp4$/i, '_merged.mp4'),
             item.id
         );
-        const mergeOk = await concatVideoFiles(outputs, mergedOutput);
+        const mergeOk = await concatVideoFiles(outputs, mergedOutput, item.id);
         if (mergeOk) {
             if (config.delete_parts_after_merge) {
                 for (const partPath of outputs) {
@@ -6198,6 +6272,7 @@ async function processDownloadMergeGroup(
             }
 
             mg.downloadedFiles[i] = tmpFilename;
+            registerQueuePartialFile(item.id, tmpFilename);
             saveQueue(downloadQueue);
         }
     }
@@ -6242,7 +6317,8 @@ async function processDownloadMergeGroup(
                     totalParts: 0
                 });
             },
-            totalDurationSec
+            totalDurationSec,
+            item.id
         );
 
         if (!mergeSuccess) {
@@ -6250,6 +6326,7 @@ async function processDownloadMergeGroup(
         }
 
         mg.mergedFile = mergedFilePath;
+        registerQueuePartialFile(item.id, mergedFilePath);
         saveQueue(downloadQueue);
     }
 
@@ -6346,6 +6423,18 @@ async function processDownloadMergeGroup(
 }
 
 async function processOneQueueItem(item: QueueItem): Promise<void> {
+    queueProcessRegistry.resetItem(item.id);
+    const itemRegistration = queueProcessRegistry.register(item.id, 'post-processing', {});
+    if (!itemRegistration.accepted) return;
+    if (item.mergeGroup) {
+        for (const filePath of Object.values(item.mergeGroup.downloadedFiles)) {
+            if (filePath && fs.existsSync(filePath)) registerQueuePartialFile(item.id, filePath);
+        }
+        if (item.mergeGroup.mergedFile && fs.existsSync(item.mergeGroup.mergedFile)) {
+            registerQueuePartialFile(item.id, item.mergeGroup.mergedFile);
+        }
+    }
+
     appendDebugLog('queue-item-start', {
         itemId: item.id,
         title: item.title,
@@ -6370,6 +6459,10 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
         const maxAttempts = getRetryAttemptLimit();
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            if (!isDownloading || cancelledItemIds.has(item.id) || queueProcessRegistry.isCancelled(item.id)) {
+                finalResult = { success: false, error: tBackend('downloadCancelled') };
+                break;
+            }
             appendDebugLog('queue-item-attempt', { itemId: item.id, attempt, max: maxAttempts });
 
             const result = item.mergeGroup
@@ -6389,7 +6482,17 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
 
             finalResult = result;
 
-            if (!isDownloading || cancelledItemIds.has(item.id)) {
+            if (queueProcessRegistry.isPaused(item.id)) {
+                await queueProcessRegistry.whenResumed(item.id);
+                if (!isDownloading || cancelledItemIds.has(item.id) || queueProcessRegistry.isCancelled(item.id)) {
+                    finalResult = { success: false, error: tBackend('downloadCancelled') };
+                    break;
+                }
+                attempt -= 1;
+                continue;
+            }
+
+            if (!isDownloading || cancelledItemIds.has(item.id) || queueProcessRegistry.isCancelled(item.id)) {
                 finalResult = { success: false, error: tBackend('downloadCancelled') };
                 break;
             }
@@ -6423,7 +6526,10 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
                 } as DownloadProgress);
                 saveQueue(downloadQueue);
                 emitQueueUpdated();
-                await sleep(retryDelaySeconds * 1000);
+                await Promise.race([
+                    sleep(retryDelaySeconds * 1000),
+                    queueProcessRegistry.whenCancelled(item.id),
+                ]);
             } else {
                 runtimeMetrics.retriesExhausted += 1;
             }
@@ -6541,7 +6647,7 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
                                 currentPart: 0,
                                 totalParts: 0
                             } as DownloadProgress);
-                        }, () => cancelledItemIds.has(item.id));
+                        }, () => cancelledItemIds.has(item.id) || queueProcessRegistry.isCancelled(item.id));
 
                         const chatPath = chatReplayPathFor(firstOutput);
                         const payload = {
@@ -6588,8 +6694,9 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
         });
 
         saveQueue(downloadQueue);
-        emitQueueUpdated();
+        if (!appShutdownStarted) emitQueueUpdated();
     } finally {
+        queueProcessRegistry.releaseItem(item.id);
         activeDownloads.delete(item.id);
         cancelledItemIds.delete(item.id);
         // Release only THIS item's claimed filenames (other parallel downloads keep their claims)
@@ -6598,8 +6705,15 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
     }
 }
 
+function scheduleQueueProcessing(): boolean {
+    if (appShutdownStarted) return false;
+    return queueRunLifecycle.schedule(processQueue, (error) => {
+        appendDebugLog('queue-run-failed', String(error));
+    });
+}
+
 async function processQueue(): Promise<void> {
-    if (isDownloading || !downloadQueue.some((item) => item.status === 'pending')) return;
+    if (appShutdownStarted || isDownloading || !downloadQueue.some((item) => item.status === 'pending')) return;
 
     appendDebugLog('queue-start', {
         items: downloadQueue.length,
@@ -6655,6 +6769,10 @@ async function processQueue(): Promise<void> {
     cancelledItemIds.clear();
 
     saveQueue(downloadQueue);
+    if (appShutdownStarted) {
+        appendDebugLog('queue-finished', { items: downloadQueue.length, shutdown: true });
+        return;
+    }
     emitQueueUpdated();
     mainWindow?.webContents.send('download-finished');
     try {
@@ -6743,7 +6861,7 @@ function createWindow(): void {
                 setTimeout(() => {
                     if (config.auto_resume_queue_on_startup && !isDownloading
                         && downloadQueue.some((it) => it.status === 'pending')) {
-                        void processQueue();
+                        scheduleQueueProcessing();
                     }
                 }, 5000);
             }
@@ -7210,7 +7328,7 @@ ipcMain.handle('start-live-recording', async (_, streamerName: string) => {
     downloadQueue.push(liveItem);
     saveQueue(downloadQueue);
     emitQueueUpdated();
-    if (!isDownloading) void processQueue();
+    if (!isDownloading) scheduleQueueProcessing();
     appendDebugLog('live-recording-queued', { streamer: login, title: liveItem.title });
     return { success: true, streamer: login, title: liveInfo.title || login };
 });
@@ -7244,20 +7362,16 @@ ipcMain.handle('add-to-queue', (_, item: Omit<QueueItem, 'id' | 'status' | 'prog
 });
 
 ipcMain.handle('remove-from-queue', async (_, id: string) => {
-    const wasActiveItem = activeQueueItemId === id || activeDownloads.has(id);
+    const wasActiveItem = activeQueueItemId === id || activeDownloads.has(id) || queueProcessRegistry.activeItemIds().includes(id);
 
     if (wasActiveItem) {
         cancelledItemIds.add(id);
-        const tracking = activeDownloads.get(id);
-        if (tracking?.process) {
-            tracking.process.kill();
-            await tracking.output.cancel();
-            partialDownloadRegistry.discard(tracking.partialFilename);
-        }
+        await queueProcessRegistry.cancelItem(id);
         activeDownloads.delete(id);
-        activeQueueItemId = null;
-        runtimeMetrics.activeItemId = null;
-        runtimeMetrics.activeItemTitle = null;
+        const nextActiveId = queueProcessRegistry.activeItemIds()[0] || null;
+        activeQueueItemId = nextActiveId;
+        runtimeMetrics.activeItemId = nextActiveId;
+        runtimeMetrics.activeItemTitle = nextActiveId ? downloadQueue.find((item) => item.id === nextActiveId)?.title || null : null;
         appendDebugLog('queue-item-removed-active-cancelled', { id });
     }
 
@@ -7300,7 +7414,10 @@ ipcMain.handle('reorder-queue', (_, orderIds: string[]) => {
     return downloadQueue;
 });
 
-ipcMain.handle('retry-failed-downloads', () => {
+ipcMain.handle('retry-failed-downloads', async () => {
+    const failedIds = downloadQueue.filter((item) => item.status === 'error').map((item) => item.id);
+    await Promise.all(failedIds.map((id) => queueProcessRegistry.cancelItem(id)));
+    for (const id of failedIds) queueProcessRegistry.resetItem(id);
     downloadQueue = downloadQueue.map((item) => {
         if (item.status !== 'error') return item;
 
@@ -7316,18 +7433,21 @@ ipcMain.handle('retry-failed-downloads', () => {
     emitQueueUpdated();
 
     if (!isDownloading) {
-        void processQueue();
+        scheduleQueueProcessing();
     }
 
     return downloadQueue;
 });
 
-ipcMain.handle('retry-queue-item', (_, id: string) => {
+ipcMain.handle('retry-queue-item', async (_, id: string) => {
     if (typeof id !== 'string' || !id) return downloadQueue;
     const idx = downloadQueue.findIndex((it) => it.id === id);
     if (idx < 0) return downloadQueue;
     const item = downloadQueue[idx];
     if (item.status !== 'error') return downloadQueue;
+
+    await queueProcessRegistry.cancelItem(id);
+    queueProcessRegistry.resetItem(id);
 
     downloadQueue[idx] = {
         ...item,
@@ -7341,7 +7461,7 @@ ipcMain.handle('retry-queue-item', (_, id: string) => {
     appendDebugLog('queue-item-retry-single', { id, title: item.title });
 
     if (!isDownloading) {
-        void processQueue();
+        scheduleQueueProcessing();
     }
 
     return downloadQueue;
@@ -7430,9 +7550,7 @@ ipcMain.handle('start-download', async () => {
         for (const item of downloadQueue) {
             if (item.status === 'paused') item.status = 'downloading';
         }
-        for (const [id, tracking] of activeDownloads) {
-            tracking.output.resume();
-        }
+        await Promise.all(queueProcessRegistry.activeItemIds().map((id) => queueProcessRegistry.resumeItem(id)));
         saveQueue(downloadQueue);
         emitQueueUpdated(true);
         mainWindow?.webContents.send('download-started');
@@ -7451,18 +7569,16 @@ ipcMain.handle('start-download', async () => {
     emitQueueUpdated();
 
     if (!isDownloading) {
-        void processQueue();
+        scheduleQueueProcessing();
     }
     return true;
 });
 
-ipcMain.handle('pause-download', () => {
+ipcMain.handle('pause-download', async () => {
     if (!isDownloading || queuePaused) return false;
 
     queuePaused = true;
-    for (const [, tracking] of activeDownloads) {
-        tracking.output.pause();
-    }
+    await Promise.all(queueProcessRegistry.activeItemIds().map((id) => queueProcessRegistry.pauseItem(id)));
     for (const item of downloadQueue) {
         if (item.status === 'downloading') {
             item.status = 'paused';
@@ -7480,14 +7596,9 @@ ipcMain.handle('pause-download', () => {
 ipcMain.handle('cancel-download', async () => {
     isDownloading = false;
     queuePaused = false;
-    await Promise.all([...activeDownloads].map(async ([id, tracking]) => {
-        cancelledItemIds.add(id);
-        if (tracking.process) {
-            tracking.process.kill();
-            await tracking.output.cancel();
-            partialDownloadRegistry.discard(tracking.partialFilename);
-        }
-    }));
+    const activeItemIds = queueProcessRegistry.activeItemIds();
+    for (const id of activeItemIds) cancelledItemIds.add(id);
+    await queueProcessRegistry.cancelAll();
     return true;
 });
 
@@ -8194,6 +8305,11 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
     if (shutdownCleanupDone) return;
     shutdownCleanupDone = true;
     appShutdownStarted = true;
+    if (queueSaveTimer) {
+        clearTimeout(queueSaveTimer);
+        queueSaveTimer = null;
+    }
+    pendingQueueSnapshot = downloadQueue;
 
     appendDebugLog('shutdown-cleanup', { reason });
 
@@ -8209,13 +8325,17 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
     // and any in-flight cutter/merger/splitter ffmpeg. before-quit used to
     // skip this entirely; window-all-closed did it but only via direct
     // kill() (no try/catch around the queue process kill).
-    await Promise.all([...activeDownloads.values()].map(async (tracking) => {
-        if (tracking.process) {
-            try { tracking.process.kill(); } catch { /* already exited */ }
-        }
-        try { await tracking.output.cancel(); } catch { }
-        try { partialDownloadRegistry.discard(tracking.partialFilename); } catch { }
-    }));
+    await queueRunLifecycle.shutdown(
+        () => {
+            isDownloading = false;
+            queuePaused = false;
+            for (const id of queueProcessRegistry.activeItemIds()) cancelledItemIds.add(id);
+        },
+        () => {
+            saveConfig(config);
+            flushQueueSave();
+        },
+    );
     activeDownloads.clear();
 
     await Promise.all([...activeClipProcesses.values()].map(async (tracking) => {
@@ -8253,9 +8373,6 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
         try { fs.rmSync(currentCutterPartialFile, { force: true }); } catch { }
         currentCutterPartialFile = null;
     }
-
-    saveConfig(config);
-    flushQueueSave();
 
     // SQLite-Handle schliessen, falls geoeffnet — WAL-Checkpoint passiert beim
     // close, sodass beim naechsten Start keine .wal/.shm orphans bleiben.
