@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.9 - 2026-08-12
+
+- Waited for managed-tool checksum streams to close before promoting verified installations, preventing intermittent Windows repair failures caused by open file handles.
+
 ## 1.0.8 - 2026-08-12
 
 - Updated the Windows CI runtime to Node.js 24.11.1, resolving the SQLite native-module crash that interrupted verification workers on Node.js 22.13.0.

@@ -1,16 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fileSystemSpies = vi.hoisted(() => ({
-    readFileSync: vi.fn()
+    readFileSync: vi.fn(),
+    createReadStream: vi.fn()
 }));
 
 vi.mock('node:fs', async (importOriginal) => {
     const actual = await importOriginal<typeof import('node:fs')>();
     fileSystemSpies.readFileSync.mockImplementation(actual.readFileSync);
-    return { ...actual, readFileSync: fileSystemSpies.readFileSync };
+    fileSystemSpies.createReadStream.mockImplementation(actual.createReadStream);
+    return {
+        ...actual,
+        readFileSync: fileSystemSpies.readFileSync,
+        createReadStream: fileSystemSpies.createReadStream
+    };
 });
 
 import * as crypto from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -379,5 +386,40 @@ describe('managed tool installer', () => {
         fs.writeFileSync(path.join(installPath, 'bin', 'streamlink.exe'), Buffer.alloc(3 * 1024 * 1024, 0x2a));
         await expect(installer.status(manifest())).resolves.toMatchObject({ state: 'corrupt', verified: false });
         expect(fileSystemSpies.readFileSync).not.toHaveBeenCalled();
+    });
+
+    it('waits for hash streams to close before promoting a verified installation', async () => {
+        const createReadStream = fileSystemSpies.createReadStream.getMockImplementation();
+        if (!createReadStream) throw new Error('createReadStream mock is not initialized');
+        let openStreams = 0;
+        fileSystemSpies.createReadStream.mockImplementation((filePath: fs.PathLike) => {
+            const stream = new EventEmitter();
+            openStreams += 1;
+            queueMicrotask(() => {
+                stream.emit('data', fs.readFileSync(filePath));
+                stream.emit('end');
+                setImmediate(() => {
+                    openStreams -= 1;
+                    stream.emit('close');
+                });
+            });
+            return stream as fs.ReadStream;
+        });
+
+        const installPath = path.join(directory, 'installed');
+        const { installer } = createInstaller({
+            rename: (sourcePath, destinationPath) => {
+                if (sourcePath.includes('.stage-') && destinationPath === installPath && openStreams > 0) {
+                    throw new Error('hash stream still open');
+                }
+                fs.renameSync(sourcePath, destinationPath);
+            }
+        });
+
+        try {
+            await expect(installer.repair(manifest())).resolves.toMatchObject({ success: true });
+        } finally {
+            fileSystemSpies.createReadStream.mockImplementation(createReadStream);
+        }
     });
 });

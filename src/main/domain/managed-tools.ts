@@ -96,11 +96,17 @@ function sha256File(filePath: string): Promise<string> {
     return new Promise((resolve, reject) => {
         const hash = crypto.createHash('sha256');
         const stream = fs.createReadStream(filePath);
+        let digest: string | null = null;
         stream.on('data', (chunk) => {
             hash.update(chunk);
         });
         stream.once('error', reject);
-        stream.once('end', () => resolve(hash.digest('hex')));
+        stream.once('end', () => {
+            digest = hash.digest('hex');
+        });
+        stream.once('close', () => {
+            if (digest !== null) resolve(digest);
+        });
     });
 }
 
