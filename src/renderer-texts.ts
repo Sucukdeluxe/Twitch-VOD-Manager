@@ -280,6 +280,12 @@ function applyLanguageToStaticUI(): void {
     setText('streamlinkQualityBest', UI_TEXT.static.streamlinkQualityBest);
     setText('streamlinkQualitySource', UI_TEXT.static.streamlinkQualitySource);
     setText('streamlinkQualityAudio', UI_TEXT.static.streamlinkQualityAudio);
+    setText('downloadPolicyTitle', UI_TEXT.static.downloadPolicyTitle);
+    setText('downloadThrottleLabel', UI_TEXT.static.downloadThrottleLabel);
+    setText('downloadThrottleHint', UI_TEXT.static.downloadThrottleHint);
+    setText('downloadWindowsLabel', UI_TEXT.static.downloadWindowsLabel);
+    setText('downloadWindowsHint', UI_TEXT.static.downloadWindowsHint);
+    setText('downloadPolicyOverrideBtn', UI_TEXT.static.downloadPolicyOverride);
     setText('streamerSectionTitleText', UI_TEXT.static.streamerSectionTitle);
     setPlaceholder('streamerListFilter', UI_TEXT.static.streamerListFilterPlaceholder);
     setAriaLabel('streamerListFilter', UI_TEXT.static.streamerListFilterAria);

@@ -694,7 +694,75 @@ function syncPartMinutesFieldState(): void {
     label.classList.toggle('input-disabled', !isSplitMode);
 }
 
+function parseDownloadPolicyFormValue(rateValue: string, windowsValue: string): { value: DownloadPolicy | null; error: string | null } {
+    const rate = rateValue.trim();
+    let throttle: DownloadPolicy['throttle'] = null;
+    if (rate) {
+        const numberParts = rate.replace(',', '.').split('.');
+        if (numberParts.length > 2 || numberParts.some((part) => !part || [...part].some((character) => character < '0' || character > '9'))) {
+            return { value: null, error: 'rate' };
+        }
+        const maxBytesPerSecond = Math.round(Number(numberParts.join('.')) * 1024 * 1024);
+        if (!Number.isSafeInteger(maxBytesPerSecond) || maxBytesPerSecond <= 0) return { value: null, error: 'rate' };
+        throttle = { maxBytesPerSecond };
+    }
+    const windows: DownloadPolicy['windows'] = [];
+    const seen = new Set<string>();
+    for (const value of windowsValue.split(/[;,\n]+/).map((entry) => entry.trim()).filter(Boolean)) {
+        const match = /^(\d{2}:\d{2})\s*[-–]\s*(\d{2}:\d{2})$/.exec(value);
+        if (!match) return { value: null, error: 'window' };
+        const [startHour, startMinute] = match[1].split(':').map(Number);
+        const [endHour, endMinute] = match[2].split(':').map(Number);
+        if (startHour > 23 || startMinute > 59 || endHour > 23 || endMinute > 59 || match[1] === match[2]) {
+            return { value: null, error: 'window' };
+        }
+        const key = `${match[1]}-${match[2]}`;
+        if (!seen.has(key)) {
+            seen.add(key);
+            windows.push({ start: match[1], end: match[2] });
+        }
+    }
+    return { value: { throttle, windows }, error: null };
+}
+
+function updateDownloadPolicyValidation(error: string | null): void {
+    const status = byId<HTMLElement>('downloadPolicyValidation');
+    status.textContent = error === 'rate'
+        ? UI_TEXT.static.downloadThrottleInvalid
+        : error === 'window'
+            ? UI_TEXT.static.downloadWindowsInvalid
+            : '';
+}
+
+function formatDownloadThrottle(maxBytesPerSecond: number | null | undefined): string {
+    if (!maxBytesPerSecond) return '';
+    return (maxBytesPerSecond / (1024 * 1024)).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function renderDownloadPolicyStatus(status: DownloadPolicyStatus): void {
+    const node = byId<HTMLElement>('downloadPolicyStatus');
+    if (status.waiting && status.nextStart) {
+        node.textContent = UI_TEXT.static.downloadPolicyWaiting.replace('{time}', formatUiDateTime(status.nextStart));
+        return;
+    }
+    node.textContent = UI_TEXT.static.downloadPolicyReady;
+}
+
+async function refreshDownloadPolicyStatus(): Promise<void> {
+    renderDownloadPolicyStatus(await window.api.getDownloadPolicyStatus());
+}
+
+async function startDownloadPolicyOverride(): Promise<void> {
+    await window.api.startDownload(true);
+    await refreshDownloadPolicyStatus();
+}
+
 function collectDownloadSettingsPayload(): Partial<AppConfig> {
+    const parsedPolicy = parseDownloadPolicyFormValue(
+        byId<HTMLInputElement>('downloadThrottleMiBps').value,
+        byId<HTMLTextAreaElement>('downloadWindows').value,
+    );
+    updateDownloadPolicyValidation(parsedPolicy.error);
     return {
         sidebar_split_view: byId<HTMLInputElement>('sidebarSplitViewToggle').checked,
         download_mode: byId<HTMLSelectElement>('downloadMode').value as 'parts' | 'full',
@@ -724,7 +792,8 @@ function collectDownloadSettingsPayload(): Partial<AppConfig> {
         auto_cleanup_target: byId<HTMLSelectElement>('autoCleanupTarget').value === 'all' ? 'all' : 'live_only',
         auto_cleanup_action: byId<HTMLSelectElement>('autoCleanupAction').value === 'delete' ? 'delete' : 'archive',
         streamlink_quality: byId<HTMLSelectElement>('streamlinkQuality').value,
-        metadata_cache_minutes: parseInt(byId<HTMLInputElement>('metadataCacheMinutes').value, 10) || 10
+        metadata_cache_minutes: parseInt(byId<HTMLInputElement>('metadataCacheMinutes').value, 10) || 10,
+        download_policy: parsedPolicy.value ?? config.download_policy ?? { throttle: null, windows: [] }
     };
 }
 
@@ -811,6 +880,9 @@ function syncSettingsFormFromConfig(syncSecrets = true): void {
     byId<HTMLInputElement>('autoResumeQueueToggle').checked = (config.auto_resume_queue_on_startup as boolean) === true;
     byId<HTMLInputElement>('notifyEachCompletionToggle').checked = (config.notify_on_each_completion as boolean) === true;
     byId<HTMLInputElement>('streamlinkDisableAdsToggle').checked = (config.streamlink_disable_ads as boolean) !== false;
+    byId<HTMLInputElement>('downloadThrottleMiBps').value = formatDownloadThrottle(config.download_policy?.throttle?.maxBytesPerSecond);
+    byId<HTMLTextAreaElement>('downloadWindows').value = (config.download_policy?.windows ?? []).map((window) => `${window.start}-${window.end}`).join('\n');
+    updateDownloadPolicyValidation(null);
     byId<HTMLInputElement>('downloadChatReplayToggle').checked = (config.download_chat_replay as boolean) === true;
     byId<HTMLInputElement>('captureLiveChatToggle').checked = (config.capture_live_chat as boolean) === true;
     byId<HTMLInputElement>('logStreamEventsToggle').checked = (config.log_stream_events as boolean) !== false;
@@ -833,6 +905,7 @@ function syncSettingsFormFromConfig(syncSecrets = true): void {
     byId<HTMLInputElement>('partsFilenameTemplate').value = (config.filename_template_parts as string) || '{date}_Part{part_padded}.mp4';
     byId<HTMLInputElement>('defaultClipFilenameTemplate').value = (config.filename_template_clip as string) || '{date}_{part}.mp4';
     syncPartMinutesFieldState();
+    void refreshDownloadPolicyStatus();
     validateFilenameTemplates();
     lastPersistedSettingsFingerprint = getSettingsFingerprint({});
 }
@@ -938,6 +1011,7 @@ function initSettingsAutoSave(): void {
 
     settingsAutoSaveBound = true;
     syncSettingsFormFromConfig();
+    window.api.onDownloadPolicyStatus(renderDownloadPolicyStatus);
 
     const immediateSaveIds = [
         'downloadMode',
@@ -969,7 +1043,9 @@ function initSettingsAutoSave(): void {
         'partsFilenameTemplate',
         'defaultClipFilenameTemplate',
         'discordWebhookUrl',
-        'autoCleanupDays'
+        'autoCleanupDays',
+        'downloadThrottleMiBps',
+        'downloadWindows'
     ] as const;
 
     const credentialIds = [

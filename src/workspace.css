@@ -3598,6 +3598,18 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
     margin-top: 9px;
 }
 
+#settingsTab .download-policy-settings textarea {
+    min-height: 72px;
+}
+
+#settingsTab .download-policy-settings #downloadPolicyValidation:empty {
+    display: none;
+}
+
+#settingsTab .download-policy-settings #downloadPolicyStatus {
+    margin: 8px 0 12px;
+}
+
 .sidebar-layout-setting {
     margin-top: 18px;
     padding-top: 16px;

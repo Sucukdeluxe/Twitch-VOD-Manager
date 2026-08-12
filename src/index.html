@@ -902,6 +902,22 @@
                                         <label class="toggle-row"><input type="checkbox" id="notifyEachCompletionToggle"><span id="notifyEachCompletionLabel">Benachrichtigung bei jedem fertigen Download</span></label>
                                     </div>
                                 </section>
+                                <section class="download-settings-section download-policy-settings">
+                                    <h4 id="downloadPolicyTitle">Drosselung und Zeitfenster</h4>
+                                    <div class="form-group">
+                                        <label id="downloadThrottleLabel" for="downloadThrottleMiBps">Maximale Downloadrate (MiB/s)</label>
+                                        <input type="text" id="downloadThrottleMiBps" inputmode="decimal" autocomplete="off" aria-describedby="downloadThrottleHint downloadPolicyValidation">
+                                        <div id="downloadThrottleHint" class="form-note">Leer lassen für keine Drosselung. Dezimalwerte wie 1,5 sind möglich.</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label id="downloadWindowsLabel" for="downloadWindows">Lokale Download-Zeitfenster</label>
+                                        <textarea id="downloadWindows" rows="3" aria-describedby="downloadWindowsHint downloadPolicyValidation" placeholder="22:00-06:00"></textarea>
+                                        <div id="downloadWindowsHint" class="form-note">Ein Zeitfenster pro Zeile oder durch Semikolon getrennt. Über Mitternacht ist erlaubt.</div>
+                                    </div>
+                                    <div id="downloadPolicyValidation" class="form-note" role="alert"></div>
+                                    <div id="downloadPolicyStatus" class="form-note" role="status" aria-live="polite"></div>
+                                    <button type="button" class="btn-secondary" id="downloadPolicyOverrideBtn" onclick="startDownloadPolicyOverride()">Jetzt starten</button>
+                                </section>
                                 <section class="download-settings-section">
                                     <h4 id="recordingMetadataTitle">Aufnahmen und Metadaten</h4>
                                     <div class="download-settings-toggles">

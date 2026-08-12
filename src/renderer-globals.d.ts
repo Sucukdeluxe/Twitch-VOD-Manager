@@ -22,6 +22,7 @@ interface AppConfig {
     streamlink_quality?: string;
     notify_on_each_completion?: boolean;
     streamlink_disable_ads?: boolean;
+    download_policy?: DownloadPolicy;
     auto_record_streamers?: string[];
     auto_record_poll_seconds?: number;
     download_chat_replay?: boolean;
@@ -170,6 +171,17 @@ interface VideoInfo {
     variableFrameRate: boolean;
     rotation: 0 | 90 | 180 | 270;
     audioStreams: Array<{ index: number; codec: string; channels: number; language: string | null }>;
+}
+
+interface DownloadPolicy {
+    throttle: { maxBytesPerSecond: number } | null;
+    windows: Array<{ start: string; end: string }>;
+}
+
+interface DownloadPolicyStatus {
+    waiting: boolean;
+    reason: 'outside-window' | null;
+    nextStart: string | null;
 }
 
 interface SecretStatus {
@@ -409,6 +421,7 @@ interface ArchiveStats {
 
 interface ApiBridge {
     getConfig(): Promise<AppConfig>;
+    getDownloadPolicyStatus(): Promise<DownloadPolicyStatus>;
     saveConfig(config: Partial<AppConfig>, fileCapability?: string): Promise<AppConfig>;
     getSecretStatus(): Promise<SecretStatus>;
     setClientSecret(value: string): Promise<SecretStatus>;
@@ -427,7 +440,7 @@ interface ApiBridge {
     retryFailedDownloads(): Promise<QueueItem[]>;
     retryQueueItem(id: string): Promise<QueueItem[]>;
     createMergeGroup(itemIds: string[]): Promise<QueueItem[]>;
-    startDownload(): Promise<boolean>;
+    startDownload(manualOverride?: boolean): Promise<boolean>;
     pauseDownload(): Promise<boolean>;
     cancelDownload(): Promise<boolean>;
     isDownloading(): Promise<boolean>;
@@ -504,6 +517,7 @@ interface ApiBridge {
     onDownloadStarted(callback: () => void): void;
     onDownloadPaused(callback: () => void): void;
     onDownloadFinished(callback: () => void): void;
+    onDownloadPolicyStatus(callback: (status: DownloadPolicyStatus) => void): void;
     onCutProgress(callback: (percent: number) => void): void;
     onMergeProgress(callback: (percent: number) => void): void;
     onUpdateChecking(callback: () => void): void;

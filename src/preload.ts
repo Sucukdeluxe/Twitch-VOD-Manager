@@ -103,6 +103,7 @@ interface FileCapabilityReference {
 contextBridge.exposeInMainWorld('api', {
     // Config
     getConfig: () => ipcRenderer.invoke('get-config'),
+    getDownloadPolicyStatus: () => ipcRenderer.invoke('get-download-policy-status'),
     saveConfig: (config: any, fileCapability?: string) => ipcRenderer.invoke('save-config', config, fileCapability),
     getSecretStatus: () => ipcRenderer.invoke('get-secret-status'),
     setClientSecret: (value: string) => ipcRenderer.invoke('set-client-secret', value),
@@ -129,7 +130,7 @@ contextBridge.exposeInMainWorld('api', {
     createMergeGroup: (itemIds: string[]) => ipcRenderer.invoke('create-merge-group', itemIds),
 
     // Download
-    startDownload: () => ipcRenderer.invoke('start-download'),
+    startDownload: (manualOverride: boolean = true) => ipcRenderer.invoke('start-download', manualOverride),
     pauseDownload: () => ipcRenderer.invoke('pause-download'),
     cancelDownload: () => ipcRenderer.invoke('cancel-download'),
     isDownloading: () => ipcRenderer.invoke('is-downloading'),
@@ -248,6 +249,9 @@ contextBridge.exposeInMainWorld('api', {
     },
     onDownloadFinished: (callback: () => void) => {
         ipcRenderer.on('download-finished', () => callback());
+    },
+    onDownloadPolicyStatus: (callback: (status: DownloadPolicyStatus) => void) => {
+        ipcRenderer.on('download-policy-status', (_, status) => callback(status));
     },
     onCutProgress: (callback: (percent: number) => void) => {
         ipcRenderer.on('cut-progress', (_, percent) => callback(percent));

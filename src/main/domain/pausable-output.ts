@@ -1,4 +1,4 @@
-import { Readable, Writable } from 'stream';
+import { Readable, Transform, Writable } from 'stream';
 
 export interface PausableOutput {
     pause(): void;
@@ -8,7 +8,7 @@ export interface PausableOutput {
     finished: Promise<void>;
 }
 
-export function createPausableOutput(source: Readable, target: Writable): PausableOutput {
+export function createPausableOutput(source: Readable, target: Writable, transform?: Transform): PausableOutput {
     let paused = false;
     let settled = false;
     let resolveFinished: () => void = () => {};
@@ -21,7 +21,8 @@ export function createPausableOutput(source: Readable, target: Writable): Pausab
     const closed = new Promise<void>((resolve) => {
         resolveClosed = resolve;
     });
-    const attach = () => source.pipe(target, { end: false });
+    const outputSource = transform ? source.pipe(transform) : source;
+    const attach = () => outputSource.pipe(target, { end: false });
     const finish = () => {
         if (!settled) target.end();
     };
@@ -42,15 +43,16 @@ export function createPausableOutput(source: Readable, target: Writable): Pausab
         source.destroy(error);
         rejectFinished(error);
     });
-    source.once('end', finish);
+    outputSource.once('end', finish);
     source.once('error', (error) => target.destroy(error));
+    if (transform) transform.once('error', (error) => target.destroy(error));
     attach();
 
     return {
         pause() {
             if (paused || settled) return;
             paused = true;
-            source.unpipe(target);
+            outputSource.unpipe(target);
             source.pause();
         },
         resume() {
@@ -62,8 +64,9 @@ export function createPausableOutput(source: Readable, target: Writable): Pausab
         async cancel() {
             if (!settled) {
                 paused = false;
-                source.unpipe(target);
+                outputSource.unpipe(target);
                 source.destroy();
+                transform?.destroy();
                 target.destroy();
             }
             await closed;

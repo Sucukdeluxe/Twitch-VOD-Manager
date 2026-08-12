@@ -1,6 +1,7 @@
 import { PassThrough, Writable } from 'stream';
 import { describe, expect, it } from 'vitest';
 import { createPausableOutput } from './pausable-output';
+import { createTokenBucketTransform } from './token-bucket-transform';
 
 function waitForTurn(): Promise<void> {
     return new Promise((resolve) => setImmediate(resolve));
@@ -85,5 +86,24 @@ describe('createPausableOutput', () => {
         expect(source.destroyed).toBe(true);
         expect(target.destroyed).toBe(true);
         expect(Buffer.concat(chunks).toString()).toBe('behalten');
+    });
+
+    it('bricht eine wartende app-seitige Drosselung zusammen mit dem Ausgabestrom ab', async () => {
+        const source = new PassThrough();
+        const target = new Writable({
+            write(_chunk, _encoding, callback) {
+                callback();
+            }
+        });
+        const throttle = createTokenBucketTransform(1);
+        const output = createPausableOutput(source, target, throttle);
+
+        source.write('a');
+        source.write('b');
+        await output.cancel();
+
+        expect(source.destroyed).toBe(true);
+        expect(target.destroyed).toBe(true);
+        expect(throttle.destroyed).toBe(true);
     });
 });

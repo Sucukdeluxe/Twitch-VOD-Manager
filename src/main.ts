@@ -19,6 +19,8 @@ import {
 import { tBackend as tBackendCore, type BackendMessageKey } from './main/domain/i18n-backend';
 import { watchRendererChanges } from './main/dev-reload';
 import { createPausableOutput, type PausableOutput } from './main/domain/pausable-output';
+import { createTokenBucketTransform } from './main/domain/token-bucket-transform';
+import { decideDownloadStart, normalizeDownloadPolicy, type DownloadPolicy } from './main/domain/download-policy';
 import { PartialDownloadRegistry } from './main/domain/partial-download';
 import { QueueProcessRegistry, QueueRunLifecycle, waitForChildProcessExit } from './main/queue/process-registry';
 import { openDatabase, type DbHandle } from './main/infra/db';
@@ -182,6 +184,7 @@ interface Config {
     streamlink_quality: string;
     notify_on_each_completion: boolean;
     streamlink_disable_ads: boolean;
+    download_policy: DownloadPolicy;
     auto_record_streamers: string[];
     auto_record_poll_seconds: number;
     download_chat_replay: boolean;
@@ -201,6 +204,12 @@ interface Config {
     auto_resume_live_recording: boolean;
     auto_merge_resumed_parts: boolean;
     delete_parts_after_merge: boolean;
+}
+
+interface DownloadPolicyStatus {
+    waiting: boolean;
+    reason: 'outside-window' | null;
+    nextStart: string | null;
 }
 
 interface RuntimeMetrics {
@@ -378,6 +387,7 @@ const defaultConfig: Config = {
     streamlink_quality: 'best',
     notify_on_each_completion: false,
     streamlink_disable_ads: true,
+    download_policy: { throttle: null, windows: [] },
     auto_record_streamers: [],
     auto_record_poll_seconds: 90,
     download_chat_replay: false,
@@ -445,6 +455,7 @@ function normalizeConfigTemplates(input: Config): Config {
         // Default-true on first launch (most users hit this), but respect
         // an explicit `false` from the loaded config.
         streamlink_disable_ads: input.streamlink_disable_ads !== false,
+        download_policy: normalizeDownloadPolicy(input.download_policy),
         auto_record_streamers: normalizeAutoRecordList(input.auto_record_streamers),
         auto_record_poll_seconds: normalizeAutoRecordPollSeconds(input.auto_record_poll_seconds),
         download_chat_replay: input.download_chat_replay === true,
@@ -798,6 +809,8 @@ const activeDownloads = new Map<string, ActiveDownloadTracking>();
 const cancelledItemIds = new Set<string>();
 const queueProcessRegistry = new QueueProcessRegistry();
 const queueRunLifecycle = new QueueRunLifecycle(queueProcessRegistry);
+let downloadPolicyWakeTimer: NodeJS.Timeout | null = null;
+let lastDownloadPolicyStatusFingerprint = '';
 
 function registerQueuePartialFile(itemId: string, filePath: string): void {
     queueProcessRegistry.register(itemId, 'post-processing', {
@@ -1568,6 +1581,8 @@ function getQueueBroadcastFingerprint(queueData: QueueItem[] = downloadQueue): s
 }
 
 function emitQueueUpdated(force = false): void {
+    if (!downloadQueue.some((item) => item.status === 'pending')) clearDownloadPolicyWakeTimer();
+    emitDownloadPolicyStatus();
     const nextFingerprint = getQueueBroadcastFingerprint(downloadQueue);
     if (!force && nextFingerprint === lastQueueBroadcastFingerprint) {
         return;
@@ -2348,6 +2363,53 @@ interface PublicStreamerProfileResult {
     broadcasterType: '' | 'partner' | 'affiliate';
     followerCount: number | null;
     stream: PublicStreamInfo | null;
+}
+
+function getDownloadPolicyStatus(): DownloadPolicyStatus {
+    const hasPendingItems = downloadQueue.some((item) => item.status === 'pending');
+    const decision = decideDownloadStart(config.download_policy, new Date());
+    const waiting = hasPendingItems && !isDownloading && !queuePaused && !decision.allowed;
+    return {
+        waiting,
+        reason: waiting ? 'outside-window' : null,
+        nextStart: waiting ? decision.nextStart?.toISOString() ?? null : null,
+    };
+}
+
+function emitDownloadPolicyStatus(force = false): void {
+    const status = getDownloadPolicyStatus();
+    const fingerprint = JSON.stringify(status);
+    if (!force && fingerprint === lastDownloadPolicyStatusFingerprint) return;
+    lastDownloadPolicyStatusFingerprint = fingerprint;
+    mainWindow?.webContents.send('download-policy-status', status);
+}
+
+function clearDownloadPolicyWakeTimer(): void {
+    if (!downloadPolicyWakeTimer) return;
+    clearTimeout(downloadPolicyWakeTimer);
+    downloadPolicyWakeTimer = null;
+}
+
+function scheduleDownloadPolicyWake(nextStart: Date | null): void {
+    clearDownloadPolicyWakeTimer();
+    if (!nextStart || appShutdownStarted) return;
+    const delayMs = Math.max(0, nextStart.getTime() - Date.now());
+    downloadPolicyWakeTimer = setTimeout(() => {
+        downloadPolicyWakeTimer = null;
+        scheduleQueueProcessing();
+    }, delayMs);
+}
+
+function canStartDownloadQueue(manualOverride: boolean): boolean {
+    const decision = decideDownloadStart(config.download_policy, new Date(), manualOverride);
+    if (!decision.allowed) {
+        scheduleDownloadPolicyWake(decision.nextStart);
+        emitDownloadPolicyStatus(true);
+        return false;
+    }
+    clearDownloadPolicyWakeTimer();
+    emitDownloadPolicyStatus(true);
+    return true;
 }
 
 interface PublicDisplayNameQueryResult {
@@ -3977,7 +4039,12 @@ function downloadVODPart(
             resolve({ success: false, error: tBackend('unknownDownloadError') });
             return;
         }
-        const output = createPausableOutput(proc.stdout, outputStream);
+        const maxBytesPerSecond = config.download_policy.throttle?.maxBytesPerSecond;
+        const output = createPausableOutput(
+            proc.stdout,
+            outputStream,
+            maxBytesPerSecond ? createTokenBucketTransform(maxBytesPerSecond) : undefined,
+        );
         const outputFinished = output.finished.then(() => null, (error) => error);
         const processRegistration = queueProcessRegistry.register(itemId, 'streamlink', {
             kill: () => proc.kill(),
@@ -6881,15 +6948,17 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
     }
 }
 
-function scheduleQueueProcessing(): boolean {
+function scheduleQueueProcessing(manualOverride = false): boolean {
     if (appShutdownStarted) return false;
-    return queueRunLifecycle.schedule(processQueue, (error) => {
+    if (!isDownloading && !canStartDownloadQueue(manualOverride)) return false;
+    return queueRunLifecycle.schedule(() => processQueue(manualOverride), (error) => {
         appendDebugLog('queue-run-failed', String(error));
     });
 }
 
-async function processQueue(): Promise<void> {
+async function processQueue(manualOverride = false): Promise<void> {
     if (appShutdownStarted || isDownloading || !downloadQueue.some((item) => item.status === 'pending')) return;
+    if (!canStartDownloadQueue(manualOverride)) return;
 
     appendDebugLog('queue-start', {
         items: downloadQueue.length,
@@ -7019,6 +7088,7 @@ function createWindow(): void {
 
     mainWindow.webContents.on('did-finish-load', () => {
         emitQueueUpdated(true);
+        emitDownloadPolicyStatus(true);
         if (isDownloading) {
             mainWindow?.webContents.send('download-started');
         }
@@ -7342,6 +7412,11 @@ function setupAutoUpdater() {
 // ==========================================
 ipcMain.handle('get-config', () => config);
 
+ipcMain.handle('get-download-policy-status', (event) => {
+    if (!isTrustedRendererEvent(event)) return getDownloadPolicyStatus();
+    return getDownloadPolicyStatus();
+});
+
 ipcMain.handle('get-secret-status', (event) => {
     if (!isTrustedRendererEvent(event) || !appSecretStore) {
         return { encryptionAvailable: false, clientSecretConfigured: false, discordWebhookConfigured: false };
@@ -7425,6 +7500,7 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
     const previousAutoVodList = JSON.stringify(config.auto_vod_download_streamers || []);
     const previousAutoVodMinutes = config.auto_vod_download_poll_minutes;
     const previousStreamerList = JSON.stringify(config.streamers || []);
+    const previousDownloadPolicy = JSON.stringify(config.download_policy);
 
     const acceptedConfig = { ...newConfig };
     delete (acceptedConfig as Record<string, unknown>).client_secret;
@@ -7439,6 +7515,11 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
     }
     const nextConfig = normalizeConfigTemplates({ ...config, ...acceptedConfig });
     config = persistStateChange(config, () => nextConfig, saveConfig);
+    if (JSON.stringify(config.download_policy) !== previousDownloadPolicy && !isDownloading && downloadQueue.some((item) => item.status === 'pending')) {
+        scheduleQueueProcessing();
+    } else {
+        emitDownloadPolicyStatus(true);
+    }
 
     if (config.client_id !== previousClientId) {
         accessToken = null;
@@ -7766,7 +7847,7 @@ ipcMain.handle('create-merge-group', (event, itemIds: string[]) => {
     return downloadQueue;
 });
 
-ipcMain.handle('start-download', async (event) => {
+ipcMain.handle('start-download', async (event, manualOverride: unknown = false) => {
     if (!isTrustedRendererEvent(event)) return false;
     if (isDownloading && queuePaused) {
         const nextQueue = downloadQueue.map((item) => item.status === 'paused' ? { ...item, status: 'downloading' as const } : item);
@@ -7790,7 +7871,7 @@ ipcMain.handle('start-download', async (event) => {
     emitQueueUpdated();
 
     if (!isDownloading) {
-        scheduleQueueProcessing();
+        scheduleQueueProcessing(manualOverride === true);
     }
     return true;
 });
@@ -8084,7 +8165,12 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
             resolve({ success: false, error: tBackend('unknownDownloadError') });
             return;
         }
-        const output = createPausableOutput(proc.stdout, fs.createWriteStream(partialFilename, { flags: 'w' }));
+        const maxBytesPerSecond = config.download_policy.throttle?.maxBytesPerSecond;
+        const output = createPausableOutput(
+            proc.stdout,
+            fs.createWriteStream(partialFilename, { flags: 'w' }),
+            maxBytesPerSecond ? createTokenBucketTransform(maxBytesPerSecond) : undefined,
+        );
         const outputFinished = output.finished.then(() => null, (error) => error);
 
         activeClipProcesses.set(clipId, { process: proc, output, partialFilename });
@@ -8725,6 +8811,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
     if (shutdownCleanupDone) return;
     shutdownCleanupDone = true;
     appShutdownStarted = true;
+    clearDownloadPolicyWakeTimer();
     if (queueSaveTimer) {
         clearTimeout(queueSaveTimer);
         queueSaveTimer = null;
