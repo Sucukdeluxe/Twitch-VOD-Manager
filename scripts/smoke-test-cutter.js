@@ -735,7 +735,7 @@ async function run() {
       await win.locator('.toolbar-context[data-toolbar-for="cutter"] .toolbar-primary').click();
       await win.waitForFunction(() => document.getElementById('cutterDiscardModal').classList.contains('show'));
       await win.locator('#cutterDiscardConfirmBtn').click();
-      await win.waitForFunction((nextPath) => document.getElementById('cutterFilePath').value === nextPath && document.getElementById('cutterVideo').readyState >= HTMLMediaElement.HAVE_METADATA, scrubStressInputFile);
+      await win.waitForFunction((nextName) => document.getElementById('cutterFilePath').value === nextName && document.getElementById('cutterVideo').readyState >= HTMLMediaElement.HAVE_METADATA, path.basename(scrubStressInputFile));
       replacementPlaybackState = await win.evaluate(() => {
         const preview = document.getElementById('cutterPreview');
         const playIcon = document.querySelector('#cutterPlayBtn .cutter-play-icon');
