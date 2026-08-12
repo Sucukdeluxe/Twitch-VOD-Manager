@@ -20,9 +20,9 @@
             <div class="update-changelog-card is-hidden" id="updateChangelogCard">
                 <div class="update-changelog-header">
                     <span class="update-changelog-label" id="updateChangelogLabel">Changelog</span>
-                    <button type="button" class="update-changelog-toggle" id="updateChangelogToggle" onclick="toggleUpdateChangelog()">Changelog anzeigen</button>
+                    <button type="button" class="update-changelog-toggle" id="updateChangelogToggle" onclick="toggleUpdateChangelog()" aria-controls="updateChangelogPanel" aria-expanded="false">Changelog anzeigen</button>
                 </div>
-                <div class="update-changelog-panel" id="updateChangelogPanel" hidden>
+                <div class="update-changelog-panel" id="updateChangelogPanel" aria-hidden="true">
                     <div class="update-changelog-content" id="updateChangelogContent"></div>
                     <p class="update-changelog-empty" id="updateChangelogEmpty" hidden>Kein Changelog verfügbar.</p>
                 </div>
@@ -940,7 +940,7 @@
 
                     <div class="settings-card" data-settings-pane="updates" hidden>
                         <h3 id="updateTitle">Updates</h3>
-                        <p id="versionInfo" class="card-intro">Version: v1.0.6</p>
+                        <p id="versionInfo" class="card-intro">Version: v1.0.7</p>
                         <button type="button" class="btn-secondary" id="checkUpdateBtn" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
 

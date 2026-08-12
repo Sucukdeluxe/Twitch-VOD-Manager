@@ -5,6 +5,7 @@ const { spawnSync } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const appGuid = '08429788-303d-53b6-a4f9-894401712c7e';
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -26,6 +27,17 @@ function findUninstaller(installationDirectory) {
     .map((name) => path.join(installationDirectory, name))[0] || '';
 }
 
+function assertCleanInstallerSmokeSurface() {
+  const userInstallKey = `HKCU\\Software\\${appGuid}`;
+  const machineInstallKey = `HKLM\\SOFTWARE\\${appGuid}`;
+  const query = (key) => spawnSync('reg', ['query', key], { encoding: 'utf8', windowsHide: true });
+  const existingInstallations = [userInstallKey, machineInstallKey]
+    .filter((key) => query(key).status === 0);
+  if (existingInstallations.length > 0) {
+    throw new Error(`Installer smoke requires a clean Windows registration surface: ${existingInstallations.join(', ')}`);
+  }
+}
+
 async function waitForPathRemoval(targetPath, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   while (fs.existsSync(targetPath)) {
@@ -43,6 +55,7 @@ async function main() {
 
   const installerPath = path.join(root, 'release', `Twitch-VOD-Manager-Setup-${packageJson.version}.exe`);
   if (!fs.statSync(installerPath).isFile()) throw new Error(`Installer is missing: ${installerPath}`);
+  assertCleanInstallerSmokeSurface();
 
   const smokeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-installer-'));
   const installationDirectory = path.join(smokeRoot, 'app');
@@ -50,7 +63,7 @@ async function main() {
   let uninstallerPath = '';
 
   try {
-    run(installerPath, ['/S', `/D=${installationDirectory}`], { cwd: smokeRoot });
+    run(installerPath, ['/S', '/currentuser', `/D=${installationDirectory}`], { cwd: smokeRoot });
     if (!fs.statSync(executablePath).isFile()) throw new Error(`Installed executable is missing: ${executablePath}`);
     uninstallerPath = findUninstaller(installationDirectory);
     if (!uninstallerPath) throw new Error('Installed uninstaller is missing');

@@ -2646,6 +2646,10 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
         transition-delay: 0s !important;
     }
 
+    .update-changelog-panel {
+        transition: max-height 260ms cubic-bezier(0.22, 0.76, 0.22, 1), padding 260ms cubic-bezier(0.22, 0.76, 0.22, 1), opacity 180ms ease, transform 260ms cubic-bezier(0.22, 0.76, 0.22, 1) !important;
+    }
+
     .top-nav::before {
         transition: transform 420ms cubic-bezier(0.22, 0.76, 0.22, 1), width 420ms cubic-bezier(0.22, 0.76, 0.22, 1), height 420ms cubic-bezier(0.22, 0.76, 0.22, 1) !important;
     }
@@ -2871,6 +2875,15 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
     border-left: 1px solid var(--workspace-popover-border);
     content: "";
     transform: rotate(45deg);
+}
+
+.workspace-update-popover::after {
+    position: absolute;
+    top: -7px;
+    right: 0;
+    left: 0;
+    height: 7px;
+    content: "";
 }
 
 .workspace-update.show:not(.popover-dismissed):hover .workspace-update-popover,

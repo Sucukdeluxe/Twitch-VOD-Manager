@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.7 - 2026-08-12
+
+- Replaced versioned Windows Start menu shortcuts with one stable application entry, migrated legacy shortcuts during upgrades and refreshed the Windows Shell registration.
+- Kept the application icon consistent across the installer, desktop shortcut, Start menu entry, taskbar and relaunch metadata.
+- Repaired upgrades after incomplete per-user installations so missing program files are restored before shortcuts are refreshed.
+- Fixed the available-update popover so pointer movement from the Update button into its actions remains reliable across the full button width.
+- Added a smooth expandable changelog section to the update dialog.
+
 ## 1.0.6 - 2026-08-12
 
 - Hardened queue process ownership, persisted state transitions and protected file access across downloads, imports, exports and local media tools.

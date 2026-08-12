@@ -3000,9 +3000,20 @@ input[type="checkbox"].vod-select-checkbox {
 }
 
 .update-changelog-panel {
+    max-height: 0;
+    overflow: hidden;
+    padding: 0 14px;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: max-height 260ms cubic-bezier(0.22, 0.76, 0.22, 1), padding 260ms cubic-bezier(0.22, 0.76, 0.22, 1), opacity 180ms ease, transform 260ms cubic-bezier(0.22, 0.76, 0.22, 1);
+}
+
+.update-changelog-panel.is-expanded {
     max-height: 320px;
     overflow: auto;
     padding: 14px;
+    opacity: 1;
+    transform: translateY(0);
 }
 
 .update-changelog-content {

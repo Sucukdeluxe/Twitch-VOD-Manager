@@ -293,7 +293,8 @@ function renderUpdateChangelog(notes?: string): void {
 
     if (!normalized) {
         card.classList.add('is-hidden');
-        panel.hidden = true;
+        panel.classList.remove('is-expanded');
+        panel.setAttribute('aria-hidden', 'true');
         updateChangelogExpanded = false;
         return;
     }
@@ -372,7 +373,8 @@ function renderUpdateChangelog(notes?: string): void {
         content.appendChild(fragment);
     }
 
-    panel.hidden = !updateChangelogExpanded;
+    panel.classList.toggle('is-expanded', updateChangelogExpanded);
+    panel.setAttribute('aria-hidden', String(!updateChangelogExpanded));
 }
 
 function refreshUpdateChangelogToggleText(): void {
@@ -383,6 +385,7 @@ function refreshUpdateChangelogToggleText(): void {
     }
 
     toggle.textContent = updateChangelogExpanded ? UI_TEXT.updates.hideChangelog : UI_TEXT.updates.showChangelog;
+    toggle.setAttribute('aria-expanded', String(updateChangelogExpanded));
 }
 
 function refreshUpdateModalTexts(): void {
@@ -459,7 +462,9 @@ function toggleUpdateChangelog(): void {
     }
 
     updateChangelogExpanded = !updateChangelogExpanded;
-    byId<HTMLElement>('updateChangelogPanel').hidden = !updateChangelogExpanded;
+    const panel = byId<HTMLElement>('updateChangelogPanel');
+    panel.classList.toggle('is-expanded', updateChangelogExpanded);
+    panel.setAttribute('aria-hidden', String(!updateChangelogExpanded));
     refreshUpdateChangelogToggleText();
 }
 

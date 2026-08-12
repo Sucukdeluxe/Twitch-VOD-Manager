@@ -351,6 +351,54 @@ async function run() {
       check(updateModalButtons.overflow.every((overflow) => overflow <= 0), `Update modal button text overflows by ${updateModalButtons.overflow.join(', ')}px`);
       check(updateModalButtons.skipLineHeight >= 14, `Update skip-version line height is too small: ${updateModalButtons.skipLineHeight}`);
 
+      await win.emulateMedia({ reducedMotion: 'reduce' });
+      await win.evaluate(() => {
+        updateReady = false;
+        openUpdateModal({
+          version: '9.9.9',
+          releaseNotes: '- Stable Windows shell registration\n- Smoother update details'
+        });
+      });
+      const captureUpdateChangelog = () => win.evaluate(() => {
+        const panel = document.getElementById('updateChangelogPanel');
+        const toggle = document.getElementById('updateChangelogToggle');
+        const style = panel ? getComputedStyle(panel) : null;
+        return {
+          hidden: panel?.hidden || false,
+          expanded: panel?.classList.contains('is-expanded') || false,
+          ariaHidden: panel?.getAttribute('aria-hidden') || '',
+          ariaExpanded: toggle?.getAttribute('aria-expanded') || '',
+          height: panel?.getBoundingClientRect().height || 0,
+          transitionDuration: style?.transitionDuration || ''
+        };
+      });
+      const changelogCollapsed = await captureUpdateChangelog();
+      await win.locator('#updateChangelogToggle').click();
+      await win.waitForTimeout(100);
+      const changelogOpening = await captureUpdateChangelog();
+      await win.waitForTimeout(260);
+      const changelogExpanded = await captureUpdateChangelog();
+      await win.locator('#updateChangelogToggle').click();
+      await win.waitForTimeout(100);
+      const changelogClosing = await captureUpdateChangelog();
+      await win.waitForTimeout(260);
+      const changelogClosed = await captureUpdateChangelog();
+      await win.evaluate(() => dismissUpdateModal());
+      await win.emulateMedia({ reducedMotion: 'no-preference' });
+      checks.updateChangelogMotion = {
+        collapsed: changelogCollapsed,
+        opening: changelogOpening,
+        expanded: changelogExpanded,
+        closing: changelogClosing,
+        closed: changelogClosed
+      };
+      check(!changelogCollapsed.hidden && !changelogCollapsed.expanded && changelogCollapsed.ariaHidden === 'true' && changelogCollapsed.ariaExpanded === 'false', `Collapsed changelog does not remain animatable: ${JSON.stringify(changelogCollapsed)}`);
+      check(changelogOpening.expanded && changelogOpening.height > changelogCollapsed.height && changelogOpening.height < changelogExpanded.height, `Changelog does not visibly expand through an intermediate frame: ${JSON.stringify({ changelogCollapsed, changelogOpening, changelogExpanded })}`);
+      check(changelogExpanded.expanded && changelogExpanded.ariaHidden === 'false' && changelogExpanded.ariaExpanded === 'true' && changelogExpanded.height > 0, `Expanded changelog state is incorrect: ${JSON.stringify(changelogExpanded)}`);
+      check(changelogClosing.height > changelogClosed.height && changelogClosing.height < changelogExpanded.height, `Changelog does not visibly collapse through an intermediate frame: ${JSON.stringify({ changelogExpanded, changelogClosing, changelogClosed })}`);
+      check(!changelogClosed.expanded && changelogClosed.ariaHidden === 'true' && changelogClosed.ariaExpanded === 'false' && changelogClosed.height === 0, `Collapsed changelog state is incorrect: ${JSON.stringify(changelogClosed)}`);
+      check(!/^0\.01ms(?:, 0\.01ms)*$/.test(changelogOpening.transitionDuration), `Changelog animation is disabled by reduced-motion fallback: ${changelogOpening.transitionDuration}`);
+
       await win.evaluate(() => window.setDownloadPendingUi());
       await win.locator('#workspaceUpdateButton').focus();
       await win.waitForTimeout(80);
@@ -377,6 +425,7 @@ async function run() {
       await win.evaluate(() => window.hideUpdateBanner());
 
       await win.evaluate(() => window.setUpdateBannerAvailableUi({ version: '9.9.9' }));
+      await win.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
       await win.locator('#workspaceUpdateButton').hover();
       await win.waitForTimeout(80);
       const popoverActions = await win.evaluate(() => {
@@ -400,6 +449,57 @@ async function run() {
       check(popoverActions.dismissExists, 'Available update popover has no Close action');
       check(/^close$/i.test(popoverActions.dismissLabel), `Available update Close action is labelled "${popoverActions.dismissLabel}"`);
       check(popoverActions.expanded === 'true', 'Available update trigger does not expose aria-expanded=true while the popover is visible');
+
+      const updatePopoverTransit = [];
+      const updateButtonBox = await win.locator('#workspaceUpdateButton').boundingBox();
+      const updatePopoverBox = await win.locator('#workspaceUpdatePopover').boundingBox();
+      if (updateButtonBox && updatePopoverBox) {
+        const transitXs = [
+          updateButtonBox.x + 10,
+          updateButtonBox.x + updateButtonBox.width / 2,
+          updateButtonBox.x + updateButtonBox.width - 10
+        ];
+        const transitY = (updateButtonBox.y + updateButtonBox.height + updatePopoverBox.y) / 2;
+
+        for (const transitX of transitXs) {
+          await win.mouse.move(transitX, transitY);
+          await win.waitForTimeout(300);
+          const gapState = await win.evaluate(({ transitX, transitY }) => {
+            const button = document.getElementById('workspaceUpdateButton');
+            const popover = document.getElementById('workspaceUpdatePopover');
+            const style = popover ? getComputedStyle(popover) : null;
+            return {
+              expanded: button?.getAttribute('aria-expanded') || '',
+              visibility: style?.visibility || '',
+              pointerEvents: style?.pointerEvents || '',
+              target: document.elementFromPoint(transitX, transitY)?.id || ''
+            };
+          }, { transitX, transitY });
+          await win.locator('#workspaceUpdateButton').hover();
+          await win.waitForTimeout(160);
+          const panelState = await win.evaluate(() => {
+            const button = document.getElementById('workspaceUpdateButton');
+            const popover = document.getElementById('workspaceUpdatePopover');
+            const style = popover ? getComputedStyle(popover) : null;
+            return {
+              expanded: button?.getAttribute('aria-expanded') || '',
+              visibility: style?.visibility || '',
+              pointerEvents: style?.pointerEvents || ''
+            };
+          });
+          updatePopoverTransit.push({ gapState, panelState });
+        }
+      }
+      checks.updatePopoverTransit = updatePopoverTransit;
+      check(updatePopoverTransit.length === 3, 'Available update popover geometry cannot be measured for hover transit');
+      check(updatePopoverTransit.every(({ gapState, panelState }) => (
+        gapState.expanded === 'true'
+        && gapState.visibility === 'visible'
+        && gapState.pointerEvents === 'auto'
+        && panelState.expanded === 'true'
+        && panelState.visibility === 'visible'
+        && panelState.pointerEvents === 'auto'
+      )), `Available update popover closes while moving into it: ${JSON.stringify(updatePopoverTransit)}`);
 
       if (popoverActions.laterExists) {
         await win.locator('#workspaceUpdateLater').click();

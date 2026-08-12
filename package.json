@@ -1,6 +1,6 @@
 {
   "name": "twitch-vod-manager",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Twitch VOD Manager - Download Twitch VODs easily",
   "main": "dist/main.js",
   "author": "Sucukdeluxe",
@@ -90,7 +90,7 @@
       "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Twitch VOD Manager v${version}",
+      "shortcutName": "Twitch VOD Manager",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "include": "build/installer.nsh"
