@@ -58,7 +58,12 @@ jobs:
         run: npm run test:packaged-launch
         timeout-minutes: 10
       - name: Build installer
-        run: npm run dist:ci
+        run: |
+          npm run dist:ci
+          if ($LASTEXITCODE -ne 0) {
+            npm run dist:ci
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
         timeout-minutes: 10
       - name: Installer smoke
         run: npm run test:installer

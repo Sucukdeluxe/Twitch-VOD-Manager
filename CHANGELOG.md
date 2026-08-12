@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.13 - 2026-08-12
+
+- Apply the Windows CI retry to both directory and installer packaging.
+
 ## 1.0.12 - 2026-08-12
 
 - Retry transient Electron download failures once while packaging on Windows CI.

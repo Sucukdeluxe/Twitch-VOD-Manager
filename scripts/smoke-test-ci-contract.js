@@ -52,7 +52,9 @@ for (const relativePath of ['.github/workflows/windows-ci.yml', '.gitea/workflow
   for (const command of requiredCommands) {
     check(source.includes(command), `${relativePath} is missing ${command}`);
   }
-  check(source.includes('if ($LASTEXITCODE -ne 0)') && source.match(/npm run pack/g)?.length >= 2, `${relativePath} does not retry transient package failures`);
+  for (const command of ['npm run pack', 'npm run dist:ci']) {
+    check(source.match(new RegExp(command.replace(/[:]/g, '\\:'), 'g'))?.length >= 2, `${relativePath} does not retry transient ${command} failures`);
+  }
   const runSteps = source.split(/\r?\n/).filter((line) => /^\s+run:\s+/.test(line));
   const timeoutSteps = source.split(/\r?\n/).filter((line) => /^\s+timeout-minutes:\s*10\s*$/.test(line));
   check(timeoutSteps.length >= runSteps.length, `${relativePath} does not cap every command at ten minutes`);
