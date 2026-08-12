@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.6 - 2026-08-12
+
+- Hardened queue process ownership, persisted state transitions and protected file access across downloads, imports, exports and local media tools.
+- Added verified managed tool installation with version pinning, archive checksums, atomic recovery and repair status controls.
+- Improved keyboard navigation, dialog focus handling, accessible virtualized chat and event viewers, context menus and command-palette behavior.
+- Added cutter project recovery, export profiles, rotation and audio-stream choices, hardware encoder verification and safer media replacement handling.
+- Added global download bandwidth limits and configurable download windows that apply consistently across queue and clip jobs.
+- Added Windows quality, packaging and security gates, including public-file allowlist validation and packaged-media checks.
+- Fixed Windows taskbar identity so development and installed windows publish an explicit application icon and relaunch metadata.
+
 ## 1.0.5 - 2026-08-11
 
 - Added a complete local video editor for MP4, M4V, MOV, WebM, MKV, TS and AVI files with frame-accurate trimming, removable ranges, undo and redo, timeline zoom and atomic exports.
