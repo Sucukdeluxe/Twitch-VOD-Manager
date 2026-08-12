@@ -453,6 +453,13 @@
                                 <input type="text" id="cutterFilePath" readonly aria-labelledby="cutterSelectTitle" placeholder="Keine Datei ausgewählt…">
                             </div>
                             <button type="button" class="btn-secondary" id="cutterBrowseBtn" onclick="selectCutterVideo()">Durchsuchen</button>
+                            <button type="button" class="btn-secondary" id="cutterOpenProjectBtn" onclick="openCutterProject()" disabled>Projekt öffnen</button>
+                            <button type="button" class="btn-secondary" id="cutterSaveProjectBtn" onclick="saveCutterProject()" disabled>Projekt speichern</button>
+                        </div>
+                        <div class="cutter-recovery-panel" id="cutterRecoveryPanel" role="status" hidden>
+                            <span id="cutterRecoveryText">Gespeicherte Bearbeitung gefunden</span>
+                            <button type="button" class="btn-secondary" onclick="recoverCutterProject()">Wiederherstellen</button>
+                            <button type="button" class="btn-secondary" onclick="discardCutterProject()">Verwerfen</button>
                         </div>
 
                         <div class="cutter-workspace" id="cutterWorkspace">
@@ -474,6 +481,23 @@
                                     <input type="checkbox" id="cutterPreviewMode" checked onchange="setCutterPreviewMode(this.checked)">
                                     <span class="cutter-toggle-track" aria-hidden="true"></span>
                                 </label>
+                                <div class="cutter-export-options">
+                                    <label for="cutterExportProfile">Exportprofil</label>
+                                    <select id="cutterExportProfile" onchange="setCutterExportProfile(this.value)" disabled>
+                                        <option value="quality">Quality</option>
+                                        <option value="balanced" selected>Balanced</option>
+                                        <option value="fast">Fast</option>
+                                        <option value="archive">Archive</option>
+                                    </select>
+                                    <label for="cutterExportEncoder">Encoder</label>
+                                    <select id="cutterExportEncoder" onchange="setCutterExportEncoder(this.value)" disabled>
+                                        <option value="software">Software</option>
+                                    </select>
+                                    <label for="cutterAudioStream">Audiospur</label>
+                                    <select id="cutterAudioStream" onchange="setCutterAudioStream(this.value)" disabled>
+                                        <option value="0">Keine Audiospur</option>
+                                    </select>
+                                </div>
                                 <div class="cutter-trim-card">
                                     <div class="cutter-card-title" id="cutterGlobalTrimLabel">Gesamtauswahl</div>
                                     <div class="cutter-time-field-row">

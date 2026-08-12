@@ -21,7 +21,7 @@ import { watchRendererChanges } from './main/dev-reload';
 import { createPausableOutput, type PausableOutput } from './main/domain/pausable-output';
 import { PartialDownloadRegistry } from './main/domain/partial-download';
 import { QueueProcessRegistry, QueueRunLifecycle, waitForChildProcessExit } from './main/queue/process-registry';
-import type { DbHandle } from './main/infra/db';
+import { openDatabase, type DbHandle } from './main/infra/db';
 import {
     normalizeLogin,
     normalizeAutoRecordPollSeconds,
@@ -40,7 +40,17 @@ import { CustomClip, MergeGroupItem, MergeGroup, QueueItem, DownloadProgress, Do
 import { buildVodPreviewFrameUrls } from './main/domain/vod-preview';
 import { getWindowsAppIdentity } from './main/domain/app-identity';
 import { addCutAt, createVideoEditorState, getPlayableSegments, setTrimRange, type EditorCut } from './main/domain/video-editor';
-import { calculateCutterExportProgress, createCutterExportPlan } from './main/domain/cutter-export';
+import {
+    calculateCutterExportProgress,
+    createCutterExportPlan,
+    CUTTER_EXPORT_PROFILES,
+    getCutterExportProfile,
+    parseCutterHardwareEncoders,
+    type CutterExportEncoder,
+    type CutterExportProfile,
+    type CutterHardwareEncoder,
+} from './main/domain/cutter-export';
+import { createCutterProjectAutosaveStore, type CutterProject, type CutterProjectSource } from './main/domain/cutter-project';
 import {
     CUTTER_SESSION_CAPABILITY_TTL_MS,
     FileCapabilityStore,
@@ -56,6 +66,7 @@ import { createExportableConfig } from './main/domain/config-export';
 import { commitQueueMutation, persistStateChange } from './main/domain/persistence-commit';
 import { resolveSecretInputUpdate } from './main/domain/secret-input';
 import { createSecretStore, type SecretStore } from './main/domain/secret-store';
+import { migrateJsonToSqlite } from './main/domain/migrator';
 import { createElectronSecureStorage } from './main/infra/secure-storage';
 import { readChatFile } from './main/domain/chat-reader';
 import {
@@ -85,6 +96,7 @@ const GITHUB_RELEASES_DOWNLOAD_BASE_URL = 'https://github.com/Sucukdeluxe/Twitch
 const APPDATA_DIR = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'Twitch_VOD_Manager');
 const DEBUG_LOG_FILE = path.join(APPDATA_DIR, 'debug.log');
 const PARTIAL_DOWNLOADS_FILE = path.join(APPDATA_DIR, 'partial-downloads.json');
+const CUTTER_PROJECT_AUTOSAVE_FILE = path.join(APPDATA_DIR, 'cutter-projects.json');
 const TOOLS_DIR = path.join(APPDATA_DIR, 'tools');
 const TOOLS_STREAMLINK_DIR = path.join(TOOLS_DIR, 'streamlink');
 const TOOLS_FFMPEG_DIR = path.join(TOOLS_DIR, 'ffmpeg');
@@ -141,6 +153,7 @@ if (!fs.existsSync(APPDATA_DIR)) {
     fs.mkdirSync(APPDATA_DIR, { recursive: true });
 }
 const partialDownloadRegistry = new PartialDownloadRegistry(PARTIAL_DOWNLOADS_FILE);
+const cutterProjectAutosaves = createCutterProjectAutosaveStore(CUTTER_PROJECT_AUTOSAVE_FILE);
 
 // ==========================================
 // INTERFACES
@@ -274,6 +287,8 @@ interface VideoInfo {
     audioCodec: string | null;
     previewCompatible: boolean;
     variableFrameRate: boolean;
+    rotation: 0 | 90 | 180 | 270;
+    audioStreams: Array<{ index: number; codec: string; channels: number; language: string | null }>;
 }
 
 interface VideoEditorMedia {
@@ -312,6 +327,9 @@ interface VideoEditExportRequest {
     trimStart: number;
     trimEnd: number;
     cuts: EditorCut[];
+    profile: CutterExportProfile;
+    encoder: CutterExportEncoder;
+    audioStreamIndex: number;
 }
 
 interface RendererVideoEditExportRequest {
@@ -320,6 +338,9 @@ interface RendererVideoEditExportRequest {
     trimStart: number;
     trimEnd: number;
     cuts: EditorCut[];
+    profile?: CutterExportProfile;
+    encoder?: CutterExportEncoder;
+    audioStreamIndex?: number;
 }
 
 interface ReleaseUpdateInfo {
@@ -735,6 +756,7 @@ let currentCutterProcess: ChildProcess | null = null;
 let currentCutterPartialFile: string | null = null;
 let cutterExportActive = false;
 let cutterExportCancelled = false;
+let cutterHardwareEncoderProbe: Promise<CutterHardwareEncoder[]> | null = null;
 let cutterPreparedInput: { path: string; size: number; mtimeMs: number; dev: number; ino: number } | null = null;
 let cutterMediaGeneration = 0;
 let cutterMediaRequestGeneration = 0;
@@ -2629,7 +2651,7 @@ async function getVodStoryboard(vodId: string): Promise<VodStoryboard | null> {
             return null;
         }
 
-        let manifest: StoryboardManifestEntry[] | null = null;
+        let manifest: StoryboardManifestEntry[];
         try {
             const manifestResp = await axios.get<StoryboardManifestEntry[]>(manifestUrl, {
                 timeout: 6000,
@@ -2771,6 +2793,12 @@ function isSupportedVideoEditorInput(filePath: string): boolean {
     return ['.mp4', '.m4v', '.mov', '.webm', '.mkv', '.ts', '.avi'].includes(path.extname(filePath).toLowerCase());
 }
 
+function normalizeCutterRotation(value: unknown): 0 | 90 | 180 | 270 {
+    const numeric = Number(value);
+    const normalized = ((numeric % 360) + 360) % 360;
+    return normalized === 90 || normalized === 180 || normalized === 270 ? normalized : 0;
+}
+
 async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProcess>, timeoutMs = 30000): Promise<VideoInfo | null> {
     const ffmpegReady = await ensureFfmpegInstalled();
     if (!ffmpegReady) {
@@ -2826,7 +2854,15 @@ async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProces
             try {
                 const info = JSON.parse(output);
                 const videoStream = info.streams?.find((s: any) => s.codec_type === 'video');
-                const audioStream = info.streams?.find((s: any) => s.codec_type === 'audio');
+                const audioStreams = (Array.isArray(info.streams) ? info.streams : [])
+                    .filter((stream: any) => stream?.codec_type === 'audio')
+                    .map((stream: any, index: number) => ({
+                        index,
+                        codec: String(stream.codec_name || '').toLowerCase(),
+                        channels: Number.isFinite(stream.channels) ? Number(stream.channels) : 0,
+                        language: typeof stream.tags?.language === 'string' ? stream.tags.language : null,
+                    }));
+                const audioStream = audioStreams[0] ?? null;
                 const duration = parseFloat(info.format?.duration || videoStream?.duration || '0');
                 const averageFps = parseFrameRate(videoStream?.avg_frame_rate);
                 const realFps = parseFrameRate(videoStream?.r_frame_rate);
@@ -2838,8 +2874,11 @@ async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProces
                 }
 
                 const videoCodec = String(videoStream.codec_name || '').toLowerCase();
-                const audioCodec = audioStream ? String(audioStream.codec_name || '').toLowerCase() : null;
+                const audioCodec = audioStream?.codec ?? null;
                 const variableFrameRate = averageFps > 0 && realFps > 0 && Math.abs(averageFps - realFps) / Math.max(averageFps, realFps) > 0.005;
+                const rotationData = Array.isArray(videoStream.side_data_list)
+                    ? videoStream.side_data_list.find((entry: any) => Number.isFinite(Number(entry?.rotation)))?.rotation
+                    : undefined;
                 finish({
                     duration,
                     width: videoStream.width,
@@ -2850,6 +2889,8 @@ async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProces
                     audioCodec,
                     previewCompatible: isVideoEditorPreviewCompatible(filePath, videoCodec, audioCodec),
                     variableFrameRate,
+                    rotation: normalizeCutterRotation(rotationData ?? videoStream.tags?.rotate),
+                    audioStreams,
                 });
             } catch {
                 finish(null);
@@ -2858,6 +2899,40 @@ async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProces
 
         proc.on('error', () => finish(null));
     });
+}
+
+async function getCutterHardwareEncoders(): Promise<CutterHardwareEncoder[]> {
+    if (cutterHardwareEncoderProbe) return await cutterHardwareEncoderProbe;
+    cutterHardwareEncoderProbe = (async (): Promise<CutterHardwareEncoder[]> => {
+        if (!await ensureFfmpegInstalled()) return [];
+        return await new Promise<CutterHardwareEncoder[]>((resolve) => {
+            const proc = spawn(getFFmpegPath(), ['-hide_banner', '-encoders'], { windowsHide: true });
+            currentCutterProbeProcesses.add(proc);
+            proc.stderr?.resume();
+            let output = '';
+            let settled = false;
+            const finish = (encoders: CutterHardwareEncoder[]): void => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                currentCutterProbeProcesses.delete(proc);
+                resolve(encoders);
+            };
+            const timeout = setTimeout(() => {
+                try { proc.kill(); } catch { }
+                finish([]);
+            }, 8000);
+            proc.stdout?.on('data', (chunk) => { output += chunk.toString(); });
+            proc.on('close', (code) => finish(code === 0 ? parseCutterHardwareEncoders(output) : []));
+            proc.on('error', () => finish([]));
+        });
+    })();
+    try {
+        return await cutterHardwareEncoderProbe;
+    } catch {
+        cutterHardwareEncoderProbe = null;
+        return [];
+    }
 }
 
 function cancelCutterMediaPreparation(): void {
@@ -3100,6 +3175,66 @@ function getCutterInputIdentity(filePath: string): { path: string; size: number;
     }
 }
 
+function getCutterProjectSource(filePath: string): CutterProjectSource | null {
+    const identity = getCutterInputIdentity(filePath);
+    return identity ? { path: identity.path, size: identity.size, mtimeMs: identity.mtimeMs } : null;
+}
+
+function isCutterExportProfile(value: unknown): value is CutterExportProfile {
+    return value === 'quality' || value === 'balanced' || value === 'fast' || value === 'archive';
+}
+
+function isCutterExportEncoder(value: unknown): value is CutterExportEncoder {
+    return value === 'software' || value === 'h264_nvenc' || value === 'h264_qsv' || value === 'h264_amf';
+}
+
+function createCutterProject(filePath: string, info: VideoInfo, value: unknown): CutterProject | null {
+    if (!value || typeof value !== 'object') return null;
+    const project = value as Record<string, unknown>;
+    const profile = project.profile;
+    const encoder = project.encoder;
+    const audioStreamIndex = project.audioStreamIndex;
+    const trimStart = project.trimStart;
+    const trimEnd = project.trimEnd;
+    const cuts = project.cuts;
+    const source = getCutterProjectSource(filePath);
+    if (!source
+        || !isCutterExportProfile(profile)
+        || !isCutterExportEncoder(encoder)
+        || typeof audioStreamIndex !== 'number' || !Number.isInteger(audioStreamIndex) || audioStreamIndex < 0
+        || typeof trimStart !== 'number' || !Number.isFinite(trimStart)
+        || typeof trimEnd !== 'number' || !Number.isFinite(trimEnd)
+        || !Array.isArray(cuts) || cuts.length > 64
+        || cuts.some((cut) => !isPlainObject(cut)
+            || typeof cut.id !== 'string'
+            || typeof cut.start !== 'number' || !Number.isFinite(cut.start)
+            || typeof cut.end !== 'number' || !Number.isFinite(cut.end))) {
+        return null;
+    }
+    const hasSelectedAudio = info.audioStreams.some((stream) => stream.index === audioStreamIndex);
+    if ((info.hasAudio && !hasSelectedAudio) || (!info.hasAudio && audioStreamIndex !== 0)) return null;
+    let state = setTrimRange(createVideoEditorState(info.duration, info.fps), trimStart, trimEnd);
+    if (Math.abs(state.trimStart - trimStart) > 1 / info.fps || Math.abs(state.trimEnd - trimEnd) > 1 / info.fps) return null;
+    try {
+        for (const cut of cuts) {
+            state = addCutAt(state, cut.start, cut.end - cut.start).state;
+        }
+    } catch {
+        return null;
+    }
+    return {
+        source,
+        duration: info.duration,
+        fps: info.fps,
+        trimStart: state.trimStart,
+        trimEnd: state.trimEnd,
+        cuts: state.cuts.map((cut) => ({ ...cut })),
+        profile,
+        encoder,
+        audioStreamIndex,
+    };
+}
+
 function cutterInputIdentityMatches(filePath: string): boolean {
     const current = getCutterInputIdentity(filePath);
     return cutterInputIdentitiesMatch(current, cutterPreparedInput);
@@ -3160,13 +3295,18 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
     if (appShutdownStarted) return false;
     if (!request || typeof request.inputFile !== 'string' || typeof request.outputFile !== 'string') return false;
     if (!path.isAbsolute(request.inputFile) || !path.isAbsolute(request.outputFile) || !fs.existsSync(request.inputFile)) return false;
-    if (path.extname(request.outputFile).toLowerCase() !== '.mp4' || pathsReferToSameFile(request.inputFile, request.outputFile)) return false;
+    if (!isCutterExportProfile(request.profile) || !isCutterExportEncoder(request.encoder)) return false;
+    const profile = getCutterExportProfile(request.profile);
+    const outputExtension = `.${profile.container}`;
+    if (path.extname(request.outputFile).toLowerCase() !== outputExtension || pathsReferToSameFile(request.inputFile, request.outputFile)) return false;
     if (!Number.isFinite(request.trimStart) || !Number.isFinite(request.trimEnd) || !Array.isArray(request.cuts) || request.cuts.length > 64) return false;
     if (request.cuts.some((cut) => !isPlainObject(cut) || typeof cut.id !== 'string' || !Number.isFinite(cut.start) || !Number.isFinite(cut.end))) return false;
     const inputIdentity = getCutterInputIdentity(request.inputFile);
     if (!cutterInputIdentitiesMatch(inputIdentity, cutterPreparedInput)) return false;
     const info = await getVideoInfo(request.inputFile, currentCutterExportProcesses);
     if (!info || cutterExportCancelled) return false;
+    if (!Number.isInteger(request.audioStreamIndex) || request.audioStreamIndex < 0) return false;
+    if ((info.hasAudio && !info.audioStreams.some((stream) => stream.index === request.audioStreamIndex)) || (!info.hasAudio && request.audioStreamIndex !== 0)) return false;
     let state = setTrimRange(createVideoEditorState(info.duration, info.fps), request.trimStart, request.trimEnd);
     if (Math.abs(state.trimStart - request.trimStart) > 1 / info.fps || Math.abs(state.trimEnd - request.trimEnd) > 1 / info.fps) return false;
     try {
@@ -3183,12 +3323,23 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
     const inputBytes = fs.statSync(request.inputFile).size;
     const diskCheck = ensureDiskSpace(outputDir, Math.max(128 * 1024 * 1024, Math.ceil(inputBytes * 1.25)), 'Video-Editor');
     if (!diskCheck.success) return false;
-    const partialFile = path.join(outputDir, `.${path.basename(request.outputFile, '.mp4')}.${process.pid}.${Date.now()}.tvm-edit.mp4`);
-    const plan = createCutterExportPlan({ inputFile: request.inputFile, outputFile: partialFile, segments, hasAudio: info.hasAudio });
+    const partialFile = path.join(outputDir, `.${path.basename(request.outputFile, outputExtension)}.${process.pid}.${Date.now()}.tvm-edit${outputExtension}`);
+    const availableHardwareEncoders = request.encoder === 'software' ? [] : await getCutterHardwareEncoders();
+    let plan = createCutterExportPlan({
+        inputFile: request.inputFile,
+        outputFile: partialFile,
+        segments,
+        hasAudio: info.hasAudio,
+        profile: request.profile,
+        encoder: request.encoder,
+        availableHardwareEncoders,
+        audioStreamIndex: request.audioStreamIndex,
+        rotation: info.rotation,
+    });
     if (plan.filterComplex.length > 24000 || cutterExportCancelled) return false;
     currentCutterPartialFile = partialFile;
-    const success = await new Promise<boolean>((resolve) => {
-        const proc = spawn(getFFmpegPath(), plan.ffmpegArgs, { windowsHide: true });
+    const runPlan = async (activePlan: ReturnType<typeof createCutterExportPlan>): Promise<boolean> => await new Promise<boolean>((resolve) => {
+        const proc = spawn(getFFmpegPath(), activePlan.ffmpegArgs, { windowsHide: true });
         currentCutterProcess = proc;
         currentCutterExportProcesses.add(proc);
         proc.stderr?.resume();
@@ -3199,7 +3350,7 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
             stdout = lines.pop() || '';
             for (const line of lines) {
                 const match = line.match(/^out_time_(?:us|ms)=(\d+)$/);
-                if (match) onProgress(calculateCutterExportProgress(Number(match[1]) / 1_000_000, plan));
+                if (match) onProgress(calculateCutterExportProgress(Number(match[1]) / 1_000_000, activePlan));
             }
         });
         proc.on('close', (code) => {
@@ -3213,6 +3364,21 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
             resolve(false);
         });
     });
+    let success = await runPlan(plan);
+    if (!success && !cutterExportCancelled && plan.selectedEncoder !== 'libx264' && plan.selectedEncoder !== 'ffv1') {
+        try { fs.rmSync(partialFile, { force: true }); } catch { }
+        plan = createCutterExportPlan({
+            inputFile: request.inputFile,
+            outputFile: partialFile,
+            segments,
+            hasAudio: info.hasAudio,
+            profile: request.profile,
+            encoder: 'software',
+            audioStreamIndex: request.audioStreamIndex,
+            rotation: info.rotation,
+        });
+        success = await runPlan(plan);
+    }
     if (!success || !fs.existsSync(partialFile) || fs.statSync(partialFile).size <= 256) {
         fs.rmSync(partialFile, { force: true });
         currentCutterPartialFile = null;
@@ -5733,7 +5899,7 @@ async function downloadLiveStream(
     const outputs: string[] = [];
     let partNumber = 1;
     let resumeCount = 0;
-    let lastPartResult: DownloadResult = { success: false, error: tBackend('unknownDownloadError') };
+    let failedPartResult: DownloadResult | null = null;
 
     try {
         // Resume loop. Each iteration runs streamlink once. On clean exit,
@@ -5760,7 +5926,7 @@ async function downloadLiveStream(
             const partStartedAt = Date.now();
             appendDebugLog('recording-part-start', { itemId: item.id, partNumber, filename: path.basename(partFilename) });
 
-            lastPartResult = await downloadVODPart(item.url, partFilename, null, null, wrappedProgress, item.id, partNumber, partNumber);
+            const partResult = await downloadVODPart(item.url, partFilename, null, null, wrappedProgress, item.id, partNumber, partNumber);
 
             // Accumulate this part's final bytes into the running total so
             // the next part's meta line continues from the correct figure.
@@ -5774,6 +5940,7 @@ async function downloadLiveStream(
                 outputs.push(partFilename);
                 accumulatedBytes += partFinalBytes;
             } else {
+                failedPartResult = partResult;
                 // Streamlink produced no bytes — likely permission or auth
                 // failure. Skip resume because retrying will hit the same
                 // wall. The error from lastPartResult will surface upstream.
@@ -5842,7 +6009,7 @@ async function downloadLiveStream(
         stopLiveEventsTracker(item.id, {
             success: outputs.length > 0,
             durationMs: Date.now() - recordingStartedAt,
-            error: outputs.length === 0 ? lastPartResult.error : undefined
+            error: outputs.length === 0 ? failedPartResult?.error ?? tBackend('unknownDownloadError') : undefined
         });
     }
 
@@ -5864,7 +6031,7 @@ async function downloadLiveStream(
         });
     }
 
-    if (outputs.length === 0) return lastPartResult;
+    if (outputs.length === 0) return failedPartResult ?? { success: false, error: tBackend('unknownDownloadError') };
 
     // Auto-merge resumed parts. Only attempt when (a) the user opted in,
     // (b) there's actually something to merge, and (c) the parts are all
@@ -8298,33 +8465,86 @@ ipcMain.handle('cancel-video-editor-assets', (event, jobId: number) => {
     return true;
 });
 
+ipcMain.handle('get-cutter-project-recovery', (event, capability: string) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    const filePath = resolveFileCapability(event, capability, 'cutter-input');
+    const source = filePath ? getCutterProjectSource(filePath) : null;
+    return source ? cutterProjectAutosaves.find(source) : null;
+});
+
+ipcMain.handle('save-cutter-project', async (event, capability: string, value: unknown) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) return false;
+    const filePath = resolveFileCapability(event, capability, 'cutter-input');
+    if (!filePath || !cutterInputIdentityMatches(filePath) || !cutterMediaJob || !cutterInputIdentitiesMatch(getCutterInputIdentity(filePath), cutterMediaJob.identity)) return false;
+    const project = createCutterProject(filePath, cutterMediaJob.info, value);
+    if (!project) return false;
+    try {
+        cutterProjectAutosaves.save(project);
+        return true;
+    } catch (error) {
+        appendDebugLog('cutter-project-save-failed', String(error));
+        return false;
+    }
+});
+
+ipcMain.handle('discard-cutter-project', (event, capability: string) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) return false;
+    const filePath = resolveFileCapability(event, capability, 'cutter-input');
+    const source = filePath ? getCutterProjectSource(filePath) : null;
+    if (!source) return false;
+    try {
+        return cutterProjectAutosaves.discard(source);
+    } catch (error) {
+        appendDebugLog('cutter-project-discard-failed', String(error));
+        return false;
+    }
+});
+
+ipcMain.handle('open-cutter-project', (event, capability: string) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    const filePath = resolveFileCapability(event, capability, 'cutter-input');
+    const source = filePath ? getCutterProjectSource(filePath) : null;
+    return source ? cutterProjectAutosaves.find(source) : null;
+});
+
+ipcMain.handle('get-cutter-export-options', async (event) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) return null;
+    return { profiles: CUTTER_EXPORT_PROFILES, hardwareEncoders: await getCutterHardwareEncoders() };
+});
+
 ipcMain.handle('export-video-edit', async (event, request: RendererVideoEditExportRequest) => {
     if (!isTrustedRendererEvent(event) || appShutdownStarted || !request || typeof request.inputCapability !== 'string') return { success: false, outputName: null };
     const inputFile = resolveFileCapability(event, request.inputCapability, 'cutter-input');
     if (!inputFile || !cutterInputIdentityMatches(inputFile)) return { success: false, outputName: null };
+    const profile = request.profile ?? 'balanced';
+    const encoder = request.encoder ?? 'software';
+    const audioStreamIndex = request.audioStreamIndex ?? 0;
+    if (!isCutterExportProfile(profile) || !isCutterExportEncoder(encoder) || !Number.isInteger(audioStreamIndex) || audioStreamIndex < 0) return { success: false, outputName: null };
+    const profileDefinition = getCutterExportProfile(profile);
+    const extension = profileDefinition.container;
     let outputFile: string | null = null;
     const testRoot = process.env.TWITCH_VOD_MANAGER_E2E_CUTTER_OUTPUT_ROOT;
     if (testRoot && typeof request.outputName === 'string' && path.basename(request.outputName) === request.outputName) {
         const candidate = path.join(testRoot, request.outputName);
         if (isPathInsideDirectory(testRoot, candidate)) {
-            const outputCapability = issueFileCapability(event, 'cutter-output', candidate, 'output-file', ['mp4']);
+            const outputCapability = issueFileCapability(event, 'cutter-output', candidate, 'output-file', [extension]);
             outputFile = resolveFileCapability(event, outputCapability.token, 'cutter-output', true, [inputFile]);
         }
     } else {
-        const defaultName = path.join(path.dirname(inputFile), `${path.basename(inputFile, path.extname(inputFile))}_edited.mp4`);
+        const defaultName = path.join(path.dirname(inputFile), `${path.basename(inputFile, path.extname(inputFile))}_edited.${extension}`);
         const result = await dialog.showSaveDialog(mainWindow!, {
             defaultPath: defaultName,
-            filters: [{ name: 'MP4 Video', extensions: ['mp4'] }],
+            filters: [{ name: `${profileDefinition.label} Video`, extensions: [extension] }],
         });
         if (result.canceled || !result.filePath) return { success: false, outputName: null, cancelled: true };
-        const outputCapability = issueFileCapability(event, 'cutter-output', result.filePath, 'output-file', ['mp4']);
+        const outputCapability = issueFileCapability(event, 'cutter-output', result.filePath, 'output-file', [extension]);
         outputFile = resolveFileCapability(event, outputCapability.token, 'cutter-output', true, [inputFile]);
     }
     if (!outputFile) return { success: false, outputName: null };
-    const outcome = await exportVideoEdit({ inputFile, outputFile, trimStart: request.trimStart, trimEnd: request.trimEnd, cuts: request.cuts }, (percent) => {
+    const outcome = await exportVideoEdit({ inputFile, outputFile, trimStart: request.trimStart, trimEnd: request.trimEnd, cuts: request.cuts, profile, encoder, audioStreamIndex }, (percent) => {
         mainWindow?.webContents.send('cut-progress', percent);
     });
-    const outputCapability = outcome.success ? issueFileCapability(event, 'show-in-folder', outputFile, 'input-file', ['mp4']) : null;
+    const outputCapability = outcome.success ? issueFileCapability(event, 'show-in-folder', outputFile, 'input-file', [extension]) : null;
     return { success: outcome.success, outputCapability: outputCapability?.token, outputName: outcome.success ? path.basename(outputFile) : null, cancelled: outcome.cancelled || undefined };
 });
 
@@ -8440,8 +8660,6 @@ app.whenReady().then(() => {
     startDebugLogFlushTimer();
 
     try {
-        const { openDatabase } = require('./main/infra/db');
-        const { migrateJsonToSqlite } = require('./main/domain/migrator');
         const dbPath = path.join(APPDATA_DIR, 'app.db');
         const database: DbHandle = openDatabase(dbPath);
         appDb = database;

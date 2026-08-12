@@ -61,6 +61,12 @@ let cutterScrubSeekInFlight = false;
 let cutterScrubResumePlayback = false;
 let cutterScrubGeneration = 0;
 let cutterDiscardResolver: ((discard: boolean) => void) | null = null;
+let cutterExportProfile: 'quality' | 'balanced' | 'fast' | 'archive' = 'balanced';
+let cutterExportEncoder: 'software' | 'h264_nvenc' | 'h264_qsv' | 'h264_amf' = 'software';
+let cutterAudioStreamIndex = 0;
+let cutterPendingProject: CutterProject | null = null;
+let cutterAutosaveTimer: number | null = null;
+let cutterExportOptions: CutterExportOptions | null = null;
 const cutterMaximumCuts = 64;
 const cutterFrameTolerance = 1e-8;
 
@@ -139,12 +145,194 @@ function getCutterPlayableDuration(): number {
     return Math.max(0, cutterEditorState.trimEnd - cutterEditorState.trimStart - removed);
 }
 
+function getCutterProjectPayload(): Omit<CutterProject, 'source' | 'duration' | 'fps'> | null {
+    if (!cutterEditorState) return null;
+    return {
+        trimStart: cutterEditorState.trimStart,
+        trimEnd: cutterEditorState.trimEnd,
+        cuts: cutterEditorState.cuts.map((cut) => ({ ...cut })),
+        profile: cutterExportProfile,
+        encoder: cutterExportEncoder,
+        audioStreamIndex: cutterAudioStreamIndex,
+    };
+}
+
+async function persistCutterProject(showResult: boolean): Promise<boolean> {
+    const file = cutterFile;
+    const project = getCutterProjectPayload();
+    if (!file || !project) return false;
+    let saved = false;
+    try {
+        saved = await window.api.saveCutterProject(file.token, project);
+    } catch { }
+    if (showResult) showAppToast(saved ? 'Projekt gespeichert' : 'Projekt konnte nicht gespeichert werden', saved ? 'info' : 'warn');
+    return saved;
+}
+
+function scheduleCutterAutosave(): void {
+    if (cutterAutosaveTimer !== null) window.clearTimeout(cutterAutosaveTimer);
+    const file = cutterFile;
+    cutterAutosaveTimer = window.setTimeout(() => {
+        cutterAutosaveTimer = null;
+        if (!file || cutterFile !== file) return;
+        void persistCutterProject(false);
+    }, 500);
+}
+
+function renderCutterProjectRecovery(project: CutterProject | null): void {
+    cutterPendingProject = project;
+    const panel = byId<HTMLElement>('cutterRecoveryPanel');
+    panel.hidden = !project;
+    if (project) byId('cutterRecoveryText').textContent = 'Gespeicherte Bearbeitung gefunden';
+}
+
+function updateCutterAudioStreams(): void {
+    const select = byId<HTMLSelectElement>('cutterAudioStream');
+    const streams = cutterVideoInfo?.audioStreams ?? [];
+    select.replaceChildren();
+    if (streams.length === 0) {
+        const option = document.createElement('option');
+        option.value = '0';
+        option.textContent = 'Keine Audiospur';
+        select.append(option);
+        select.disabled = true;
+        cutterAudioStreamIndex = 0;
+        return;
+    }
+    streams.forEach((stream) => {
+        const option = document.createElement('option');
+        option.value = String(stream.index);
+        const details = [stream.language, stream.codec, stream.channels > 0 ? `${stream.channels} Kanäle` : ''].filter(Boolean).join(' · ');
+        option.textContent = `Audiospur ${stream.index + 1}${details ? ` (${details})` : ''}`;
+        select.append(option);
+    });
+    if (!streams.some((stream) => stream.index === cutterAudioStreamIndex)) cutterAudioStreamIndex = streams[0].index;
+    select.value = String(cutterAudioStreamIndex);
+    select.disabled = false;
+}
+
+function updateCutterExportControls(options: CutterExportOptions | null): void {
+    const profile = byId<HTMLSelectElement>('cutterExportProfile');
+    const encoder = byId<HTMLSelectElement>('cutterExportEncoder');
+    if (options) {
+        profile.replaceChildren(...options.profiles.map((entry) => {
+            const option = document.createElement('option');
+            option.value = entry.id;
+            option.textContent = entry.label;
+            return option;
+        }));
+    }
+    profile.value = cutterExportProfile;
+    encoder.replaceChildren();
+    const software = document.createElement('option');
+    software.value = 'software';
+    software.textContent = 'Software';
+    encoder.append(software);
+    if (cutterExportProfile !== 'archive') {
+        (options?.hardwareEncoders ?? []).forEach((value) => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value === 'h264_nvenc' ? 'NVIDIA NVENC' : value === 'h264_qsv' ? 'Intel Quick Sync' : 'AMD AMF';
+            encoder.append(option);
+        });
+    }
+    if (!Array.from(encoder.options).some((option) => option.value === cutterExportEncoder)) cutterExportEncoder = 'software';
+    encoder.value = cutterExportEncoder;
+    encoder.disabled = cutterExportProfile === 'archive';
+}
+
+async function loadCutterExportOptions(file: FileCapabilityReference, generation: number): Promise<void> {
+    let options: CutterExportOptions | null = null;
+    try {
+        options = await window.api.getCutterExportOptions();
+    } catch { }
+    if (generation !== cutterLoadGeneration || cutterFile !== file) return;
+    cutterExportOptions = options;
+    updateCutterExportControls(options);
+}
+
+function applyCutterProject(project: CutterProject): boolean {
+    if (!cutterEditorState || !cutterVideoInfo) return false;
+    if (Math.abs(project.duration - cutterEditorState.duration) > 1 / cutterEditorState.fps || Math.abs(project.fps - cutterEditorState.fps) > 0.01) return false;
+    cutterEditorState = {
+        duration: cutterEditorState.duration,
+        fps: cutterEditorState.fps,
+        trimStart: project.trimStart,
+        trimEnd: project.trimEnd,
+        cuts: project.cuts.map((cut) => ({ ...cut })),
+    };
+    cutterExportProfile = project.profile;
+    cutterExportEncoder = project.encoder;
+    cutterAudioStreamIndex = project.audioStreamIndex;
+    updateCutterAudioStreams();
+    updateCutterExportControls(cutterExportOptions);
+    cutterHistoryPast = [];
+    cutterHistoryFuture = [];
+    cutterActiveCutId = null;
+    renderCutterEditor();
+    seekCutterVideo(cutterEditorState.trimStart);
+    return true;
+}
+
+async function recoverCutterProject(): Promise<void> {
+    if (!cutterPendingProject || !applyCutterProject(cutterPendingProject)) {
+        showAppToast('Projekt konnte nicht wiederhergestellt werden', 'warn');
+        return;
+    }
+    renderCutterProjectRecovery(null);
+    showAppToast('Projekt wiederhergestellt', 'info');
+}
+
+async function discardCutterProject(): Promise<void> {
+    if (!cutterFile) return;
+    try { await window.api.discardCutterProject(cutterFile.token); } catch { }
+    renderCutterProjectRecovery(null);
+}
+
+async function saveCutterProject(): Promise<void> {
+    await persistCutterProject(true);
+}
+
+async function openCutterProject(): Promise<void> {
+    if (!cutterFile || !await persistCutterProject(false)) return;
+    let project: CutterProject | null = null;
+    try { project = await window.api.openCutterProject(cutterFile.token); } catch { }
+    if (!project || !applyCutterProject(project)) {
+        showAppToast('Kein passendes Projekt gefunden', 'warn');
+        return;
+    }
+    renderCutterProjectRecovery(null);
+    showAppToast('Projekt geöffnet', 'info');
+}
+
+function setCutterExportProfile(value: string): void {
+    if (value !== 'quality' && value !== 'balanced' && value !== 'fast' && value !== 'archive') return;
+    cutterExportProfile = value;
+    if (value === 'archive') cutterExportEncoder = 'software';
+    updateCutterExportControls(cutterExportOptions);
+    scheduleCutterAutosave();
+}
+
+function setCutterExportEncoder(value: string): void {
+    if (value !== 'software' && value !== 'h264_nvenc' && value !== 'h264_qsv' && value !== 'h264_amf') return;
+    cutterExportEncoder = value;
+    scheduleCutterAutosave();
+}
+
+function setCutterAudioStream(value: string): void {
+    const index = Number(value);
+    if (!Number.isInteger(index) || index < 0 || !(cutterVideoInfo?.audioStreams ?? []).some((stream) => stream.index === index)) return;
+    cutterAudioStreamIndex = index;
+    scheduleCutterAutosave();
+}
+
 function commitCutterChange(before: CutterEditorState): void {
     if (!cutterEditorState || cutterStatesEqual(before, cutterEditorState)) return;
     cutterHistoryPast.push(cloneCutterState(before));
     if (cutterHistoryPast.length > 100) cutterHistoryPast.shift();
     cutterHistoryFuture = [];
     updateCutterHistoryButtons();
+    scheduleCutterAutosave();
 }
 
 function updateCutterHistoryButtons(): void {
@@ -718,6 +906,11 @@ function setCutterControlsEnabled(enabled: boolean): void {
     byId<HTMLButtonElement>('cutterZoomInBtn').disabled = !enabled;
     byId<HTMLButtonElement>('cutterZoomOutBtn').disabled = !enabled;
     byId<HTMLButtonElement>('cutterNewCutBtn').disabled = !enabled;
+    byId<HTMLButtonElement>('cutterSaveProjectBtn').disabled = !enabled;
+    byId<HTMLButtonElement>('cutterOpenProjectBtn').disabled = !enabled;
+    byId<HTMLSelectElement>('cutterExportProfile').disabled = !enabled;
+    byId<HTMLSelectElement>('cutterExportEncoder').disabled = !enabled || cutterExportProfile === 'archive';
+    byId<HTMLSelectElement>('cutterAudioStream').disabled = !enabled || (cutterVideoInfo?.audioStreams.length ?? 0) === 0;
     const volumeControl = document.querySelector<HTMLElement>('.cutter-volume-control');
     volumeControl?.classList.toggle('disabled', !enabled);
     volumeControl?.setAttribute('aria-disabled', String(!enabled));
@@ -872,6 +1065,11 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
     cutterHistoryPast = [];
     cutterHistoryFuture = [];
     cutterActiveCutId = null;
+    cutterExportProfile = 'balanced';
+    cutterExportEncoder = 'software';
+    cutterAudioStreamIndex = media.info.audioStreams[0]?.index ?? 0;
+    renderCutterProjectRecovery(null);
+    updateCutterAudioStreams();
     cutterZoom = getInitialCutterZoom(media.info.duration);
     byId<HTMLInputElement>('cutterZoom').value = String(cutterZoom);
     byId<HTMLInputElement>('cutterFilePath').value = file.name;
@@ -899,6 +1097,13 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
     updateCutterZoom(cutterZoom);
     renderCutterEditor();
     updateCutterPlayhead(0);
+    void (async () => {
+        await loadCutterExportOptions(file, generation);
+        if (generation !== cutterLoadGeneration || cutterFile !== file) return;
+        let project: CutterProject | null = null;
+        try { project = await window.api.getCutterProjectRecovery(file.token); } catch { }
+        if (generation === cutterLoadGeneration && cutterFile === file) renderCutterProjectRecovery(project);
+    })();
     void requestCutterWaveform(file, media.jobId, generation);
     void requestCutterAssets();
 }
@@ -940,6 +1145,10 @@ function confirmCutterReplacement(file: FileCapabilityReference): Promise<boolea
 async function requestCutterVideoReplacement(file: FileCapabilityReference): Promise<void> {
     if (!file || isCutting) return;
     if (!await confirmCutterReplacement(file)) return;
+    if (cutterEditorState && !await persistCutterProject(false)) {
+        showAppToast('Projekt konnte nicht gespeichert werden', 'warn');
+        return;
+    }
     await loadCutterFromPath(file);
 }
 
@@ -1023,6 +1232,7 @@ function undoCutterEdit(): void {
     cutterActiveCutId = null;
     seekCutterVideo(cutterEditorState.trimStart);
     renderCutterEditor();
+    scheduleCutterAutosave();
 }
 
 function redoCutterEdit(): void {
@@ -1034,6 +1244,7 @@ function redoCutterEdit(): void {
     cutterActiveCutId = null;
     seekCutterVideo(cutterEditorState.trimStart);
     renderCutterEditor();
+    scheduleCutterAutosave();
 }
 
 function setCutterPreviewMode(enabled: boolean): void {
@@ -1397,6 +1608,9 @@ async function startCutting(): Promise<void> {
             trimStart: cutterEditorState.trimStart,
             trimEnd: cutterEditorState.trimEnd,
             cuts: cutterEditorState.cuts.map((cut) => ({ ...cut })),
+            profile: cutterExportProfile,
+            encoder: cutterExportEncoder,
+            audioStreamIndex: cutterAudioStreamIndex,
         });
         if (result.success) {
             showAppToast(UI_TEXT.cutter.exportSuccess, 'info');

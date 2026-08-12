@@ -168,6 +168,8 @@ interface VideoInfo {
     audioCodec: string | null;
     previewCompatible: boolean;
     variableFrameRate: boolean;
+    rotation: 0 | 90 | 180 | 270;
+    audioStreams: Array<{ index: number; codec: string; channels: number; language: string | null }>;
 }
 
 interface SecretStatus {
@@ -212,6 +214,26 @@ interface VideoEditExportRequest {
     trimStart: number;
     trimEnd: number;
     cuts: Array<{ id: string; start: number; end: number }>;
+    profile?: 'quality' | 'balanced' | 'fast' | 'archive';
+    encoder?: 'software' | 'h264_nvenc' | 'h264_qsv' | 'h264_amf';
+    audioStreamIndex?: number;
+}
+
+interface CutterProject {
+    source: { path: string; size: number; mtimeMs: number };
+    duration: number;
+    fps: number;
+    trimStart: number;
+    trimEnd: number;
+    cuts: Array<{ id: string; start: number; end: number }>;
+    profile: 'quality' | 'balanced' | 'fast' | 'archive';
+    encoder: 'software' | 'h264_nvenc' | 'h264_qsv' | 'h264_amf';
+    audioStreamIndex: number;
+}
+
+interface CutterExportOptions {
+    profiles: Array<{ id: 'quality' | 'balanced' | 'fast' | 'archive'; label: string; container: 'mp4' | 'mkv' }>;
+    hardwareEncoders: Array<'h264_nvenc' | 'h264_qsv' | 'h264_amf'>;
 }
 
 interface FileCapabilityReference {
@@ -451,6 +473,11 @@ interface ApiBridge {
     prepareVideoEditorWaveform(capability: string, jobId: number): Promise<VideoEditorWaveform | null>;
     prepareVideoEditorAssets(capability: string, jobId: number, profile: VideoEditorAssetProfile): Promise<VideoEditorAssets | null>;
     cancelVideoEditorAssets(jobId: number): Promise<boolean>;
+    getCutterProjectRecovery(capability: string): Promise<CutterProject | null>;
+    saveCutterProject(capability: string, project: Omit<CutterProject, 'source' | 'duration' | 'fps'>): Promise<boolean>;
+    discardCutterProject(capability: string): Promise<boolean>;
+    openCutterProject(capability: string): Promise<CutterProject | null>;
+    getCutterExportOptions(): Promise<CutterExportOptions | null>;
     exportVideoEdit(request: VideoEditExportRequest): Promise<{ success: boolean; outputCapability?: string; outputName: string | null; cancelled?: boolean }>;
     cancelVideoEdit(): Promise<boolean>;
     cutVideo(inputCapability: string, startTime: number, endTime: number): Promise<{ success: boolean; outputName: string | null }>;

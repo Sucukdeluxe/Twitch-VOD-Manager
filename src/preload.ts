@@ -193,6 +193,11 @@ contextBridge.exposeInMainWorld('api', {
     prepareVideoEditorWaveform: (capability: string, jobId: number): Promise<VideoEditorWaveform | null> => ipcRenderer.invoke('prepare-video-editor-waveform', capability, jobId),
     prepareVideoEditorAssets: (capability: string, jobId: number, profile: VideoEditorAssetProfile): Promise<VideoEditorAssets | null> => ipcRenderer.invoke('prepare-video-editor-assets', capability, jobId, profile),
     cancelVideoEditorAssets: (jobId: number): Promise<boolean> => ipcRenderer.invoke('cancel-video-editor-assets', jobId),
+    getCutterProjectRecovery: (capability: string): Promise<CutterProject | null> => ipcRenderer.invoke('get-cutter-project-recovery', capability),
+    saveCutterProject: (capability: string, project: Omit<CutterProject, 'source' | 'duration' | 'fps'>): Promise<boolean> => ipcRenderer.invoke('save-cutter-project', capability, project),
+    discardCutterProject: (capability: string): Promise<boolean> => ipcRenderer.invoke('discard-cutter-project', capability),
+    openCutterProject: (capability: string): Promise<CutterProject | null> => ipcRenderer.invoke('open-cutter-project', capability),
+    getCutterExportOptions: (): Promise<CutterExportOptions | null> => ipcRenderer.invoke('get-cutter-export-options'),
     exportVideoEdit: (request: VideoEditExportRequest): Promise<{ success: boolean; outputCapability?: string; outputName: string | null; cancelled?: boolean }> => ipcRenderer.invoke('export-video-edit', request),
     cancelVideoEdit: (): Promise<boolean> => ipcRenderer.invoke('cancel-video-edit'),
     cutVideo: (inputCapability: string, startTime: number, endTime: number): Promise<{ success: boolean; outputName: string | null }> =>

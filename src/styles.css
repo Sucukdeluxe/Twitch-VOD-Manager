@@ -3174,6 +3174,23 @@ input[type="checkbox"].vod-select-checkbox {
     text-overflow: ellipsis;
 }
 
+.cutter-recovery-panel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px 10px;
+    color: var(--workspace-text, var(--text));
+    background: var(--workspace-control, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--workspace-border, rgba(255, 255, 255, 0.1));
+    border-radius: 8px;
+    font-size: 12px;
+}
+
+.cutter-recovery-panel span {
+    flex: 1;
+}
+
 .cutter-workspace {
     display: grid;
     grid-template-columns: 280px minmax(0, 1fr);
@@ -3352,6 +3369,25 @@ input[type="checkbox"].vod-select-checkbox {
 
 .cutter-preview-toggle input:checked + .cutter-toggle-track::after {
     transform: translateX(16px);
+}
+
+.cutter-export-options {
+    padding: 11px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    background: var(--workspace-control, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--workspace-border, rgba(255, 255, 255, 0.08));
+    border-radius: 7px;
+}
+
+.cutter-export-options label {
+    color: var(--workspace-text-muted, var(--text-secondary));
+    font-size: 11px;
+}
+
+.cutter-export-options select {
+    min-width: 0;
 }
 
 .cutter-trim-card,

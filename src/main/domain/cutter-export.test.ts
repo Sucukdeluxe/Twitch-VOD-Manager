@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { calculateCutterExportProgress, createCutterExportPlan } from './cutter-export';
+import { calculateCutterExportProgress, createCutterExportPlan, parseCutterHardwareEncoders } from './cutter-export';
 
 describe('cutter export segments', () => {
     test('sorts playable segments and preserves the caller input', () => {
@@ -112,5 +112,66 @@ describe('cutter export segments', () => {
         expect(calculateCutterExportProgress(15, plan)).toBe(50);
         expect(calculateCutterExportProgress(45, plan)).toBe(100);
         expect(calculateCutterExportProgress(-5, plan)).toBe(0);
+    });
+
+    test('builds a rotated quality MP4 profile for an explicitly selected audio stream', () => {
+        const plan = createCutterExportPlan({
+            inputFile: 'input.mov',
+            outputFile: 'output.mp4',
+            segments: [{ start: 0, end: 20 }],
+            hasAudio: true,
+            profile: 'quality',
+            encoder: 'software',
+            audioStreamIndex: 1,
+            rotation: 90,
+        });
+
+        expect(plan.filterComplex).toContain('[0:v]trim=start=0:end=20,setpts=PTS-STARTPTS,transpose=1[v0]');
+        expect(plan.filterComplex).toContain('[0:a:1]atrim=start=0:end=20,asetpts=PTS-STARTPTS[a0]');
+        expect(plan.ffmpegArgs).toContain('-noautorotate');
+        expect(plan.ffmpegArgs).toEqual(expect.arrayContaining(['-c:v', 'libx264', '-preset', 'slow', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k']));
+    });
+
+    test('falls back to a compatible software encoder when the requested hardware encoder is absent', () => {
+        const plan = createCutterExportPlan({
+            inputFile: 'input.mp4',
+            outputFile: 'output.mp4',
+            segments: [{ start: 0, end: 20 }],
+            hasAudio: true,
+            profile: 'fast',
+            encoder: 'h264_nvenc',
+            availableHardwareEncoders: [],
+        });
+
+        expect(plan.selectedEncoder).toBe('libx264');
+        expect(plan.hardwareFallback).toBe(true);
+        expect(plan.ffmpegArgs).toEqual(expect.arrayContaining(['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23']));
+    });
+
+    test('requires the lossless archive profile to use its compatible MKV container', () => {
+        expect(() => createCutterExportPlan({
+            inputFile: 'input.mp4',
+            outputFile: 'archive.mp4',
+            segments: [{ start: 0, end: 20 }],
+            hasAudio: true,
+            profile: 'archive',
+            encoder: 'software',
+        })).toThrow('MKV');
+
+        const plan = createCutterExportPlan({
+            inputFile: 'input.mp4',
+            outputFile: 'archive.mkv',
+            segments: [{ start: 0, end: 20 }],
+            hasAudio: true,
+            profile: 'archive',
+            encoder: 'software',
+        });
+
+        expect(plan.ffmpegArgs).toEqual(expect.arrayContaining(['-c:v', 'ffv1', '-c:a', 'flac', '-pix_fmt', 'yuv420p']));
+        expect(plan.ffmpegArgs).not.toContain('+faststart');
+    });
+
+    test('recognizes only offered H.264 hardware encoders from an ffmpeg probe', () => {
+        expect(parseCutterHardwareEncoders(' V..... h264_nvenc NVIDIA NVENC H.264 encoder\n V..... h264_qsv H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (Intel Quick Sync Video acceleration)\n V..... hevc_amf AMD AMF HEVC encoder')).toEqual(['h264_nvenc', 'h264_qsv']);
     });
 });
