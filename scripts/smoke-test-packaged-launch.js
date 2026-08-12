@@ -75,7 +75,7 @@ async function verifyPackagedLaunch(executablePath = packagedExecutablePath(), r
     return { executablePath, readyMs };
   } finally {
     terminateProcessTree(child);
-    fs.rmSync(environmentRoot, { recursive: true, force: true });
+    await fs.promises.rm(environmentRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
   }
 }
 
