@@ -107,7 +107,7 @@ export async function fetchTopClips(opts: FetchTopClipsOptions): Promise<TopClip
     try {
         parsed = JSON.parse(text) as HelixClipsResponse;
     } catch (e) {
-        throw new Error(`top-clips-crawler: parse failed: ${e instanceof Error ? e.message : String(e)}`);
+        throw new Error(`top-clips-crawler: parse failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
     }
 
     const rows = parsed.data ?? [];

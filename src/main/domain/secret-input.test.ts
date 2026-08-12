@@ -22,7 +22,7 @@ describe('resolveSecretInputUpdate', () => {
         const revision = createSecretInputRevision();
         const requestRevision = revision.current();
         let resolveSave: (() => void) | undefined;
-        let visibleValue = 'first-secret';
+        let visibleValue: string;
         const save = new Promise<void>((resolve) => {
             resolveSave = resolve;
         }).then(() => {

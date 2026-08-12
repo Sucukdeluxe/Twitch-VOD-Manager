@@ -1,7 +1,6 @@
 // Pure-Format-Helpers, extrahiert aus main.ts. Keine Globals, keine I/O.
 
-const FILENAME_INVALID_RE = /[<>:"|?*\x00-\x1f]/g;
-const FILENAME_PATH_SEP_RE = /[\\/]/g;
+const FILENAME_INVALID_CHARACTERS = new Set('<>:"|?*\\/');
 
 /**
  * Entfernt Windows-Filesystem-verbotene Zeichen und Pfad-Separatoren aus einem
@@ -9,9 +8,9 @@ const FILENAME_PATH_SEP_RE = /[\\/]/g;
  * nichts uebrig bleibt.
  */
 export function sanitizeFilenamePart(input: string, fallback = 'unnamed'): string {
-    const cleaned = (input || '')
-        .replace(FILENAME_INVALID_RE, '_')
-        .replace(FILENAME_PATH_SEP_RE, '_')
+    const cleaned = Array.from(input || '', (character) => {
+        return character.charCodeAt(0) < 32 || FILENAME_INVALID_CHARACTERS.has(character) ? '_' : character;
+    }).join('')
         .trim();
     return cleaned || fallback;
 }

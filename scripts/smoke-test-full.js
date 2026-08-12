@@ -107,7 +107,7 @@ async function run() {
 
     await win.waitForTimeout(2200);
 
-    const summary = await win.evaluate(async ({ mediaA, mediaB, tmpDir }) => {
+    const summary = await win.evaluate(async () => {
       const failures = [];
       const checks = {};
 
@@ -357,10 +357,6 @@ async function run() {
       }
 
       return { checks, failures };
-    }, {
-      mediaA: mediaA.replace(/\\/g, '/'),
-      mediaB: mediaB.replace(/\\/g, '/'),
-      tmpDir: environment.mediaDir.replace(/\\/g, '/')
     });
 
     await app.close();

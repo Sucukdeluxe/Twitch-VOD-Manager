@@ -1,0 +1,60 @@
+name: Windows CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    env:
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: npm
+      - name: Clean install
+        run: npm ci
+        timeout-minutes: 10
+      - name: Lint
+        run: npm run lint
+        timeout-minutes: 10
+      - name: Lint configuration contract
+        run: npm run test:lint-config
+        timeout-minutes: 10
+      - name: Security contracts
+        run: npm run security:check
+        timeout-minutes: 10
+      - name: Security regression tests
+        run: npm run test:security
+        timeout-minutes: 10
+      - name: CI contract
+        run: npm run test:ci-contract
+        timeout-minutes: 10
+      - name: Unit tests
+        run: npm run test:unit
+        timeout-minutes: 10
+      - name: Focused Electron smoke
+        run: npm run test:e2e:focused
+        timeout-minutes: 10
+      - name: Build
+        run: npm run build
+        timeout-minutes: 10
+      - name: Package directory
+        run: npm run pack
+        timeout-minutes: 10
+      - name: Packaged launch smoke
+        run: npm run test:packaged-launch
+        timeout-minutes: 10
+      - name: Build installer
+        run: npm run dist:ci
+        timeout-minutes: 10
+      - name: Installer smoke
+        run: npm run test:installer
+        timeout-minutes: 10

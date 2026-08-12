@@ -175,7 +175,7 @@ async function run() {
   const staleCutterDirectories = ['media', 'waveform', 'preview'].map((kind) => path.join(os.tmpdir(), `tvm-editor-${kind}-2147483647-${Date.now()}-${Math.random().toString(36).slice(2)}`));
   staleCutterDirectories.forEach((directory) => fs.mkdirSync(directory));
   let realMaximumZoomState = null;
-  let replacementPromptState = null;
+  let replacementPromptState;
   let replacementPlaybackState = null;
   let app;
   const check = (condition, message) => { if (!condition) failures.push(message); };
@@ -431,7 +431,6 @@ async function run() {
       const tiles = [...strip.querySelectorAll('img:not(.cutter-thumbnail-sprite), .cutter-thumbnail-tile')];
       const waveform = document.getElementById('cutterWaveform');
       await Promise.all([...images, waveform].map((image) => image.decode()));
-      const scroll = document.getElementById('cutterTimelineScroll');
       const timeline = document.getElementById('timeline');
       const targetWidth = Math.min(32000, Math.ceil(timeline.getBoundingClientRect().width * window.devicePixelRatio));
       const firstFrameRect = images[0].getBoundingClientRect();

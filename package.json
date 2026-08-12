@@ -10,6 +10,8 @@
   },
   "scripts": {
     "build": "tsc",
+    "lint": "eslint .",
+    "security:check": "node scripts/security-check.js && node scripts/smoke-test-public-release-config.js",
     "start": "npm run build && electron .",
     "dev": "node scripts/dev.mjs",
     "test:unit": "vitest run --passWithNoTests",
@@ -24,11 +26,18 @@
     "test:e2e:isolation": "node scripts/smoke-test-e2e-isolation-contract.js",
     "test:capability-contract": "node scripts/smoke-test-file-capability-contract.js",
     "test:e2e:settings-autosave": "node scripts/smoke-test-settings-autosave.js",
+    "test:e2e:focused": "npm run test:e2e:isolation && npm run test:e2e:workspace-ui",
+    "test:security": "node --test scripts/security-check.test.js",
+    "test:lint-config": "node --test scripts/lint-config.test.mjs",
+    "test:ci-contract": "node scripts/smoke-test-ci-contract.js",
+    "test:packaged-launch": "node scripts/smoke-test-packaged-launch.js",
+    "test:installer": "node scripts/smoke-test-installer.js",
     "test:e2e:release": "npm run build && npm run test:unit && npm run test:capability-contract && npm run test:e2e:update-logic && npm run test:merge-split && npm run test:e2e:public-release && npm run test:e2e:workspace-ui && node scripts/smoke-test-cutter.js && npm run test:e2e:isolation && npm run test:e2e && npm run test:e2e:guide && npm run test:e2e:full && npm run test:e2e:settings-autosave",
     "test:e2e:stress": "npm run test:e2e:release && npm run test:e2e:release && npm run test:e2e:release",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run test:e2e:release && electron-builder --win",
+    "dist:ci": "electron-builder --win nsis",
     "test:merge-split": "node scripts/smoke-test-merge-split-logic.js"
   },
   "dependencies": {
@@ -44,6 +53,7 @@
     "electron-builder": "^26.15.7",
     "eslint": "^10.4.0",
     "eslint-plugin-security": "^4.0.0",
+    "globals": "^16.4.0",
     "playwright": "^1.60.0",
     "typescript": "^5.3.0",
     "typescript-eslint": "^8.59.4",
@@ -72,6 +82,7 @@
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico",
+      "signExecutable": false,
       "artifactName": "Twitch-VOD-Manager-Setup-${version}.${ext}"
     },
     "nsis": {

@@ -197,8 +197,7 @@ export class ManagedToolInstaller {
         const existing = this.inFlight.get(manifest.id);
         if (existing) return existing;
 
-        let operation!: Promise<ManagedToolInstallResult>;
-        operation = Promise.resolve()
+        const operation = Promise.resolve()
             .then(() => this.installOnce(manifest))
             .catch(async (error: unknown) => await this.failure(manifest, 'download-failed', this.errorText(error), []))
             .finally(() => {

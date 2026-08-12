@@ -62,7 +62,7 @@ export function parseFfprobeJson(rawJson: string): ProbeResult {
     try {
         parsed = JSON.parse(rawJson) as FfprobeJson;
     } catch (e) {
-        throw new Error(`integrity-check: ffprobe JSON parse failed: ${e instanceof Error ? e.message : String(e)}`);
+        throw new Error(`integrity-check: ffprobe JSON parse failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
     }
 
     const streams: ProbeStream[] = (parsed.streams ?? []).map((s, idx) => ({

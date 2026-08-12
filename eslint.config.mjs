@@ -1,25 +1,81 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import security from 'eslint-plugin-security';
+import globals from 'globals';
 
 export default [
+    {
+        ignores: ['dist/**', 'release/**', 'node_modules/**', 'tmp_*/**', 'docs/**']
+    },
     js.configs.recommended,
     ...tseslint.configs.recommended,
     security.configs.recommended,
     {
         files: ['src/**/*.ts'],
         rules: {
-            // Tune down noisy rules for existing codebase
             '@typescript-eslint/no-explicit-any': 'off',
             '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
             'no-console': 'off',
-            'security/detect-object-injection': 'off', // Too many false positives with Record types
-            'security/detect-non-literal-fs-filename': 'off', // All paths come from controlled sources
+            'security/detect-object-injection': 'off',
+            'security/detect-non-literal-fs-filename': 'off',
             'no-async-promise-executor': 'warn',
-            'no-empty': ['warn', { allowEmptyCatch: true }],
+            'no-empty': ['warn', { allowEmptyCatch: true }]
         }
     },
     {
-        ignores: ['dist/**', 'release/**', 'node_modules/**', 'scripts/**', 'tmp_*/**']
+        files: ['src/renderer.ts', 'src/renderer-*.ts'],
+        ignores: ['src/**/*.test.ts'],
+        languageOptions: {
+            sourceType: 'script',
+            globals: globals.browser
+        },
+        rules: {
+            '@typescript-eslint/no-unused-vars': 'off',
+            'prefer-const': 'off'
+        }
+    },
+    {
+        files: ['scripts/**/*.js'],
+        languageOptions: {
+            sourceType: 'commonjs',
+            globals: globals.node
+        },
+        rules: {
+            '@typescript-eslint/no-require-imports': 'off',
+            '@typescript-eslint/no-unused-vars': 'off',
+            'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
+            'no-console': 'off',
+            'no-empty': ['error', { allowEmptyCatch: true }],
+            'security/detect-object-injection': 'off',
+            'security/detect-non-literal-fs-filename': 'off'
+        }
+    },
+    {
+        files: ['scripts/**/*.mjs'],
+        languageOptions: {
+            sourceType: 'module',
+            globals: globals.node
+        },
+        rules: {
+            '@typescript-eslint/no-require-imports': 'off',
+            '@typescript-eslint/no-unused-vars': 'off',
+            'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
+            'no-console': 'off',
+            'no-empty': ['error', { allowEmptyCatch: true }],
+            'security/detect-object-injection': 'off',
+            'security/detect-non-literal-fs-filename': 'off'
+        }
+    },
+    {
+        files: ['scripts/smoke-test*.js', 'scripts/capture-readme-screenshot.js', 'scripts/e2e-test-environment.js'],
+        languageOptions: {
+            globals: {
+                ...globals.node,
+                ...globals.browser
+            }
+        },
+        rules: {
+            'no-undef': 'off'
+        }
     }
 ];

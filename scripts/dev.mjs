@@ -59,7 +59,10 @@ function restartElectron() {
 
 function isElectronRestartTarget(fileName) {
     const baseName = fileName.replaceAll('\\', '/').split('/').at(-1) ?? '';
-    return !/^renderer(?:[-.].+)?\.js$/.test(baseName);
+    if (baseName === 'renderer.js') return false;
+    if (!baseName.startsWith('renderer') || !baseName.endsWith('.js')) return true;
+    const suffix = baseName.slice(8);
+    return suffix.length <= 4 || (suffix[0] !== '-' && suffix[0] !== '.');
 }
 
 function scheduleRestart(fileName) {
