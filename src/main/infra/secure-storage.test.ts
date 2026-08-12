@@ -1,5 +1,7 @@
-import { test, expect, describe } from 'vitest';
+import { test, expect, describe, vi } from 'vitest';
 import { MemorySecureStorage, createElectronSecureStorage, type SecureStorage } from './secure-storage';
+
+vi.mock('electron', () => ({}));
 
 describe('MemorySecureStorage', () => {
     test('isEncryptionAvailable returns false (kennzeichnet Memory-Mode)', () => {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.11 - 2026-08-12
+
+- Stabilize the Windows CI secure-storage test without invoking Electron's binary bootstrap outside Electron.
+
 ## 1.0.10 - 2026-08-12
 
 - Ignore malformed updater events without a version instead of showing an unusable update prompt.

@@ -1,6 +1,6 @@
 {
   "name": "twitch-vod-manager",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Twitch VOD Manager - Download Twitch VODs easily",
   "main": "dist/main.js",
   "author": "Sucukdeluxe",
@@ -66,9 +66,12 @@
       "dist/**/*",
       "src/index.html",
       "src/styles.css",
-      "src/workspace.css",
-      "build/icon.png",
-      "package.json"
+    "src/workspace.css",
+    "build/icon.png",
+    "package.json",
+    "!node_modules/better-sqlite3/build/**",
+    "!node_modules/better-sqlite3/deps/**",
+    "!node_modules/better-sqlite3/src/**"
     ],
     "extraResources": [
       {
