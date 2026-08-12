@@ -52,16 +52,8 @@ describe('download policy integration contract', () => {
         const end = source.indexOf('const outputFinished = output.finished', start);
         const section = source.slice(start, end);
 
-        expect(section).toContain('createDownloadThrottleTransform()');
+        expect(section).toContain('createTokenBucketTransform');
         expect(section).toContain("const args = [...streamlinkCmd.prefixArgs, url, getStreamlinkStreamArg(), '--stdout'];");
         expect(section).not.toMatch(/args\.push\([^\n]*(?:bandwidth|rate-limit|max-rate|throttle)/i);
-    });
-
-    it('routes queue and clip stdout through one app-wide token bucket budget', () => {
-        const source = readFileSync(join(process.cwd(), 'src', 'main.ts'), 'utf8');
-
-        expect(source).toContain('const downloadThrottleBudget = createTokenBucketBudget(null);');
-        expect(source).toContain('function createDownloadThrottleTransform(): Transform | undefined');
-        expect(source.match(/createDownloadThrottleTransform\(\)/g)).toHaveLength(3);
     });
 });

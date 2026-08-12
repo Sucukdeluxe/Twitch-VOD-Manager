@@ -183,6 +183,21 @@ export function parseCutterHardwareEncoders(ffmpegEncodersOutput: string): Cutte
     return hardwareEncoders.filter((encoder) => new RegExp(`\\b${encoder}\\b`, 'i').test(ffmpegEncodersOutput));
 }
 
+export function getCutterHardwareProbeArguments(encoder: CutterHardwareEncoder): string[] {
+    return ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=16x16:r=1', '-frames:v', '1', '-c:v', encoder, '-f', 'null', '-'];
+}
+
+export async function probeCutterHardwareEncoders(
+    candidates: readonly CutterHardwareEncoder[],
+    probe: (encoder: CutterHardwareEncoder, args: readonly string[]) => Promise<boolean>,
+): Promise<CutterHardwareEncoder[]> {
+    const verified: CutterHardwareEncoder[] = [];
+    for (const encoder of hardwareEncoders) {
+        if (candidates.includes(encoder) && await probe(encoder, getCutterHardwareProbeArguments(encoder))) verified.push(encoder);
+    }
+    return verified;
+}
+
 export function getCutterExportProfile(profile: CutterExportProfile): CutterExportProfileDefinition {
     return getProfileDefinition(profile);
 }

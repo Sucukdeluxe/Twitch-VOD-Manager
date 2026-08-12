@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { calculateCutterExportProgress, createCutterExportPlan, parseCutterHardwareEncoders } from './cutter-export';
+import { calculateCutterExportProgress, createCutterExportPlan, parseCutterHardwareEncoders, probeCutterHardwareEncoders } from './cutter-export';
 
 describe('cutter export segments', () => {
     test('sorts playable segments and preserves the caller input', () => {
@@ -173,5 +173,21 @@ describe('cutter export segments', () => {
 
     test('recognizes only offered H.264 hardware encoders from an ffmpeg probe', () => {
         expect(parseCutterHardwareEncoders(' V..... h264_nvenc NVIDIA NVENC H.264 encoder\n V..... h264_qsv H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (Intel Quick Sync Video acceleration)\n V..... hevc_amf AMD AMF HEVC encoder')).toEqual(['h264_nvenc', 'h264_qsv']);
+    });
+
+    test('offers only hardware encoders that pass a one-frame encode capability test', async () => {
+        const probes: Array<{ encoder: string; args: readonly string[] }> = [];
+
+        const verified = await probeCutterHardwareEncoders(['h264_nvenc', 'h264_qsv', 'h264_amf'], async (encoder, args) => {
+            probes.push({ encoder, args });
+            return encoder !== 'h264_qsv';
+        });
+
+        expect(verified).toEqual(['h264_nvenc', 'h264_amf']);
+        expect(probes).toHaveLength(3);
+        expect(probes[0]).toMatchObject({
+            encoder: 'h264_nvenc',
+            args: expect.arrayContaining(['-f', 'lavfi', '-frames:v', '1', '-c:v', 'h264_nvenc', '-f', 'null', '-']),
+        });
     });
 });

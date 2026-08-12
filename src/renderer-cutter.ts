@@ -67,6 +67,7 @@ let cutterAudioStreamIndex = 0;
 let cutterPendingProject: CutterProject | null = null;
 let cutterAutosaveTimer: number | null = null;
 let cutterExportOptions: CutterExportOptions | null = null;
+let cutterRecoveryDecisionPending = false;
 const cutterMaximumCuts = 64;
 const cutterFrameTolerance = 1e-8;
 
@@ -174,7 +175,7 @@ function scheduleCutterAutosave(): void {
     const file = cutterFile;
     cutterAutosaveTimer = window.setTimeout(() => {
         cutterAutosaveTimer = null;
-        if (!file || cutterFile !== file) return;
+        if (!file || cutterFile !== file || cutterRecoveryDecisionPending) return;
         void persistCutterProject(false);
     }, 500);
 }
@@ -279,6 +280,7 @@ async function recoverCutterProject(): Promise<void> {
         showAppToast('Projekt konnte nicht wiederhergestellt werden', 'warn');
         return;
     }
+    cutterRecoveryDecisionPending = false;
     renderCutterProjectRecovery(null);
     showAppToast('Projekt wiederhergestellt', 'info');
 }
@@ -286,21 +288,24 @@ async function recoverCutterProject(): Promise<void> {
 async function discardCutterProject(): Promise<void> {
     if (!cutterFile) return;
     try { await window.api.discardCutterProject(cutterFile.token); } catch { }
+    cutterRecoveryDecisionPending = false;
     renderCutterProjectRecovery(null);
 }
 
 async function saveCutterProject(): Promise<void> {
+    cutterRecoveryDecisionPending = false;
     await persistCutterProject(true);
 }
 
 async function openCutterProject(): Promise<void> {
-    if (!cutterFile || !await persistCutterProject(false)) return;
+    if (!cutterFile) return;
     let project: CutterProject | null = null;
     try { project = await window.api.openCutterProject(cutterFile.token); } catch { }
     if (!project || !applyCutterProject(project)) {
         showAppToast('Kein passendes Projekt gefunden', 'warn');
         return;
     }
+    cutterRecoveryDecisionPending = false;
     renderCutterProjectRecovery(null);
     showAppToast('Projekt geöffnet', 'info');
 }
@@ -1068,6 +1073,7 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
     cutterExportProfile = 'balanced';
     cutterExportEncoder = 'software';
     cutterAudioStreamIndex = media.info.audioStreams[0]?.index ?? 0;
+    cutterRecoveryDecisionPending = true;
     renderCutterProjectRecovery(null);
     updateCutterAudioStreams();
     cutterZoom = getInitialCutterZoom(media.info.duration);
@@ -1078,7 +1084,6 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
     byId('cutterInfo').classList.add('shown');
     byId('timelineContainer').classList.add('shown');
     if (previousPreviewRect) animateCutterWorkspaceReveal(previousPreviewRect);
-    byId<HTMLButtonElement>('btnCut').disabled = false;
     byId('infoDuration').textContent = formatCutterTimecode(media.info.duration);
     byId('infoResolution').textContent = `${media.info.width}×${media.info.height}`;
     byId('infoFps').textContent = media.info.fps.toFixed(media.info.fps % 1 === 0 ? 0 : 2);
@@ -1093,16 +1098,18 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
     video.load();
     byId('cutterPreview').classList.remove('playing', 'buffering');
     updateCutterPlayUi();
-    setCutterControlsEnabled(true);
     updateCutterZoom(cutterZoom);
     renderCutterEditor();
     updateCutterPlayhead(0);
     void (async () => {
-        await loadCutterExportOptions(file, generation);
-        if (generation !== cutterLoadGeneration || cutterFile !== file) return;
         let project: CutterProject | null = null;
         try { project = await window.api.getCutterProjectRecovery(file.token); } catch { }
-        if (generation === cutterLoadGeneration && cutterFile === file) renderCutterProjectRecovery(project);
+        if (generation !== cutterLoadGeneration || cutterFile !== file) return;
+        cutterRecoveryDecisionPending = Boolean(project);
+        renderCutterProjectRecovery(project);
+        setCutterControlsEnabled(true);
+        byId<HTMLButtonElement>('btnCut').disabled = false;
+        void loadCutterExportOptions(file, generation);
     })();
     void requestCutterWaveform(file, media.jobId, generation);
     void requestCutterAssets();
@@ -1145,7 +1152,7 @@ function confirmCutterReplacement(file: FileCapabilityReference): Promise<boolea
 async function requestCutterVideoReplacement(file: FileCapabilityReference): Promise<void> {
     if (!file || isCutting) return;
     if (!await confirmCutterReplacement(file)) return;
-    if (cutterEditorState && !await persistCutterProject(false)) {
+    if (cutterEditorState && !cutterRecoveryDecisionPending && !await persistCutterProject(false)) {
         showAppToast('Projekt konnte nicht gespeichert werden', 'warn');
         return;
     }
