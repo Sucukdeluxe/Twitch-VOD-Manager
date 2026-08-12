@@ -396,7 +396,10 @@ function createEventViewerRow(event: EventLogEntry): HTMLElement {
     const detail = document.createElement('div');
     detail.className = 'event-viewer-detail';
     detail.textContent = getEventViewerDetail(event);
-    row.title = `${time.textContent} ${tag.textContent} ${detail.textContent}`.trim();
+    const accessibleLabel = `${time.textContent} ${tag.textContent} ${detail.textContent}`.trim();
+    row.title = accessibleLabel;
+    row.setAttribute('tabindex', '0');
+    row.setAttribute('aria-label', accessibleLabel);
     row.append(time, tag, detail);
     return row;
 }
@@ -575,7 +578,10 @@ function createChatViewerRow(m: ChatViewerMessage): HTMLElement {
     const message = document.createElement('span');
     message.textContent = ' ' + (m.msg || m.text || '');
     row.appendChild(message);
-    row.title = [time, user, m.msg || m.text || ''].filter(Boolean).join(' ');
+    const accessibleLabel = [time, user, m.msg || m.text || ''].filter(Boolean).join(' ');
+    row.title = accessibleLabel;
+    row.setAttribute('tabindex', '0');
+    row.setAttribute('aria-label', accessibleLabel);
     return row;
 }
 

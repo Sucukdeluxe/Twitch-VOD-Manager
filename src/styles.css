@@ -4942,6 +4942,12 @@ input[type="number"]::-webkit-outer-spin-button {
     background: rgba(255, 255, 255, 0.04);
 }
 
+.chat-viewer-row:focus-visible,
+.event-viewer-row:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
 .chat-viewer-row .chat-viewer-time {
     color: var(--text-secondary);
     margin-right: 8px;
