@@ -47,7 +47,12 @@ jobs:
         run: npm run build
         timeout-minutes: 10
       - name: Package directory
-        run: npm run pack
+        run: |
+          npm run pack
+          if ($LASTEXITCODE -ne 0) {
+            npm run pack
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
         timeout-minutes: 10
       - name: Packaged launch smoke
         run: npm run test:packaged-launch

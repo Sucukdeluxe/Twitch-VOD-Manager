@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.12 - 2026-08-12
+
+- Retry transient Electron download failures once while packaging on Windows CI.
+
 ## 1.0.11 - 2026-08-12
 
 - Stabilize the Windows CI secure-storage test without invoking Electron's binary bootstrap outside Electron.
