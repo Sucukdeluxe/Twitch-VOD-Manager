@@ -183,7 +183,7 @@ async function run() {
         globalThis.__workspaceCutterDropPaths.mediaCapability = capability;
         return {
           sourceUrl: encodeURI(`file:///${expectedPath.replace(/\\/g, '/')}`),
-          info: { duration: 120, width: 1920, height: 1080, fps: 60, hasAudio: false },
+          info: { duration: 120, width: 1920, height: 1080, fps: 60, hasAudio: false, rotation: 0, audioStreams: [] },
           thumbnails: ['data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='],
           waveform: null
         };
@@ -581,7 +581,7 @@ async function run() {
     });
     checks.downloadSettingsWide = downloadSettingsWide;
     check(downloadSettingsWide.cardWidth >= downloadSettingsWide.tabWidth * 0.8, `Download Settings wastes the wide workspace: ${downloadSettingsWide.cardWidth}/${downloadSettingsWide.tabWidth}`);
-    check(downloadSettingsWide.columns === 2 && downloadSettingsWide.sections === 4, `Download Settings is not arranged as four semantic groups in two columns: ${downloadSettingsWide.columns}/${downloadSettingsWide.sections}`);
+    check(downloadSettingsWide.columns === 2 && downloadSettingsWide.sections === 5, `Download Settings is not arranged as five semantic groups in two columns: ${downloadSettingsWide.columns}/${downloadSettingsWide.sections}`);
     check(downloadSettingsWide.checkboxWidth >= 18 && downloadSettingsWide.checkboxBackground !== 'none', `Checked Download Settings toggle has no clear checkmark: ${downloadSettingsWide.checkboxWidth}/${downloadSettingsWide.checkboxBackground}`);
     check(downloadSettingsWide.labelFontSize >= 13, `Download Settings toggle labels remain too small: ${downloadSettingsWide.labelFontSize}px`);
     check(downloadSettingsWide.statusText === 'Public-Modus · öffentliche VODs verfügbar', `Public status copy is unclear: ${downloadSettingsWide.statusText}`);
