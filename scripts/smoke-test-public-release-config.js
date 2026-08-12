@@ -33,7 +33,7 @@ check(installerSource.includes('CreateShortCut "$newStartMenuLink"'), 'start men
 check(installerSource.includes('SHChangeNotify(i 0x08000000, i 0x1000'), 'Windows shell icon cache is not flushed after shortcut refresh');
 check(installerSource.includes('${ifNot} ${isUpdated}') && installerSource.includes('RMDir /r "$LOCALAPPDATA\\Twitch VOD Manager\\Shortcut Icons"'), 'persistent shortcut icons are not cleaned up on a real uninstall');
 check(packageJson.build?.win?.signAndEditExecutable !== false, 'Windows executable resource editing is enabled');
-check(packageJson.build?.win?.signExecutable === false, 'Windows code signing remains disabled without suppressing icon resources');
+check(packageJson.build?.win?.signExecutable !== false, 'Windows executable signing is disabled');
 check(fs.existsSync(path.join(root, 'build', 'icon.png')), 'application PNG icon is missing');
 check(fs.existsSync(path.join(root, 'build', 'icon.ico')), 'application ICO icon is missing');
 check(mainSource.includes('app.setAppUserModelId(WINDOWS_APP_IDENTITY.appUserModelId)'), 'Windows AppUserModelID is not applied from the centralized identity');

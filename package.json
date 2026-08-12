@@ -82,7 +82,6 @@
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico",
-      "signExecutable": false,
       "artifactName": "Twitch-VOD-Manager-Setup-${version}.${ext}"
     },
     "nsis": {
