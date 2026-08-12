@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.10 - 2026-08-12
+
+- Ignore malformed updater events without a version instead of showing an unusable update prompt.
+- Keep the cutter source selection out of the loaded editor layout and render each export profile indicator exactly once.
+
 ## 1.0.9 - 2026-08-12
 
 - Waited for managed-tool checksum streams to close before promoting verified installations, preventing intermittent Windows repair failures caused by open file handles.

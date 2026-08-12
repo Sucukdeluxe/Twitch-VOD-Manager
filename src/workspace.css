@@ -1420,6 +1420,21 @@ textarea:hover:not(:disabled) {
     border-color: var(--workspace-border-strong);
 }
 
+#cutterTab .cutter-export-options select {
+    appearance: none;
+    -webkit-appearance: none;
+    min-width: 0;
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23999'%3E%3Cpath d='M4 6l4 4 4-4z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 14px;
+}
+
+#cutterTab .cutter-export-options select:hover:not(:disabled) {
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%239146FF'%3E%3Cpath d='M4 6l4 4 4-4z'/%3E%3C/svg%3E");
+}
+
 input:not([type="checkbox"]):not([type="radio"]):focus,
 select:focus,
 textarea:focus {

@@ -3091,7 +3091,7 @@ input[type="checkbox"].vod-select-checkbox {
         grid-template-rows: minmax(0, 1fr) auto;
     }
 
-    #cutterTab .cutter-source-bar:has(+ .cutter-workspace.shown) {
+    #cutterTab .cutter-source-bar:has(~ .cutter-workspace.shown) {
         display: none;
     }
 

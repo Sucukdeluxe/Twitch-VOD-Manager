@@ -33,8 +33,9 @@ function notifyUpdate(message: string, type: 'info' | 'warn' = 'info'): void {
     }
 }
 
-function rememberUpdateInfo(info?: UpdateInfo | null): UpdateInfo {
-    const version = info?.version || latestUpdateVersion || latestUpdateInfo?.version || '?';
+function rememberUpdateInfo(info?: UpdateInfo | null): UpdateInfo | null {
+    const version = (info?.version || latestUpdateVersion || latestUpdateInfo?.version || '').trim();
+    if (!version) return null;
     latestUpdateVersion = version;
     latestUpdateInfo = {
         ...(latestUpdateInfo || { version }),
@@ -44,7 +45,7 @@ function rememberUpdateInfo(info?: UpdateInfo | null): UpdateInfo {
     return latestUpdateInfo;
 }
 
-function getActiveUpdateInfo(): UpdateInfo {
+function getActiveUpdateInfo(): UpdateInfo | null {
     return rememberUpdateInfo();
 }
 
@@ -182,7 +183,8 @@ function handleWorkspaceUpdateAction(): void {
     }
 
     if (updateBannerState === 'available' || updateBannerState === 'ready') {
-        openUpdateModal(getActiveUpdateInfo());
+        const info = getActiveUpdateInfo();
+        if (info) openUpdateModal(info);
         return;
     }
 
@@ -191,6 +193,7 @@ function handleWorkspaceUpdateAction(): void {
 
 function setUpdateBannerAvailableUi(info: UpdateInfo, reveal = true): void {
     const activeInfo = rememberUpdateInfo(info);
+    if (!activeInfo) return;
     updateReady = false;
     updateDownloadInProgress = false;
     latestDownloadProgress = null;
@@ -240,6 +243,7 @@ function setDownloadPendingUi(): void {
 
 function setDownloadReadyUi(info?: UpdateInfo): void {
     const activeInfo = rememberUpdateInfo(info);
+    if (!activeInfo) return;
     updateReady = true;
     updateDownloadInProgress = false;
     updateBannerState = 'ready';
@@ -390,6 +394,7 @@ function refreshUpdateChangelogToggleText(): void {
 
 function refreshUpdateModalTexts(): void {
     const info = getActiveUpdateInfo();
+    if (!info) return;
     const isReady = updateReady;
 
     byId('updateModalTitle').textContent = isReady
@@ -421,7 +426,7 @@ function refreshUpdateModalTexts(): void {
 }
 
 function openUpdateModal(info?: UpdateInfo): void {
-    rememberUpdateInfo(info);
+    if (!rememberUpdateInfo(info)) return;
     updateChangelogExpanded = false;
     RendererAccessibility.openDialog('updateModal', { onEscape: dismissUpdateModal });
     refreshUpdateModalTexts();
@@ -546,7 +551,8 @@ async function checkUpdate(): Promise<void> {
             updateCheckInProgress = false;
             setCheckButtonCheckingState(false);
             if (latestUpdateInfo || updateReady) {
-                openUpdateModal(getActiveUpdateInfo());
+                const info = getActiveUpdateInfo();
+                if (info) openUpdateModal(info);
             } else {
                 notifyUpdate(UI_TEXT.updates.readyToInstall, 'info');
             }
@@ -611,8 +617,11 @@ function downloadUpdate(): void {
         }
 
         if (result?.skipped === 'ready-to-install') {
-            setDownloadReadyUi(getActiveUpdateInfo());
-            openUpdateModal(getActiveUpdateInfo());
+            const info = getActiveUpdateInfo();
+            if (info) {
+                setDownloadReadyUi(info);
+                openUpdateModal(info);
+            }
             return;
         }
 
@@ -645,6 +654,11 @@ window.api.onUpdateAvailable((info: UpdateInfo) => {
     manualUpdateOutcomeHandled = true;
     latestDownloadProgress = null;
     setCheckButtonCheckingState(false);
+
+    if (!activeInfo) {
+        shouldOpenUpdateModalOnAvailable = false;
+        return;
+    }
 
     // If the user explicitly skipped this exact version, suppress the auto
     // notification entirely — banner stays hidden, no modal popup. A manual
@@ -707,6 +721,7 @@ window.api.onUpdateDownloaded((info: UpdateInfo) => {
     // by a stale entry.
     clearSkippedUpdateVersion();
     const activeInfo = rememberUpdateInfo(info);
+    if (!activeInfo) return;
     setDownloadReadyUi(activeInfo);
     openUpdateModal(activeInfo);
 });

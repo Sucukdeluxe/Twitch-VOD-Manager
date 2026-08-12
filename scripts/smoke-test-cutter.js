@@ -200,6 +200,34 @@ async function run() {
     await win.setViewportSize({ width: 1440, height: 900 });
     await win.emulateMedia({ reducedMotion: 'reduce' });
     await win.evaluate(() => window.showTab('cutter'));
+    await win.evaluate(() => {
+      document.getElementById('cutterWorkspace').classList.add('shown');
+      document.getElementById('cutterExportProfile').disabled = false;
+    });
+    await win.locator('#cutterExportProfile').waitFor({ state: 'visible' });
+    const cutterExportProfileBox = await win.locator('#cutterExportProfile').boundingBox();
+    if (!cutterExportProfileBox) throw new Error('Export profile is not visible');
+    await win.mouse.move(cutterExportProfileBox.x + cutterExportProfileBox.width / 2, cutterExportProfileBox.y + cutterExportProfileBox.height / 2);
+    const cutterExportProfilePresentation = await win.evaluate(() => {
+      const style = getComputedStyle(document.getElementById('cutterExportProfile'));
+      return {
+        backgroundImage: style.backgroundImage,
+        backgroundRepeat: style.backgroundRepeat,
+        backgroundPosition: style.backgroundPosition,
+        sourceDisplay: getComputedStyle(document.querySelector('.cutter-source-bar')).display,
+      };
+    });
+    check(
+      cutterExportProfilePresentation.backgroundImage !== 'none'
+        && cutterExportProfilePresentation.backgroundRepeat === 'no-repeat'
+        && cutterExportProfilePresentation.backgroundPosition.includes('8px')
+        && cutterExportProfilePresentation.sourceDisplay === 'none',
+      `Export profile indicator is tiled or misplaced: ${JSON.stringify(cutterExportProfilePresentation)}`
+    );
+    await win.evaluate(() => {
+      document.getElementById('cutterWorkspace').classList.remove('shown');
+      document.getElementById('cutterExportProfile').disabled = true;
+    });
     const additionalContainerCapabilities = await Promise.all(Object.entries(additionalContainerFiles).map(async ([extension, filePath]) => ({
       extension,
       capability: await createCutterCapability(win, filePath),
@@ -316,7 +344,7 @@ async function run() {
       `Disabled empty-player volume control still expands on hover: ${JSON.stringify({ emptyVolumeBefore, emptyVolumeAfter })}`
     );
     if (process.env.TWITCH_VOD_MANAGER_CUTTER_EMPTY_ONLY === '1') {
-      console.log(JSON.stringify({ failures, runtimeIssues, emptyLayout, emptyFullscreenLayout, emptyVolumeBefore, emptyVolumeAfter }, null, 2));
+      console.log(JSON.stringify({ failures, runtimeIssues, cutterExportProfilePresentation, emptyLayout, emptyFullscreenLayout, emptyVolumeBefore, emptyVolumeAfter }, null, 2));
       if (failures.length > 0) process.exitCode = 1;
       return;
     }
