@@ -131,6 +131,7 @@
     "src/renderer-archive.ts",
     "src/renderer-command-palette.ts",
     "src/renderer-cutter.ts",
+    "src/renderer-cutter.production-path.test.ts",
     "src/renderer-globals.d.ts",
     "src/renderer-locale-de.ts",
     "src/renderer-locale-en.ts",

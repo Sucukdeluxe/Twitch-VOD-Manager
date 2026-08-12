@@ -859,6 +859,8 @@ function getSettingsFingerprint(payload: Partial<AppConfig>): string {
         effective.auto_cleanup_action ?? 'archive',
         effective.streamlink_quality ?? 'best',
         effective.metadata_cache_minutes ?? 10,
+        effective.download_policy?.throttle?.maxBytesPerSecond ?? null,
+        effective.download_policy?.windows ?? [],
         effective.filename_template_vod ?? '{title}.mp4',
         effective.filename_template_parts ?? '{date}_Part{part_padded}.mp4',
         effective.filename_template_clip ?? '{date}_{part}.mp4'

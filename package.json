@@ -12,7 +12,7 @@
     "build": "tsc",
     "lint": "eslint .",
     "security:check": "node scripts/security-check.js && node scripts/smoke-test-public-release-config.js",
-    "start": "npm run build && electron .",
+    "start": "node scripts/dev.mjs --once",
     "dev": "node scripts/dev.mjs",
     "test:unit": "vitest run --passWithNoTests",
     "test:unit:watch": "vitest",

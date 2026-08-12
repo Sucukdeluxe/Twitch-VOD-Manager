@@ -38,7 +38,12 @@ check(fs.existsSync(path.join(root, 'build', 'icon.png')), 'application PNG icon
 check(fs.existsSync(path.join(root, 'build', 'icon.ico')), 'application ICO icon is missing');
 check(mainSource.includes('app.setAppUserModelId(WINDOWS_APP_IDENTITY.appUserModelId)'), 'Windows AppUserModelID is not applied from the centralized identity');
 check(mainSource.includes('app.setName(WINDOWS_APP_IDENTITY.name)'), 'Windows application name is not applied before startup');
-check(mainSource.includes("icon: path.join(__dirname, process.platform === 'win32' ? '../build/icon.ico' : '../build/icon.png')"), 'BrowserWindow does not use the platform application icon');
+const windowCreationIndex = mainSource.indexOf('mainWindow = new BrowserWindow');
+const taskbarDetailsIndex = mainSource.indexOf('mainWindow.setAppDetails', windowCreationIndex);
+const windowShowIndex = mainSource.indexOf('mainWindow.show()', windowCreationIndex);
+check(mainSource.includes('resolveWindowsAppIconPath') && mainSource.includes('createWindowsTaskbarDetails'), 'BrowserWindow does not use centralized Windows taskbar identity');
+check(mainSource.slice(windowCreationIndex, taskbarDetailsIndex).includes('show: false'), 'BrowserWindow is visible before Windows taskbar identity is applied');
+check(taskbarDetailsIndex > windowCreationIndex && windowShowIndex > taskbarDetailsIndex, 'Windows taskbar identity is not applied before the window is shown');
 check(indexSource.includes('class="topbar-brand-mark" src="../build/icon.png"'), 'topbar does not use the application icon');
 check(mainSource.includes('GITHUB_RELEASES_API_LATEST_URL'), 'GitHub releases API constant is missing');
 check(mainSource.includes('GITHUB_RELEASES_DOWNLOAD_BASE_URL'), 'GitHub releases download constant is missing');

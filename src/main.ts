@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { spawn, ChildProcess, execSync, spawnSync } from 'child_process';
 import { connect as tlsConnect, TLSSocket } from 'node:tls';
 import { pathToFileURL } from 'node:url';
+import type { Transform } from 'node:stream';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
 import { compareUpdateVersions, isNewerUpdateVersion, normalizeUpdateVersion } from './main/domain/update-version-utils';
@@ -19,7 +20,7 @@ import {
 import { tBackend as tBackendCore, type BackendMessageKey } from './main/domain/i18n-backend';
 import { watchRendererChanges } from './main/dev-reload';
 import { createPausableOutput, type PausableOutput } from './main/domain/pausable-output';
-import { createTokenBucketTransform } from './main/domain/token-bucket-transform';
+import { createTokenBucketBudget, createTokenBucketTransform } from './main/domain/token-bucket-transform';
 import { decideDownloadStart, normalizeDownloadPolicy, type DownloadPolicy } from './main/domain/download-policy';
 import { PartialDownloadRegistry } from './main/domain/partial-download';
 import { QueueProcessRegistry, QueueRunLifecycle, waitForChildProcessExit } from './main/queue/process-registry';
@@ -40,7 +41,7 @@ import {
 } from './main/domain/config-normalize';
 import { CustomClip, MergeGroupItem, MergeGroup, QueueItem, DownloadProgress, DownloadResult } from './types';
 import { buildVodPreviewFrameUrls } from './main/domain/vod-preview';
-import { getWindowsAppIdentity } from './main/domain/app-identity';
+import { createWindowsTaskbarDetails, getWindowsAppIdentity, resolveWindowsAppIconPath } from './main/domain/app-identity';
 import { addCutAt, createVideoEditorState, getPlayableSegments, setTrimRange, type EditorCut } from './main/domain/video-editor';
 import {
     calculateCutterExportProgress,
@@ -87,9 +88,18 @@ import {
 // CONFIG & CONSTANTS
 // ==========================================
 const APP_VERSION = app.getVersion();
-const WINDOWS_APP_IDENTITY = getWindowsAppIdentity(process.env.TWITCH_VOD_MANAGER_DEV === '1');
+const IS_HOT_DEVELOPMENT = process.env.TWITCH_VOD_MANAGER_DEV === '1';
+const WINDOWS_APP_IDENTITY = getWindowsAppIdentity(IS_HOT_DEVELOPMENT);
 app.setName(WINDOWS_APP_IDENTITY.name);
 app.setAppUserModelId(WINDOWS_APP_IDENTITY.appUserModelId);
+const WINDOWS_APP_ICON_PATH = process.platform === 'win32'
+    ? resolveWindowsAppIconPath({
+        isPackaged: app.isPackaged,
+        appPath: app.getAppPath(),
+        resourcesPath: process.resourcesPath,
+        version: APP_VERSION,
+    })
+    : null;
 const GITHUB_REPO_OWNER = 'Sucukdeluxe';
 const GITHUB_REPO_NAME = 'Twitch-VOD-Manager';
 const GITHUB_RELEASES_API_LATEST_URL = 'https://api.github.com/repos/Sucukdeluxe/Twitch-VOD-Manager/releases/latest';
@@ -417,6 +427,12 @@ function getStreamlinkStreamArg(): string {
     const choice = normalizeStreamlinkQuality(config.streamlink_quality);
     if (choice === 'best') return 'best';
     return `${choice},best`;
+}
+
+function createDownloadThrottleTransform(): Transform | undefined {
+    const maxBytesPerSecond = config.download_policy.throttle?.maxBytesPerSecond ?? null;
+    downloadThrottleBudget.setMaxBytesPerSecond(maxBytesPerSecond);
+    return maxBytesPerSecond ? createTokenBucketTransform(maxBytesPerSecond, undefined, downloadThrottleBudget) : undefined;
 }
 
 function normalizeConfigTemplates(input: Config): Config {
@@ -810,6 +826,7 @@ const activeDownloads = new Map<string, ActiveDownloadTracking>();
 const cancelledItemIds = new Set<string>();
 const queueProcessRegistry = new QueueProcessRegistry();
 const queueRunLifecycle = new QueueRunLifecycle(queueProcessRegistry);
+const downloadThrottleBudget = createTokenBucketBudget(null);
 let downloadPolicyWakeTimer: NodeJS.Timeout | null = null;
 let lastDownloadPolicyStatusFingerprint = '';
 
@@ -4049,11 +4066,10 @@ function downloadVODPart(
             resolve({ success: false, error: tBackend('unknownDownloadError') });
             return;
         }
-        const maxBytesPerSecond = config.download_policy.throttle?.maxBytesPerSecond;
         const output = createPausableOutput(
             proc.stdout,
             outputStream,
-            maxBytesPerSecond ? createTokenBucketTransform(maxBytesPerSecond) : undefined,
+            createDownloadThrottleTransform(),
         );
         const outputFinished = output.finished.then(() => null, (error) => error);
         const processRegistration = queueProcessRegistry.register(itemId, 'streamlink', {
@@ -7067,15 +7083,17 @@ async function processQueue(manualOverride = false): Promise<void> {
 // ==========================================
 function createWindow(): void {
     nativeTheme.themeSource = config.theme === 'light' ? 'light' : 'dark';
+    const windowIconPath = WINDOWS_APP_ICON_PATH ?? path.join(__dirname, '../build/icon.png');
 
     mainWindow = new BrowserWindow({
+        show: false,
         width: 1400,
         height: 900,
         minWidth: 1200,
         minHeight: 700,
         title: `Twitch VOD Manager [v${APP_VERSION}]`,
         backgroundColor: '#0e0e10',
-        icon: path.join(__dirname, process.platform === 'win32' ? '../build/icon.ico' : '../build/icon.png'),
+        icon: windowIconPath,
         autoHideMenuBar: true,
         webPreferences: {
             nodeIntegration: false,
@@ -7083,6 +7101,17 @@ function createWindow(): void {
             preload: path.join(__dirname, 'preload.js')
         }
     });
+
+    if (process.platform === 'win32') {
+        mainWindow.setAppDetails(createWindowsTaskbarDetails({
+            identity: WINDOWS_APP_IDENTITY,
+            iconPath: windowIconPath,
+            executablePath: process.execPath,
+            developmentRelaunchCommand: process.env.TWITCH_VOD_MANAGER_RELAUNCH_COMMAND,
+            isDevelopment: IS_HOT_DEVELOPMENT,
+        }));
+    }
+    mainWindow.show();
 
     if (process.platform !== 'darwin') {
         mainWindow.removeMenu();
@@ -7525,6 +7554,7 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
     }
     const nextConfig = normalizeConfigTemplates({ ...config, ...acceptedConfig });
     config = persistStateChange(config, () => nextConfig, saveConfig);
+    downloadThrottleBudget.setMaxBytesPerSecond(config.download_policy.throttle?.maxBytesPerSecond ?? null);
     if (JSON.stringify(config.download_policy) !== previousDownloadPolicy && !isDownloading && downloadQueue.some((item) => item.status === 'pending')) {
         scheduleQueueProcessing();
     } else {
@@ -8175,11 +8205,10 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
             resolve({ success: false, error: tBackend('unknownDownloadError') });
             return;
         }
-        const maxBytesPerSecond = config.download_policy.throttle?.maxBytesPerSecond;
         const output = createPausableOutput(
             proc.stdout,
             fs.createWriteStream(partialFilename, { flags: 'w' }),
-            maxBytesPerSecond ? createTokenBucketTransform(maxBytesPerSecond) : undefined,
+            createDownloadThrottleTransform(),
         );
         const outputFinished = output.finished.then(() => null, (error) => error);
 

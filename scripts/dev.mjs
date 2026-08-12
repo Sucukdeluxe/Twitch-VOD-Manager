@@ -4,7 +4,8 @@ import { pathToFileURL } from 'node:url';
 import { watch } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-const rootDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const scriptPath = fileURLToPath(import.meta.url);
+const rootDirectory = resolve(dirname(scriptPath), '..');
 const typescriptCli = resolve(rootDirectory, 'node_modules', 'typescript', 'bin', 'tsc');
 const electronSourceExecutable = process.platform === 'win32'
     ? resolve(rootDirectory, 'node_modules', 'electron', 'dist', 'electron.exe')
@@ -13,10 +14,14 @@ let electronExecutable = electronSourceExecutable;
 const outputDirectory = resolve(rootDirectory, 'dist');
 const developmentProgramData = resolve(rootDirectory, '.dev-program-data');
 const developmentUserData = resolve(rootDirectory, '.dev-user-data');
+const developmentRelaunchCommand = `"${process.execPath}" "${scriptPath}" --once`;
+const runOnce = process.argv.includes('--once');
 
 let electronProcess;
 let restarting = false;
 let restartTimer;
+let compiler;
+let outputWatcher;
 
 function run(command, args, options = {}) {
     return spawn(command, args, { cwd: rootDirectory, stdio: 'inherit', ...options });
@@ -35,11 +40,13 @@ function startElectron() {
             ...process.env,
             PROGRAMDATA: developmentProgramData,
             TWITCH_VOD_MANAGER_DEV: '1',
+            TWITCH_VOD_MANAGER_RELAUNCH_COMMAND: developmentRelaunchCommand,
         },
     });
     electronProcess.once('exit', () => {
         electronProcess = undefined;
     });
+    return electronProcess;
 }
 
 function restartElectron() {
@@ -90,16 +97,20 @@ if (process.platform === 'win32') {
     });
 }
 
-const compiler = run(process.execPath, [typescriptCli, '--watch', '--preserveWatchOutput']);
-const outputWatcher = watch(outputDirectory, { recursive: true }, (_, fileName) => scheduleRestart(fileName));
-startElectron();
-
 for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => {
-        outputWatcher.close();
+        outputWatcher?.close();
         clearTimeout(restartTimer);
         stop(compiler);
         stop(electronProcess);
         process.exit();
     });
+}
+
+if (runOnce) {
+    process.exitCode = await waitForExit(startElectron());
+} else {
+    compiler = run(process.execPath, [typescriptCli, '--watch', '--preserveWatchOutput']);
+    outputWatcher = watch(outputDirectory, { recursive: true }, (_, fileName) => scheduleRestart(fileName));
+    startElectron();
 }
