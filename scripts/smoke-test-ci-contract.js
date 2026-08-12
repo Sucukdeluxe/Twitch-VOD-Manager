@@ -33,6 +33,7 @@ for (const relativePath of ['.github/workflows/windows-ci.yml', '.gitea/workflow
   const source = fs.readFileSync(absolutePath, 'utf8');
   const requiredCommands = [
     'npm ci',
+    'npx install-electron --no',
     'npm run lint',
     'npm run test:lint-config',
     'npm run security:check',
@@ -55,6 +56,7 @@ for (const relativePath of ['.github/workflows/windows-ci.yml', '.gitea/workflow
   for (const command of ['npm run pack', 'npm run dist:ci']) {
     check(source.match(new RegExp(command.replace(/[:]/g, '\\:'), 'g'))?.length >= 2, `${relativePath} does not retry transient ${command} failures`);
   }
+  check(source.match(/npx install-electron --no/g)?.length >= 2, `${relativePath} does not retry Electron binary provisioning`);
   const runSteps = source.split(/\r?\n/).filter((line) => /^\s+run:\s+/.test(line));
   const timeoutSteps = source.split(/\r?\n/).filter((line) => /^\s+timeout-minutes:\s*10\s*$/.test(line));
   check(timeoutSteps.length >= runSteps.length, `${relativePath} does not cap every command at ten minutes`);

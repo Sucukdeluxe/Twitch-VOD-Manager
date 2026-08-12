@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.14 - 2026-08-12
+
+- Provision the Electron binary with a bounded retry before Windows CI smoke tests.
+
 ## 1.0.13 - 2026-08-12
 
 - Apply the Windows CI retry to both directory and installer packaging.

@@ -22,6 +22,14 @@ jobs:
       - name: Clean install
         run: npm ci
         timeout-minutes: 10
+      - name: Provision Electron binary
+        run: |
+          npx install-electron --no
+          if ($LASTEXITCODE -ne 0) {
+            npx install-electron --no
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+        timeout-minutes: 10
       - name: Lint
         run: npm run lint
         timeout-minutes: 10
