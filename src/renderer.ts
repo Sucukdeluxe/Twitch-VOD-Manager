@@ -308,10 +308,153 @@ interface EventLogEntry {
     part?: number;
 }
 
+interface ViewerListboxController {
+    activeIndex(): number;
+    synchronizeRange(range: { start: number; end: number }): number;
+    dispose(): void;
+}
+
+interface ViewerListboxOptions {
+    list: HTMLElement;
+    itemCount: () => number;
+    rowHeight: number;
+    optionId: (index: number) => string;
+    label: string;
+    detailTitle: string;
+    detailText: (index: number) => string;
+    requestRender: () => void;
+}
+
+function ensureViewerDetailDialog(): { dialog: HTMLElement; title: HTMLElement; text: HTMLElement; closeButton: HTMLButtonElement } {
+    const existing = document.getElementById('viewerDetailModal');
+    if (existing instanceof HTMLElement) {
+        const title = existing.querySelector<HTMLElement>('#viewerDetailTitle');
+        const text = existing.querySelector<HTMLElement>('#viewerDetailText');
+        const closeButton = existing.querySelector<HTMLButtonElement>('#viewerDetailClose');
+        if (title && text && closeButton) return { dialog: existing, title, text, closeButton };
+        existing.remove();
+    }
+    const dialog = document.createElement('div');
+    dialog.id = 'viewerDetailModal';
+    dialog.className = 'viewer-detail-modal';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'viewerDetailTitle');
+    const panel = document.createElement('div');
+    panel.className = 'viewer-detail-dialog';
+    const header = document.createElement('div');
+    header.className = 'viewer-detail-header';
+    const title = document.createElement('h2');
+    title.id = 'viewerDetailTitle';
+    const closeButton = document.createElement('button');
+    closeButton.id = 'viewerDetailClose';
+    closeButton.type = 'button';
+    closeButton.className = 'viewer-detail-close';
+    closeButton.textContent = '×';
+    closeButton.setAttribute('aria-label', UI_TEXT.streamers.modalCloseAria);
+    closeButton.addEventListener('click', () => RendererAccessibility.closeDialog('viewerDetailModal'));
+    const text = document.createElement('div');
+    text.id = 'viewerDetailText';
+    text.className = 'viewer-detail-text';
+    header.append(title, closeButton);
+    panel.append(header, text);
+    dialog.appendChild(panel);
+    document.body.appendChild(dialog);
+    return { dialog, title, text, closeButton };
+}
+
+function openViewerDetail(title: string, text: string, returnFocus: HTMLElement): void {
+    const detail = ensureViewerDetailDialog();
+    detail.title.textContent = title;
+    detail.text.textContent = text;
+    if (document.activeElement !== returnFocus) returnFocus.focus();
+    RendererAccessibility.openDialog('viewerDetailModal', { initialFocus: detail.closeButton });
+}
+
+function createViewerListbox(options: ViewerListboxOptions): ViewerListboxController {
+    const { list } = options;
+    let active = options.itemCount() > 0 ? 0 : -1;
+    const updateActiveDescendant = (): void => {
+        if (active < 0) list.removeAttribute('aria-activedescendant');
+        else list.setAttribute('aria-activedescendant', options.optionId(active));
+    };
+    const synchronizeRange = (range: { start: number; end: number }): number => {
+        const count = options.itemCount();
+        if (count === 0 || range.end <= range.start) {
+            active = -1;
+            updateActiveDescendant();
+            return active;
+        }
+        if (active < range.start || active >= range.end) {
+            const firstVisible = Math.max(range.start, Math.floor(list.scrollTop / options.rowHeight));
+            active = Math.min(range.end - 1, Math.max(range.start, firstVisible));
+        }
+        updateActiveDescendant();
+        return active;
+    };
+    const setActive = (next: number): void => {
+        const count = options.itemCount();
+        if (count === 0) return;
+        active = Math.max(0, Math.min(count - 1, next));
+        const firstVisible = Math.floor(list.scrollTop / options.rowHeight);
+        const visibleCount = Math.max(1, Math.ceil(list.clientHeight / options.rowHeight));
+        if (active < firstVisible || active >= firstVisible + visibleCount) {
+            list.scrollTop = Math.max(0, active * options.rowHeight - Math.floor(Math.max(0, list.clientHeight - options.rowHeight) / 2));
+        }
+        updateActiveDescendant();
+        options.requestRender();
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+        const count = options.itemCount();
+        if (count === 0) return;
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setActive(active + 1);
+            return;
+        }
+        if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setActive(active - 1);
+            return;
+        }
+        if (event.key === 'Home') {
+            event.preventDefault();
+            setActive(0);
+            return;
+        }
+        if (event.key === 'End') {
+            event.preventDefault();
+            setActive(count - 1);
+            return;
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openViewerDetail(options.detailTitle, options.detailText(active), list);
+        }
+    };
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('tabindex', '0');
+    list.setAttribute('aria-label', options.label);
+    updateActiveDescendant();
+    list.addEventListener('keydown', onKeyDown);
+    return {
+        activeIndex: () => active,
+        synchronizeRange,
+        dispose: () => {
+            list.removeEventListener('keydown', onKeyDown);
+            list.removeAttribute('aria-activedescendant');
+            list.removeAttribute('aria-label');
+            list.removeAttribute('role');
+            list.removeAttribute('tabindex');
+        }
+    };
+}
+
 let eventsViewerMessages: EventLogEntry[] = [];
 let eventsViewerSessionGeneration = 0;
 let eventsViewerReadAbort: AbortController | null = null;
 let eventsViewerVirtualList: ReturnType<typeof RendererAccessibility.createFixedHeightVirtualList> | null = null;
+let eventsViewerListbox: ViewerListboxController | null = null;
 const eventsViewerRenderGeneration = new RendererAccessibility.RenderGeneration();
 const EVENT_VIEWER_ROW_HEIGHT = 36;
 const EVENT_VIEWER_OVERSCAN = 12;
@@ -319,6 +462,8 @@ const EVENT_VIEWER_OVERSCAN = 12;
 function disposeEventsViewerVirtualList(): void {
     eventsViewerVirtualList?.dispose();
     eventsViewerVirtualList = null;
+    eventsViewerListbox?.dispose();
+    eventsViewerListbox = null;
 }
 
 async function openEventsViewer(filePath: string, title: string): Promise<void> {
@@ -383,9 +528,16 @@ function getEventViewerDetail(event: EventLogEntry): string {
     return JSON.stringify(event);
 }
 
-function createEventViewerRow(event: EventLogEntry): HTMLElement {
+function getEventViewerAccessibleLabel(event: EventLogEntry): string {
+    return `${formatEventTime(event.t)} ${event.type || 'event'} ${getEventViewerDetail(event)}`.trim();
+}
+
+function createEventViewerRow(event: EventLogEntry, index: number, activeIndex: number): HTMLElement {
     const row = document.createElement('div');
     row.className = 'event-viewer-row';
+    row.id = `eventsViewerOption-${index}`;
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', String(index === activeIndex));
     const time = document.createElement('span');
     time.className = 'event-viewer-time';
     time.textContent = formatEventTime(event.t);
@@ -396,9 +548,8 @@ function createEventViewerRow(event: EventLogEntry): HTMLElement {
     const detail = document.createElement('div');
     detail.className = 'event-viewer-detail';
     detail.textContent = getEventViewerDetail(event);
-    const accessibleLabel = `${time.textContent} ${tag.textContent} ${detail.textContent}`.trim();
+    const accessibleLabel = getEventViewerAccessibleLabel(event);
     row.title = accessibleLabel;
-    row.setAttribute('tabindex', '0');
     row.setAttribute('aria-label', accessibleLabel);
     row.append(time, tag, detail);
     return row;
@@ -423,15 +574,26 @@ function renderEventsList(events: EventLogEntry[], generation: number): void {
     rows.className = 'event-viewer-virtual-rows';
     canvas.appendChild(rows);
     list.appendChild(canvas);
+    eventsViewerListbox = createViewerListbox({
+        list,
+        itemCount: () => events.length,
+        rowHeight: EVENT_VIEWER_ROW_HEIGHT,
+        optionId: (index) => `eventsViewerOption-${index}`,
+        label: UI_TEXT.queue.viewEvents,
+        detailTitle: UI_TEXT.queue.viewEvents,
+        detailText: (index) => getEventViewerAccessibleLabel(events[index]),
+        requestRender: () => eventsViewerVirtualList?.render(),
+    });
     eventsViewerVirtualList = RendererAccessibility.createFixedHeightVirtualList(list, {
         itemCount: () => events.length,
         rowHeight: EVENT_VIEWER_ROW_HEIGHT,
         overscan: EVENT_VIEWER_OVERSCAN,
         render: (range) => {
             if (!eventsViewerRenderGeneration.isCurrent(generation) || !RendererAccessibility.isDialogOpen('eventsViewerModal')) return;
+            const activeIndex = eventsViewerListbox?.synchronizeRange(range) ?? -1;
             rows.style.transform = `translateY(${range.start * EVENT_VIEWER_ROW_HEIGHT}px)`;
             const fragment = document.createDocumentFragment();
-            for (let index = range.start; index < range.end; index++) fragment.appendChild(createEventViewerRow(events[index]));
+            for (let index = range.start; index < range.end; index++) fragment.appendChild(createEventViewerRow(events[index], index, activeIndex));
             rows.replaceChildren(fragment);
         }
     });
@@ -458,6 +620,7 @@ let chatViewerFormat: 'replay' | 'live' = 'replay';
 let chatViewerSessionGeneration = 0;
 let chatViewerReadAbort: AbortController | null = null;
 let chatViewerVirtualList: ReturnType<typeof RendererAccessibility.createFixedHeightVirtualList> | null = null;
+let chatViewerListbox: ViewerListboxController | null = null;
 const chatViewerRenderGeneration = new RendererAccessibility.RenderGeneration();
 const CHAT_VIEWER_ROW_HEIGHT = 29;
 const CHAT_VIEWER_OVERSCAN = 12;
@@ -465,6 +628,8 @@ const CHAT_VIEWER_OVERSCAN = 12;
 function disposeChatViewerVirtualList(): void {
     chatViewerVirtualList?.dispose();
     chatViewerVirtualList = null;
+    chatViewerListbox?.dispose();
+    chatViewerListbox = null;
 }
 
 async function openChatViewer(filePath: string, title: string): Promise<void> {
@@ -546,10 +711,17 @@ function onChatViewerFilterChange(): void {
     filterChunk();
 }
 
-function createChatViewerRow(m: ChatViewerMessage): HTMLElement {
+function getChatViewerAccessibleLabel(m: ChatViewerMessage): string {
+    return [formatChatTimeMarker(m), m.u || m.user || m.login || '', m.msg || m.text || ''].filter(Boolean).join(' ');
+}
+
+function createChatViewerRow(m: ChatViewerMessage, index: number, activeIndex: number): HTMLElement {
     const row = document.createElement('div');
     const isMessageType = m.type === 'msg' || !m.type;
     row.className = 'chat-viewer-row' + (!isMessageType ? ' is-system' : '');
+    row.id = `chatViewerOption-${index}`;
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', String(index === activeIndex));
 
     if (!isMessageType) {
         const tag = document.createElement('span');
@@ -578,9 +750,8 @@ function createChatViewerRow(m: ChatViewerMessage): HTMLElement {
     const message = document.createElement('span');
     message.textContent = ' ' + (m.msg || m.text || '');
     row.appendChild(message);
-    const accessibleLabel = [time, user, m.msg || m.text || ''].filter(Boolean).join(' ');
+    const accessibleLabel = getChatViewerAccessibleLabel(m);
     row.title = accessibleLabel;
-    row.setAttribute('tabindex', '0');
     row.setAttribute('aria-label', accessibleLabel);
     return row;
 }
@@ -598,15 +769,26 @@ function renderChatViewerList(messages: ChatViewerMessage[], generation: number)
     rows.className = 'chat-viewer-virtual-rows';
     canvas.appendChild(rows);
     list.appendChild(canvas);
+    chatViewerListbox = createViewerListbox({
+        list,
+        itemCount: () => messages.length,
+        rowHeight: CHAT_VIEWER_ROW_HEIGHT,
+        optionId: (index) => `chatViewerOption-${index}`,
+        label: UI_TEXT.queue.viewChat,
+        detailTitle: UI_TEXT.queue.viewChat,
+        detailText: (index) => getChatViewerAccessibleLabel(messages[index]),
+        requestRender: () => chatViewerVirtualList?.render(),
+    });
     chatViewerVirtualList = RendererAccessibility.createFixedHeightVirtualList(list, {
         itemCount: () => messages.length,
         rowHeight: CHAT_VIEWER_ROW_HEIGHT,
         overscan: CHAT_VIEWER_OVERSCAN,
         render: (range) => {
             if (!chatViewerRenderGeneration.isCurrent(generation) || !RendererAccessibility.isDialogOpen('chatViewerModal')) return;
+            const activeIndex = chatViewerListbox?.synchronizeRange(range) ?? -1;
             rows.style.transform = `translateY(${range.start * CHAT_VIEWER_ROW_HEIGHT}px)`;
             const fragment = document.createDocumentFragment();
-            for (let index = range.start; index < range.end; index++) fragment.appendChild(createChatViewerRow(messages[index]));
+            for (let index = range.start; index < range.end; index++) fragment.appendChild(createChatViewerRow(messages[index], index, activeIndex));
             rows.replaceChildren(fragment);
         }
     });

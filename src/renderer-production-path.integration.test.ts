@@ -182,6 +182,7 @@ class FakeElement {
         if (selector.includes('[role="menuitem"]')) return descendants.filter((element) => element.getAttribute('role') === 'menuitem') as T[];
         if (selector.includes('a[href]') || selector.includes('[tabindex]')) return descendants.filter((element) => element.tagName === 'button' || element.tagName === 'input' || element.tabIndex >= 0) as T[];
         if (selector === 'button') return descendants.filter((element) => element.tagName === 'button') as T[];
+        if (selector.startsWith('#')) return descendants.filter((element) => element.id === selector.slice(1)) as T[];
         if (selector.startsWith('.')) return descendants.filter((element) => element.matches(selector)) as T[];
         return [];
     }
@@ -222,7 +223,7 @@ class FakeDocument {
     }
 
     getElementById(id: string): FakeElement | null {
-        return this.elements.get(id) ?? null;
+        return this.elements.get(id) ?? findDescendantById(this.body, id);
     }
 
     querySelector(selector: string): FakeElement | null {
@@ -238,6 +239,13 @@ class FakeDocument {
 
     removeEventListener(type: string, listener: Listener): void {
         this.listeners.set(type, (this.listeners.get(type) ?? []).filter((candidate) => candidate !== listener));
+    }
+
+    dispatch(event: FakeEvent): void {
+        for (const listener of this.listeners.get(event.type) ?? []) {
+            if (event.immediatePropagationStopped) break;
+            listener(event);
+        }
     }
 
     register(element: FakeElement, id: string): FakeElement {
@@ -299,7 +307,8 @@ function createRuntime(): Runtime {
                 viewEvents: 'Events', viewEventsCount: '{count} events', viewEventsEmpty: 'No events', eventStartedAs: 'Started as', eventEndedAfter: 'Ended after',
                 eventRecordingResume: 'Resume started — part {part}', eventTitleFromTo: 'Title {from} {to}', eventGameFromTo: 'Game {from} {to}'
             },
-            vods: { ctxOpenOnTwitch: 'Open', ctxCopyUrl: 'Copy', trimButton: 'Trim', addQueue: 'Queue', ctxMarkDownloaded: 'Mark', ctxUnmarkDownloaded: 'Unmark' }
+            vods: { ctxOpenOnTwitch: 'Open', ctxCopyUrl: 'Copy', trimButton: 'Trim', addQueue: 'Queue', ctxMarkDownloaded: 'Mark', ctxUnmarkDownloaded: 'Unmark' },
+            streamers: { modalCloseAria: 'Close' }
         },
         config: { downloaded_vod_ids: [] },
         currentLanguage: 'en',
@@ -325,6 +334,15 @@ function findMenu(document: FakeDocument): FakeElement {
     const menu = document.body.children.find((element) => element.getAttribute('role') === 'menu');
     if (!menu) throw new Error('Menu was not created');
     return menu;
+}
+
+function findDescendantById(element: FakeElement, id: string): FakeElement | null {
+    if (element.id === id) return element;
+    for (const child of element.children) {
+        const found = findDescendantById(child, id);
+        if (found) return found;
+    }
+    return null;
 }
 
 describe('renderer production interaction paths', () => {
@@ -403,15 +421,37 @@ describe('renderer production interaction paths', () => {
                     return pendingResult;
                 }
                 if (path === 'events') return Promise.resolve({ success: true, messages: [{ type: 'recording_start', title: 'Long event title', game: 'Game' }] });
-                return Promise.resolve({ success: true, format: 'live', messages: [{ type: 'msg', u: 'viewer', msg: 'Long chat message' }] });
+                return Promise.resolve({ success: true, format: 'live', messages: Array.from({ length: 80 }, (_, index) => ({ type: 'msg', u: `viewer-${index}`, msg: `Long chat message ${index}` })) });
             }
         };
         const api = evaluate(runtime, sourceFragment('renderer.ts', 'interface EventLogEntry', 'function closeTopmostOpenModal'), 'openChatViewer, closeChatViewer, onChatViewerFilterChange, openEventsViewer, closeEventsViewer');
 
         await api.openChatViewer('chat', 'Chat');
         const chatRow = chatList.firstChild?.firstChild?.firstChild;
-        expect(chatRow?.getAttribute('tabindex')).toBe('0');
-        expect(chatRow?.getAttribute('aria-label')).toContain('Long chat message');
+        expect(chatList.getAttribute('role')).toBe('listbox');
+        expect(chatRow?.getAttribute('role')).toBe('option');
+        expect(chatRow?.getAttribute('tabindex')).toBeNull();
+        chatList.focus();
+        chatList.scrollTop = 29 * 40;
+        chatList.dispatch(new FakeEvent('scroll'));
+        expect(runtime.document.activeElement).toBe(chatList);
+        const chatActiveId = chatList.getAttribute('aria-activedescendant');
+        expect(chatActiveId).toBeTruthy();
+        expect(findDescendantById(chatList, chatActiveId || '')).not.toBeNull();
+        chatList.dispatch(new FakeEvent('keydown', { key: 'ArrowDown' }));
+        expect(runtime.document.activeElement).toBe(chatList);
+        const chatKeyboardId = chatList.getAttribute('aria-activedescendant');
+        expect(chatKeyboardId).not.toBe(chatActiveId);
+        expect(findDescendantById(chatList, chatKeyboardId || '')).not.toBeNull();
+        chatList.dispatch(new FakeEvent('keydown', { key: 'Enter' }));
+        const detailDialog = findDescendantById(runtime.document.body, 'viewerDetailModal');
+        expect(detailDialog?.classList.contains('show')).toBe(true);
+        expect(findDescendantById(detailDialog as FakeElement, 'viewerDetailText')?.textContent).toContain('Long chat message 41');
+        const detailEscape = new FakeEvent('keydown', { key: 'Escape' });
+        runtime.document.dispatch(detailEscape);
+        expect(detailEscape.immediatePropagationStopped).toBe(true);
+        expect(detailDialog?.classList.contains('show')).toBe(false);
+        expect(runtime.document.activeElement).toBe(chatList);
 
         let clock = 0;
         runtime.context.performance = { now: () => (clock++ === 0 ? 0 : 9) };
@@ -426,8 +466,16 @@ describe('renderer production interaction paths', () => {
 
         await api.openEventsViewer('events', 'Events');
         const eventsRow = eventsList.firstChild?.firstChild?.firstChild;
-        expect(eventsRow?.getAttribute('tabindex')).toBe('0');
-        expect(eventsRow?.getAttribute('aria-label')).toContain('Long event title');
+        expect(eventsList.getAttribute('role')).toBe('listbox');
+        expect(eventsRow?.getAttribute('role')).toBe('option');
+        expect(eventsRow?.getAttribute('tabindex')).toBeNull();
+        eventsList.focus();
+        eventsList.dispatch(new FakeEvent('keydown', { key: 'Enter' }));
+        const eventsDetail = findDescendantById(runtime.document.body, 'viewerDetailModal');
+        expect(eventsDetail?.classList.contains('show')).toBe(true);
+        expect(findDescendantById(eventsDetail as FakeElement, 'viewerDetailText')?.textContent).toContain('Long event title');
+        runtime.document.dispatch(new FakeEvent('keydown', { key: 'Escape' }));
+        expect(runtime.document.activeElement).toBe(eventsList);
         const pending = api.openEventsViewer('events-pending', 'Events');
         api.closeEventsViewer();
         expect(reads.at(-1)?.signal.aborted).toBe(true);
