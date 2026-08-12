@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { spawn, ChildProcess, execSync, spawnSync } from 'child_process';
 import { connect as tlsConnect, TLSSocket } from 'node:tls';
 import { pathToFileURL } from 'node:url';
+import type { Transform } from 'node:stream';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
 import { compareUpdateVersions, isNewerUpdateVersion, normalizeUpdateVersion } from './main/domain/update-version-utils';
@@ -19,7 +20,7 @@ import {
 import { tBackend as tBackendCore, type BackendMessageKey } from './main/domain/i18n-backend';
 import { watchRendererChanges } from './main/dev-reload';
 import { createPausableOutput, type PausableOutput } from './main/domain/pausable-output';
-import { createTokenBucketTransform } from './main/domain/token-bucket-transform';
+import { createTokenBucketBudget, createTokenBucketTransform } from './main/domain/token-bucket-transform';
 import { decideDownloadStart, normalizeDownloadPolicy, type DownloadPolicy } from './main/domain/download-policy';
 import { PartialDownloadRegistry } from './main/domain/partial-download';
 import { QueueProcessRegistry, QueueRunLifecycle, waitForChildProcessExit } from './main/queue/process-registry';
@@ -418,6 +419,11 @@ function getStreamlinkStreamArg(): string {
     return `${choice},best`;
 }
 
+function createDownloadThrottleTransform(): Transform | undefined {
+    const maxBytesPerSecond = config.download_policy.throttle?.maxBytesPerSecond ?? null;
+    downloadThrottleBudget.setMaxBytesPerSecond(maxBytesPerSecond);
+    return maxBytesPerSecond ? createTokenBucketTransform(maxBytesPerSecond, undefined, downloadThrottleBudget) : undefined;
+}
 function normalizeConfigTemplates(input: Config): Config {
     // downloaded_vod_ids is bounded so a long-running app doesn't accumulate
     // an unbounded list across years of downloads. Latest entries kept.
@@ -809,6 +815,7 @@ const activeDownloads = new Map<string, ActiveDownloadTracking>();
 const cancelledItemIds = new Set<string>();
 const queueProcessRegistry = new QueueProcessRegistry();
 const queueRunLifecycle = new QueueRunLifecycle(queueProcessRegistry);
+const downloadThrottleBudget = createTokenBucketBudget(null);
 let downloadPolicyWakeTimer: NodeJS.Timeout | null = null;
 let lastDownloadPolicyStatusFingerprint = '';
 
@@ -4039,11 +4046,10 @@ function downloadVODPart(
             resolve({ success: false, error: tBackend('unknownDownloadError') });
             return;
         }
-        const maxBytesPerSecond = config.download_policy.throttle?.maxBytesPerSecond;
         const output = createPausableOutput(
             proc.stdout,
             outputStream,
-            maxBytesPerSecond ? createTokenBucketTransform(maxBytesPerSecond) : undefined,
+            createDownloadThrottleTransform(),
         );
         const outputFinished = output.finished.then(() => null, (error) => error);
         const processRegistration = queueProcessRegistry.register(itemId, 'streamlink', {
@@ -7515,6 +7521,7 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
     }
     const nextConfig = normalizeConfigTemplates({ ...config, ...acceptedConfig });
     config = persistStateChange(config, () => nextConfig, saveConfig);
+    downloadThrottleBudget.setMaxBytesPerSecond(config.download_policy.throttle?.maxBytesPerSecond ?? null);
     if (JSON.stringify(config.download_policy) !== previousDownloadPolicy && !isDownloading && downloadQueue.some((item) => item.status === 'pending')) {
         scheduleQueueProcessing();
     } else {
@@ -8165,11 +8172,10 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
             resolve({ success: false, error: tBackend('unknownDownloadError') });
             return;
         }
-        const maxBytesPerSecond = config.download_policy.throttle?.maxBytesPerSecond;
         const output = createPausableOutput(
             proc.stdout,
             fs.createWriteStream(partialFilename, { flags: 'w' }),
-            maxBytesPerSecond ? createTokenBucketTransform(maxBytesPerSecond) : undefined,
+            createDownloadThrottleTransform(),
         );
         const outputFinished = output.finished.then(() => null, (error) => error);
 

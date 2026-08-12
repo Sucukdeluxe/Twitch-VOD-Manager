@@ -17,7 +17,8 @@ const inputIds = [
     'deletePartsAfterMergeToggle', 'discordWebhookUrl', 'discordNotifyLiveStartToggle', 'discordNotifyLiveEndToggle',
     'discordNotifyVodCompleteToggle', 'discordNotifyVodAutoQueuedToggle', 'autoVodPollMinutes', 'autoVodMaxAgeHours',
     'autoCleanupEnabledToggle', 'autoCleanupDays', 'autoCleanupTarget', 'autoCleanupAction', 'streamlinkQuality',
-    'metadataCacheMinutes', 'vodFilenameTemplate', 'partsFilenameTemplate', 'defaultClipFilenameTemplate'
+    'metadataCacheMinutes', 'vodFilenameTemplate', 'partsFilenameTemplate', 'defaultClipFilenameTemplate',
+    'downloadThrottleMiBps', 'downloadWindows', 'downloadPolicyValidation'
 ];
 
 function createInput(value = '', checked = false): Input {
@@ -25,6 +26,52 @@ function createInput(value = '', checked = false): Input {
 }
 
 describe('renderer settings autosave orchestration', () => {
+    it('persists a pure download policy change through the real autosave fingerprint', async () => {
+        const inputs = new Map(inputIds.map((id) => [id, createInput()]));
+        inputs.get('downloadThrottleMiBps')!.value = '1';
+        inputs.get('downloadWindows')!.value = '22:00-06:00';
+        const saveConfigCalls: Array<Record<string, unknown>> = [];
+        const window = {
+            api: {
+                setClientSecret: () => Promise.resolve({ encryptionAvailable: true, clientSecretConfigured: false, discordWebhookConfigured: false }),
+                clearClientSecret: () => Promise.resolve({ encryptionAvailable: true, clientSecretConfigured: false, discordWebhookConfigured: false }),
+                setDiscordWebhook: () => Promise.resolve({ encryptionAvailable: true, clientSecretConfigured: false, discordWebhookConfigured: false }),
+                clearDiscordWebhook: () => Promise.resolve({ encryptionAvailable: true, clientSecretConfigured: false, discordWebhookConfigured: false }),
+                saveConfig(payload: Record<string, unknown>) {
+                    saveConfigCalls.push(payload);
+                    return Promise.resolve(payload);
+                },
+            },
+        };
+        const sandbox = {
+            window,
+            config: { download_policy: { throttle: { maxBytesPerSecond: 1_048_576 }, windows: [{ start: '22:00', end: '06:00' }] } },
+            UI_TEXT: { status: {}, static: {}, streamers: {} },
+            byId: (id: string) => inputs.get(id) ?? createInput(),
+            collectUnknownTemplatePlaceholders: () => [],
+            document: { hidden: false, querySelector: () => null, getElementById: () => null },
+            setTimeout,
+            clearTimeout,
+            console,
+        };
+        const context = vm.createContext(sandbox);
+        const source = fs.readFileSync(path.join(process.cwd(), 'src', 'renderer-settings.ts'), 'utf8');
+        const compiled = ts.transpileModule(source, {
+            compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+        }).outputText;
+        vm.runInContext(compiled, context);
+
+        vm.runInContext('lastPersistedSettingsFingerprint = getSettingsFingerprint(collectAutoSavePayload())', context);
+        inputs.get('downloadThrottleMiBps')!.value = '1.5';
+        await (vm.runInContext('flushSettingsAutoSave(false)', context) as Promise<void>);
+
+        expect(saveConfigCalls).toHaveLength(1);
+        expect(saveConfigCalls[0].download_policy).toEqual({
+            throttle: { maxBytesPerSecond: 1_572_864 },
+            windows: [{ start: '22:00', end: '06:00' }]
+        });
+    });
+
     it('persists a newer secret after an earlier asynchronous save settles', async () => {
         const inputs = new Map(inputIds.map((id) => [id, createInput()]));
         inputs.get('clientSecret')!.value = 'A';
