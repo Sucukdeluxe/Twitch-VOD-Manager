@@ -26,7 +26,16 @@ function findUninstaller(installationDirectory) {
     .map((name) => path.join(installationDirectory, name))[0] || '';
 }
 
-function main() {
+async function waitForPathRemoval(targetPath, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (fs.existsSync(targetPath)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return true;
+}
+
+async function main() {
   if (process.platform !== 'win32') throw new Error('Installer smoke requires Windows');
   if (process.env.CI !== 'true' && process.env.TWITCH_VOD_MANAGER_INSTALLER_SMOKE !== '1') {
     throw new Error('Installer smoke is restricted to CI or explicit TWITCH_VOD_MANAGER_INSTALLER_SMOKE=1 opt-in');
@@ -50,19 +59,17 @@ function main() {
       env: { ...process.env, PACKAGED_APP_PATH: executablePath }
     });
     run(uninstallerPath, ['/S'], { cwd: smokeRoot });
-    if (fs.existsSync(executablePath)) throw new Error('Silent uninstall left the packaged executable installed');
+    if (!await waitForPathRemoval(executablePath)) throw new Error('Silent uninstall left the packaged executable installed');
     console.log(JSON.stringify({ failures: [], installerPath }, null, 2));
   } finally {
     if (uninstallerPath && fs.existsSync(uninstallerPath)) {
       spawnSync(uninstallerPath, ['/S'], { cwd: smokeRoot, timeout: 240000, windowsHide: true, stdio: 'ignore' });
     }
-    fs.rmSync(smokeRoot, { recursive: true, force: true });
+    await fs.promises.rm(smokeRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
   }
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
-}
+});
