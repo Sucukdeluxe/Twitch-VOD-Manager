@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.8 - 2026-08-12
+
+- Updated the Windows CI runtime to Node.js 24.11.1, resolving the SQLite native-module crash that interrupted verification workers on Node.js 22.13.0.
+- Corrected the file-capability test expectation for canonical Windows output paths, including 8.3 temporary-directory aliases.
+
 ## 1.0.7 - 2026-08-12
 
 - Replaced versioned Windows Start menu shortcuts with one stable application entry, migrated legacy shortcuts during upgrades and refreshed the Windows Shell registration.

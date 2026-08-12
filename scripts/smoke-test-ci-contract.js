@@ -48,7 +48,7 @@ for (const relativePath of ['.github/workflows/windows-ci.yml', '.gitea/workflow
   ];
 
   check(/runs-on:\s*windows-latest/.test(source), `${relativePath} does not use a Windows runner`);
-  check(/node-version:\s*['"]?22\.13\.0['"]?/.test(source), `${relativePath} does not pin Node 22.13.0`);
+  check(/node-version:\s*['"]?24\.11\.1['"]?/.test(source), `${relativePath} does not pin Node 24.11.1`);
   for (const command of requiredCommands) {
     check(source.includes(`run: ${command}`), `${relativePath} is missing ${command}`);
   }

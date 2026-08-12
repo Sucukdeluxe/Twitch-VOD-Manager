@@ -92,7 +92,7 @@ describe('file capability boundary', () => {
         expect(() => store.issue({ ownerId: 3, purpose: 'merge-output', path: directoryTarget, kind: 'output-file', extensions: ['mp4'] })).toThrow('Output target is not a file');
 
         const output = store.issue({ ownerId: 3, purpose: 'merge-output', path: fixture.output, kind: 'output-file', extensions: ['mp4'] });
-        expect(store.consume(output.token, 3, 'merge-output')).toBe(fixture.output);
+        expect(store.consume(output.token, 3, 'merge-output')).toBe(join(realpathSync.native(fixture.directory), 'result.mp4'));
     });
 
     it('rejects an output capability that aliases a protected input', () => {
