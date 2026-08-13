@@ -7,6 +7,8 @@ let settingsAutoSaveTimer: number | null = null;
 let pendingCredentialsReconnect = false;
 let lastPersistedSettingsFingerprint = '';
 let settingsInputGeneration = 0;
+let lastPreflightResult: PreflightResult | null = null;
+let preflightGeneration = 0;
 const SECRET_INPUT_MASK = '••••••••';
 let secretStatus: SecretStatus = {
     encryptionAvailable: false,
@@ -276,6 +278,7 @@ function changeLanguage(lang: string): void {
 
     void refreshRuntimeMetrics();
     void refreshAutomationStatusLine();
+    refreshLocalizedPreflightUi();
     validateFilenameTemplates();
     filterSettings(byId<HTMLInputElement>('settingsSearchInput').value);
 }
@@ -296,30 +299,53 @@ function selectLanguageOption(lang: string): void {
     changeLanguage(lang);
 }
 
-function renderPreflightResult(result: PreflightResult): void {
-    const entries = [
-        [UI_TEXT.static.preflightInternet, result.checks.internet],
-        [UI_TEXT.static.preflightStreamlink, result.checks.streamlink],
-        [UI_TEXT.static.preflightFfmpeg, result.checks.ffmpeg],
-        [UI_TEXT.static.preflightFfprobe, result.checks.ffprobe],
-        [UI_TEXT.static.preflightPath, result.checks.downloadPathWritable]
-    ];
+function renderPreflightButtonLabels(): void {
+    const runButton = byId<HTMLButtonElement>('btnPreflightRun');
+    const fixButton = byId<HTMLButtonElement>('btnPreflightFix');
+    runButton.textContent = runButton.disabled ? UI_TEXT.static.preflightChecking : UI_TEXT.static.preflightRun;
+    fixButton.textContent = fixButton.disabled ? UI_TEXT.static.preflightFixing : UI_TEXT.static.preflightFix;
+}
 
+function refreshLocalizedPreflightUi(): void {
+    renderPreflightButtonLabels();
+    if (lastPreflightResult) renderPreflightResult(lastPreflightResult);
+}
+
+function invalidatePreflightResult(): void {
+    preflightGeneration += 1;
+    lastPreflightResult = null;
+    byId('preflightResult').textContent = UI_TEXT.static.preflightEmpty;
+    const badge = byId('healthBadge');
+    badge.classList.remove('good', 'warn', 'bad', 'unknown');
+    badge.classList.add('unknown');
+    badge.textContent = UI_TEXT.static.healthUnknown;
+}
+
+function renderPreflightResult(result: PreflightResult): void {
+    lastPreflightResult = result;
+    const entries: Array<[string, boolean, string]> = [
+        [UI_TEXT.static.preflightInternet, result.checks.internet, UI_TEXT.static.preflightNoInternet],
+        [UI_TEXT.static.preflightStreamlink, result.checks.streamlink, UI_TEXT.static.preflightStreamlinkMissing],
+        [UI_TEXT.static.preflightFfmpeg, result.checks.ffmpeg, UI_TEXT.static.preflightFfmpegMissing],
+        [UI_TEXT.static.preflightFfprobe, result.checks.ffprobe, UI_TEXT.static.preflightFfprobeMissing],
+        [UI_TEXT.static.preflightPath, result.checks.downloadPathWritable, UI_TEXT.static.preflightDownloadPathNotWritable]
+    ];
+    const localizedIssues = entries.filter(([, ok]) => !ok).map(([, , message]) => message);
     const lines = entries.map(([name, ok]) => `${ok ? 'OK' : 'FAIL'} ${name}`).join('\n');
-    const extra = result.messages.length ? `\n\n${result.messages.join('\n')}` : `\n\n${UI_TEXT.static.preflightReady}`;
+    const extra = localizedIssues.length ? `\n\n${localizedIssues.join('\n')}` : `\n\n${UI_TEXT.static.preflightReady}`;
 
     byId('preflightResult').textContent = `${lines}${extra}`;
 
     const badge = byId('healthBadge');
     badge.classList.remove('good', 'warn', 'bad', 'unknown');
 
-    if (result.ok) {
+    const failCount = localizedIssues.length;
+    if (failCount === 0) {
         badge.classList.add('good');
         badge.textContent = UI_TEXT.static.healthGood;
         return;
     }
 
-    const failCount = Object.values(result.checks).filter((ok) => !ok).length;
     if (failCount <= 2) {
         badge.classList.add('warn');
         badge.textContent = UI_TEXT.static.healthWarn;
@@ -331,16 +357,16 @@ function renderPreflightResult(result: PreflightResult): void {
 
 async function runPreflight(autoFix = false): Promise<void> {
     const btn = byId<HTMLButtonElement>(autoFix ? 'btnPreflightFix' : 'btnPreflightRun');
-    const old = btn.textContent || '';
+    const generation = ++preflightGeneration;
     btn.disabled = true;
-    btn.textContent = autoFix ? UI_TEXT.static.preflightFixing : UI_TEXT.static.preflightChecking;
+    renderPreflightButtonLabels();
 
     try {
         const result = await window.api.runPreflight(autoFix);
-        renderPreflightResult(result);
+        if (generation === preflightGeneration) renderPreflightResult(result);
     } finally {
         btn.disabled = false;
-        btn.textContent = old;
+        renderPreflightButtonLabels();
     }
 }
 
@@ -378,7 +404,10 @@ async function repairManagedTools(): Promise<void> {
     byId('managedToolStatus').textContent = UI_TEXT.static.managedToolsRepairing;
     try {
         const result = await window.api.repairManagedTools();
-        if (result) renderManagedToolStatus(result.statuses);
+        if (result) {
+            renderManagedToolStatus(result.statuses);
+            invalidatePreflightResult();
+        }
     } finally {
         for (const button of buttons) button.disabled = false;
     }
@@ -387,7 +416,10 @@ async function repairManagedTools(): Promise<void> {
 async function resetManagedTools(): Promise<void> {
     if (!confirm(UI_TEXT.static.managedToolsResetConfirm)) return;
     const result = await window.api.resetManagedTools();
-    if (result) renderManagedToolStatus(result.statuses);
+    if (result) {
+        renderManagedToolStatus(result.statuses);
+        invalidatePreflightResult();
+    }
 }
 
 async function runCleanupDryRun(): Promise<void> {
@@ -564,6 +596,7 @@ async function importConfigFromFile(): Promise<void> {
             config = await window.api.getConfig();
             if (typeof setLanguage === 'function' && typeof config.language === 'string') {
                 setLanguage(config.language);
+                invalidatePreflightResult();
             }
             if (typeof renderStreamers === 'function') renderStreamers();
             if (typeof syncSettingsFormFromConfig === 'function') syncSettingsFormFromConfig();
@@ -1141,6 +1174,7 @@ async function selectFolder(): Promise<void> {
 
     byId<HTMLInputElement>('downloadPath').value = folder.displayPath;
     config = await window.api.saveConfig({ download_path: folder.displayPath }, folder.token);
+    invalidatePreflightResult();
 
     // Warn-only validation — the user explicitly chose this folder, so don't
     // refuse to save (they might be picking a path on a USB stick that's

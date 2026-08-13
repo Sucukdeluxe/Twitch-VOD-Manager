@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.16 - 2026-08-13
+
+- Preserve completed System Check results when switching between German and English.
+- Relocalize successful and failed diagnostics, health badges and running check controls without stale language state.
+- Clear obsolete System Check results after download path, imported configuration or managed tool changes.
+
 ## 1.0.15 - 2026-08-13
 
 - Keep update download progress within its popover and make changelog expansion and collapse easier to follow.

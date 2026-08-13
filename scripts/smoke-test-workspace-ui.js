@@ -96,6 +96,139 @@ async function run() {
     check(shell.topNavigationItems === 7, `Expected 7 native primary navigation buttons, found ${shell.topNavigationItems}`);
     check(shell.nonButtonNavigationItems === 0, `Expected only native primary navigation buttons, found ${shell.nonButtonNavigationItems} non-buttons`);
 
+    const preflightLocaleRetention = await win.evaluate(async () => {
+      await window.runPreflight(false);
+      window.changeLanguage('de');
+      const german = {
+        result: document.getElementById('preflightResult')?.textContent || '',
+        badge: document.getElementById('healthBadge')?.textContent || '',
+        badgeGood: document.getElementById('healthBadge')?.classList.contains('good') || false
+      };
+      window.changeLanguage('en');
+      const english = {
+        result: document.getElementById('preflightResult')?.textContent || '',
+        badge: document.getElementById('healthBadge')?.textContent || '',
+        badgeGood: document.getElementById('healthBadge')?.classList.contains('good') || false
+      };
+      return { german, english };
+    });
+    checks.preflightLocaleRetention = preflightLocaleRetention;
+    check(preflightLocaleRetention.german.result.includes('OK Download-Pfad') && preflightLocaleRetention.german.result.includes('Alles bereit.'), `German language switch lost the completed system check: ${preflightLocaleRetention.german.result}`);
+    check(preflightLocaleRetention.english.result.includes('OK Download path') && preflightLocaleRetention.english.result.includes('Everything is ready.'), `English language switch lost the completed system check: ${preflightLocaleRetention.english.result}`);
+    check(preflightLocaleRetention.german.badgeGood && preflightLocaleRetention.german.badge === 'System: Stabil', `German language switch lost the healthy system badge: ${JSON.stringify(preflightLocaleRetention.german)}`);
+    check(preflightLocaleRetention.english.badgeGood && preflightLocaleRetention.english.badge === 'System: Stable', `English language switch lost the healthy system badge: ${JSON.stringify(preflightLocaleRetention.english)}`);
+
+    await app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('run-preflight');
+      ipcMain.handle('run-preflight', async () => ({
+        ok: false,
+        autoFixApplied: false,
+        checks: {
+          internet: false,
+          streamlink: true,
+          ffmpeg: false,
+          ffprobe: true,
+          downloadPathWritable: true
+        },
+        messages: [
+          'No internet connection detected.',
+          'FFmpeg is missing or not runnable.'
+        ],
+        timestamp: '2026-01-01T00:00:00Z'
+      }));
+    });
+    const failedPreflightLocaleRetention = await win.evaluate(async () => {
+      window.changeLanguage('en');
+      await window.runPreflight(false);
+      window.changeLanguage('de');
+      const german = {
+        result: document.getElementById('preflightResult')?.textContent || '',
+        badge: document.getElementById('healthBadge')?.textContent || '',
+        badgeWarn: document.getElementById('healthBadge')?.classList.contains('warn') || false
+      };
+      window.changeLanguage('en');
+      const english = {
+        result: document.getElementById('preflightResult')?.textContent || '',
+        badge: document.getElementById('healthBadge')?.textContent || '',
+        badgeWarn: document.getElementById('healthBadge')?.classList.contains('warn') || false
+      };
+      return { german, english };
+    });
+    checks.failedPreflightLocaleRetention = failedPreflightLocaleRetention;
+    check(failedPreflightLocaleRetention.german.result.includes('Keine Internetverbindung erkannt.') && failedPreflightLocaleRetention.german.result.includes('FFmpeg fehlt oder ist nicht startbar.'), `German language switch did not relocalize failed system checks: ${failedPreflightLocaleRetention.german.result}`);
+    check(!failedPreflightLocaleRetention.german.result.includes('No internet connection detected.'), `German failed system check kept English diagnostics: ${failedPreflightLocaleRetention.german.result}`);
+    check(failedPreflightLocaleRetention.english.result.includes('No internet connection detected.') && failedPreflightLocaleRetention.english.result.includes('FFmpeg is missing or not runnable.'), `English language switch did not relocalize failed system checks: ${failedPreflightLocaleRetention.english.result}`);
+    check(failedPreflightLocaleRetention.german.badgeWarn && failedPreflightLocaleRetention.german.badge === 'System: Warnung', `German failed system badge was not retained: ${JSON.stringify(failedPreflightLocaleRetention.german)}`);
+    check(failedPreflightLocaleRetention.english.badgeWarn && failedPreflightLocaleRetention.english.badge === 'System: Warning', `English failed system badge was not retained: ${JSON.stringify(failedPreflightLocaleRetention.english)}`);
+
+    await app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('run-preflight');
+      ipcMain.handle('run-preflight', () => new Promise((resolve) => {
+        globalThis.__workspacePreflightLocaleResolve = () => resolve({
+          ok: true,
+          autoFixApplied: false,
+          checks: {
+            internet: true,
+            streamlink: true,
+            ffmpeg: true,
+            ffprobe: true,
+            downloadPathWritable: true
+          },
+          messages: [],
+          timestamp: '2026-01-01T00:00:00Z'
+        });
+      }));
+    });
+    await win.evaluate(() => {
+      window.changeLanguage('en');
+      globalThis.__workspacePreflightLocalePending = window.runPreflight(false);
+    });
+    await app.evaluate(async () => {
+      const deadline = Date.now() + 5000;
+      while (typeof globalThis.__workspacePreflightLocaleResolve !== 'function') {
+        if (Date.now() >= deadline) throw new Error('Timed out waiting for the gated system check');
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    });
+    const duringPreflightLocale = await win.evaluate(() => {
+      window.changeLanguage('de');
+      return document.getElementById('btnPreflightRun')?.textContent || '';
+    });
+    const changedDownloadPath = path.join(environment.downloadsDir, 'preflight-path-change');
+    fs.mkdirSync(changedDownloadPath, { recursive: true });
+    await app.evaluate(({ dialog }, folderPath) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folderPath] });
+    }, changedDownloadPath);
+    await win.evaluate(() => window.selectFolder());
+    await app.evaluate(() => globalThis.__workspacePreflightLocaleResolve());
+    const afterPreflightLocale = await win.evaluate(async () => {
+      await globalThis.__workspacePreflightLocalePending;
+      return document.getElementById('btnPreflightRun')?.textContent || '';
+    });
+    const preflightInFlightLocale = { during: duringPreflightLocale, after: afterPreflightLocale };
+    checks.preflightInFlightLocale = preflightInFlightLocale;
+    check(preflightInFlightLocale.during === 'Prüfe...', `Running system check did not adopt the German language: ${preflightInFlightLocale.during}`);
+    check(preflightInFlightLocale.after === 'Check ausführen', `Completed system check restored an outdated button label: ${preflightInFlightLocale.after}`);
+
+    const preflightAfterPathChange = await win.evaluate(() => {
+      window.changeLanguage('en');
+      const english = {
+        result: document.getElementById('preflightResult')?.textContent || '',
+        badge: document.getElementById('healthBadge')?.textContent || '',
+        badgeUnknown: document.getElementById('healthBadge')?.classList.contains('unknown') || false
+      };
+      window.changeLanguage('de');
+      const german = {
+        result: document.getElementById('preflightResult')?.textContent || '',
+        badge: document.getElementById('healthBadge')?.textContent || '',
+        badgeUnknown: document.getElementById('healthBadge')?.classList.contains('unknown') || false
+      };
+      return { english, german };
+    });
+    checks.preflightAfterPathChange = preflightAfterPathChange;
+    check(preflightAfterPathChange.english.result === 'No checks run yet.' && preflightAfterPathChange.english.badgeUnknown && preflightAfterPathChange.english.badge === 'System: Unknown', `Download path change kept a stale English system check: ${JSON.stringify(preflightAfterPathChange.english)}`);
+    check(preflightAfterPathChange.german.result === 'Noch kein Check ausgeführt.' && preflightAfterPathChange.german.badgeUnknown && preflightAfterPathChange.german.badge === 'System: Unbekannt', `Download path change restored a stale German system check: ${JSON.stringify(preflightAfterPathChange.german)}`);
+
     const mergeAddToolbarActions = await win.evaluate(() => {
       const capture = () => {
         const button = document.querySelector('[data-toolbar-for="merge"] button[onclick="addMergeFiles()"]');
