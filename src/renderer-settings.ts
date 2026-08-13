@@ -8,6 +8,7 @@ let pendingCredentialsReconnect = false;
 let lastPersistedSettingsFingerprint = '';
 let settingsInputGeneration = 0;
 let lastPreflightResult: PreflightResult | null = null;
+let preflightFailed = false;
 let preflightGeneration = 0;
 const SECRET_INPUT_MASK = '••••••••';
 let secretStatus: SecretStatus = {
@@ -209,10 +210,8 @@ async function refreshRuntimeMetrics(showLoading = true): Promise<void> {
             lastRuntimeMetricsOutput = nextOutput;
         }
     } catch {
-        if (lastRuntimeMetricsOutput !== UI_TEXT.static.runtimeMetricsError) {
-            output.textContent = UI_TEXT.static.runtimeMetricsError;
-            lastRuntimeMetricsOutput = UI_TEXT.static.runtimeMetricsError;
-        }
+        output.textContent = UI_TEXT.static.runtimeMetricsError;
+        lastRuntimeMetricsOutput = UI_TEXT.static.runtimeMetricsError;
     }
 }
 
@@ -314,11 +313,15 @@ function setSettingsPane(pane: string, source?: HTMLElement): void {
 }
 
 function changeLanguage(lang: string): void {
+    const normalized = applyRendererLanguage(lang);
+    void window.api.saveConfig({ language: normalized });
+}
+
+function applyRendererLanguage(lang: string): LanguageCode {
     const normalized = setLanguage(lang);
     byId<HTMLSelectElement>('languageSelect').value = normalized;
     updateLanguagePicker(normalized);
     config.language = normalized;
-    void window.api.saveConfig({ language: normalized });
 
     const currentStatus = byId('statusText').textContent?.trim() || '';
     const statusTone: ConnectionStatusTone = isConnected
@@ -349,6 +352,7 @@ function changeLanguage(lang: string): void {
     refreshLocalizedPreflightUi();
     validateFilenameTemplates();
     filterSettings(byId<HTMLInputElement>('settingsSearchInput').value);
+    return normalized;
 }
 
 function updateLanguagePicker(lang: string): void {
@@ -377,20 +381,33 @@ function renderPreflightButtonLabels(): void {
 function refreshLocalizedPreflightUi(): void {
     renderPreflightButtonLabels();
     if (lastPreflightResult) renderPreflightResult(lastPreflightResult);
+    else if (preflightFailed) renderPreflightError();
 }
 
 function invalidatePreflightResult(): void {
     preflightGeneration += 1;
     lastPreflightResult = null;
-    byId('preflightResult').textContent = UI_TEXT.static.preflightEmpty;
+    preflightFailed = false;
+    renderUnknownPreflightState(UI_TEXT.static.preflightEmpty);
+}
+
+function renderUnknownPreflightState(message: string): void {
+    byId('preflightResult').textContent = message;
     const badge = byId('healthBadge');
     badge.classList.remove('good', 'warn', 'bad', 'unknown');
     badge.classList.add('unknown');
     badge.textContent = UI_TEXT.static.healthUnknown;
 }
 
+function renderPreflightError(): void {
+    lastPreflightResult = null;
+    preflightFailed = true;
+    renderUnknownPreflightState(UI_TEXT.static.preflightError);
+}
+
 function renderPreflightResult(result: PreflightResult): void {
     lastPreflightResult = result;
+    preflightFailed = false;
     const entries: Array<[string, boolean, string]> = [
         [UI_TEXT.static.preflightInternet, result.checks.internet, UI_TEXT.static.preflightNoInternet],
         [UI_TEXT.static.preflightStreamlink, result.checks.streamlink, UI_TEXT.static.preflightStreamlinkMissing],
@@ -432,6 +449,8 @@ async function runPreflight(autoFix = false): Promise<void> {
     try {
         const result = await window.api.runPreflight(autoFix);
         if (generation === preflightGeneration) renderPreflightResult(result);
+    } catch {
+        if (generation === preflightGeneration) renderPreflightError();
     } finally {
         btn.disabled = false;
         renderPreflightButtonLabels();
@@ -662,17 +681,23 @@ async function importConfigFromFile(): Promise<void> {
         invalidatePreflightResult();
         // Reload local config copy + refresh forms / streamer list / VOD grid
         try {
-            config = await window.api.getConfig();
-            if (typeof setLanguage === 'function' && typeof config.language === 'string') {
-                setLanguage(config.language);
-            }
-            if (typeof renderStreamers === 'function') renderStreamers();
+            const currentConfig = config;
+            const importedConfig = await window.api.getConfig();
+            const language = typeof importedConfig.language === 'string'
+                ? importedConfig.language
+                : typeof currentConfig.language === 'string'
+                    ? currentConfig.language
+                    : currentLanguage;
+            const theme = typeof importedConfig.theme === 'string'
+                ? importedConfig.theme
+                : typeof currentConfig.theme === 'string'
+                    ? currentConfig.theme
+                    : byId<HTMLSelectElement>('themeSelect').value || 'twitch';
+            config = { ...currentConfig, ...importedConfig, language, theme };
             if (typeof syncSettingsFormFromConfig === 'function') syncSettingsFormFromConfig();
-            if (typeof renderVodGridFromCurrentState === 'function' && lastLoadedStreamer) {
-                renderVodGridFromCurrentState();
-            }
+            applyRendererTheme(theme);
+            applyRendererLanguage(language);
         } catch { /* ignore — next refresh will catch up */ }
-        refreshLocalizedPreflightUi();
         if (toast) toast(UI_TEXT.static.configImported, 'info');
     } else if (result.cancelled) {
         // User cancelled the dialog — no toast needed.
@@ -1131,9 +1156,13 @@ function initSettingsAutoSave(): void {
         'downloadChatReplayToggle',
         'captureLiveChatToggle',
         'logStreamEventsToggle',
+        'autoResumeLiveRecordingToggle',
+        'autoMergeResumedPartsToggle',
+        'deletePartsAfterMergeToggle',
         'discordNotifyLiveStartToggle',
         'discordNotifyLiveEndToggle',
         'discordNotifyVodCompleteToggle',
+        'discordNotifyVodAutoQueuedToggle',
         'autoCleanupEnabledToggle',
         'autoCleanupTarget',
         'autoCleanupAction',
@@ -1147,6 +1176,8 @@ function initSettingsAutoSave(): void {
         'partsFilenameTemplate',
         'defaultClipFilenameTemplate',
         'discordWebhookUrl',
+        'autoVodPollMinutes',
+        'autoVodMaxAgeHours',
         'autoCleanupDays',
         'downloadThrottleMiBps',
         'downloadWindows'
@@ -1276,15 +1307,19 @@ function syncWorkspaceThemePicker(theme: string): void {
     });
 }
 
-function selectWorkspaceTheme(theme: string): void {
+function applyRendererTheme(theme: string): void {
     byId<HTMLSelectElement>('themeSelect').value = theme;
+    document.body.className = `theme-${theme}`;
+    config.theme = theme;
+    syncWorkspaceThemePicker(theme);
+}
+
+function selectWorkspaceTheme(theme: string): void {
     changeTheme(theme);
 }
 
 function changeTheme(theme: string): void {
-    document.body.className = `theme-${theme}`;
-    config.theme = theme;
-    syncWorkspaceThemePicker(theme);
+    applyRendererTheme(theme);
     void window.api.saveConfig({ theme });
 }
 

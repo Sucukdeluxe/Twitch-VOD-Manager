@@ -14,30 +14,27 @@ function renderQueueItemFileActions(item: QueueItem): string {
     const first = item.outputFiles[0];
     if (typeof first !== 'string' || !first) return '';
     const safeFirst = escapeHtml(first);
-    const safeFirstAttr = first.replace(/'/g, "\\'").replace(/"/g, '&quot;');
     const buttons: string[] = [];
 
     // "Open file" only makes sense when there's exactly one output (a clip /
     // full VOD download). For multi-part downloads "open the first part" is
     // surprising — the user almost always wants the folder.
     if (item.outputFiles.length === 1) {
-        buttons.push(`<button type="button" class="queue-detail-btn" onclick="invokeOpenFile('${safeFirstAttr}')">${escapeHtml(UI_TEXT.queue.openFile)}</button>`);
+        buttons.push(`<button type="button" class="queue-detail-btn" data-queue-file-action="open" data-queue-file-path="${escapeHtml(first)}">${escapeHtml(UI_TEXT.queue.openFile)}</button>`);
     }
-    buttons.push(`<button type="button" class="queue-detail-btn" onclick="invokeShowInFolder('${safeFirstAttr}')">${escapeHtml(UI_TEXT.queue.showInFolder)}</button>`);
+    buttons.push(`<button type="button" class="queue-detail-btn" data-queue-file-action="folder" data-queue-file-path="${escapeHtml(first)}">${escapeHtml(UI_TEXT.queue.showInFolder)}</button>`);
 
     // Surface a "View chat" button when a sibling chat file exists in the
     // outputs list. Single click opens the in-app viewer modal.
     const chatFile = item.outputFiles.find((f) => /\.chat\.json(l)?$/i.test(f));
     if (chatFile) {
-        const safeChatAttr = chatFile.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-        buttons.push(`<button type="button" class="queue-detail-btn" onclick="openChatViewer('${safeChatAttr}', '${escapeHtml(item.title || item.streamer || '').replace(/'/g, "\\'")}')">${escapeHtml(UI_TEXT.queue.viewChat)}</button>`);
+        buttons.push(`<button type="button" class="queue-detail-btn" data-queue-file-action="chat" data-queue-file-path="${escapeHtml(chatFile)}" data-queue-file-title="${escapeHtml(item.title || item.streamer || '')}">${escapeHtml(UI_TEXT.queue.viewChat)}</button>`);
     }
 
     // Same pattern for the .events.jsonl sidecar — title/game change timeline.
     const eventsFile = item.outputFiles.find((f) => /\.events\.jsonl$/i.test(f));
     if (eventsFile) {
-        const safeEventsAttr = eventsFile.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-        buttons.push(`<button type="button" class="queue-detail-btn" onclick="openEventsViewer('${safeEventsAttr}', '${escapeHtml(item.title || item.streamer || '').replace(/'/g, "\\'")}')">${escapeHtml(UI_TEXT.queue.viewEvents)}</button>`);
+        buttons.push(`<button type="button" class="queue-detail-btn" data-queue-file-action="events" data-queue-file-path="${escapeHtml(eventsFile)}" data-queue-file-title="${escapeHtml(item.title || item.streamer || '')}">${escapeHtml(UI_TEXT.queue.viewEvents)}</button>`);
     }
 
     const fileLabel = item.outputFiles.length === 1
@@ -53,18 +50,109 @@ function renderQueueItemFileActions(item: QueueItem): string {
 }
 
 async function invokeOpenFile(filePath: string): Promise<void> {
-    const ok = await window.api.openFile(filePath);
-    if (!ok) {
-        const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
-        if (toast) toast(UI_TEXT.queue.openFileFailed, 'warn');
+    let ok: boolean;
+    try {
+        ok = await window.api.openFile(filePath);
+    } catch {
+        ok = false;
     }
+    if (ok) return;
+    const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
+    if (toast) toast(UI_TEXT.queue.openFileFailed, 'warn');
 }
 
 async function invokeShowInFolder(filePath: string): Promise<void> {
-    const ok = await window.api.showInFolder(filePath);
-    if (!ok) {
+    let ok: boolean;
+    try {
+        ok = await window.api.showInFolder(filePath);
+    } catch {
+        ok = false;
+    }
+    if (ok) return;
+    const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
+    if (toast) toast(UI_TEXT.queue.openFileFailed, 'warn');
+}
+
+async function invokeQueueFileAction(action: string, filePath: string, title = ''): Promise<void> {
+    if (action === 'open') {
+        await invokeOpenFile(filePath);
+    } else if (action === 'folder') {
+        await invokeShowInFolder(filePath);
+    } else if (action === 'chat') {
+        await openChatViewer(filePath, title);
+    } else if (action === 'events') {
+        await openEventsViewer(filePath, title);
+    }
+}
+
+let queueActionsInitialized = false;
+
+async function invokeQueueItemAction(action: string, id: string): Promise<void> {
+    if (action === 'details') {
+        toggleQueueDetails(id);
+    } else if (action === 'remove') {
+        await removeFromQueue(id);
+    } else if (action === 'retry') {
+        await retryQueueItem(id);
+    }
+}
+
+async function invokeQueueActionSafely(action: () => void | Promise<void>): Promise<void> {
+    try {
+        await action();
+    } catch {
         const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
-        if (toast) toast(UI_TEXT.queue.openFileFailed, 'warn');
+        if (toast) toast(UI_TEXT.queue.failed, 'warn');
+    }
+}
+
+async function activateQueueControl(control: HTMLElement): Promise<void> {
+    await invokeQueueActionSafely(async () => {
+        const fileAction = control.dataset.queueFileAction;
+        const filePath = control.dataset.queueFilePath;
+        if (fileAction && filePath) {
+            await invokeQueueFileAction(fileAction, filePath, control.dataset.queueFileTitle || '');
+            return;
+        }
+
+        const action = control.dataset.queueAction;
+        const item = control.closest<HTMLElement>('.queue-item');
+        const id = item?.dataset.id;
+        if (!action || !id) return;
+        await invokeQueueItemAction(action, id);
+    });
+}
+
+function resolveQueueControl(target: EventTarget | null): HTMLElement | null {
+    if (!(target instanceof Element)) return null;
+    return target.closest<HTMLElement>('[data-queue-action], [data-queue-file-action]');
+}
+
+function initQueueActions(): void {
+    if (queueActionsInitialized) return;
+    queueActionsInitialized = true;
+    const list = byId('queueList');
+    list.addEventListener('click', (event: MouseEvent) => {
+        const control = resolveQueueControl(event.target);
+        if (!control || !list.contains(control)) return;
+        void activateQueueControl(control);
+    });
+    list.addEventListener('keydown', (event: KeyboardEvent) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const control = resolveQueueControl(event.target);
+        if (!control || !list.contains(control)) return;
+        event.preventDefault();
+        control.click();
+    });
+}
+
+async function copyQueueUrl(url: string): Promise<void> {
+    const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
+    try {
+        await navigator.clipboard.writeText(url);
+        if (toast) toast(UI_TEXT.queue.ctxCopiedUrl, 'info');
+    } catch {
+        if (toast) toast(UI_TEXT.queue.ctxCopyFailed, 'warn');
     }
 }
 
@@ -101,7 +189,9 @@ function getQueueRenderFingerprint(items: QueueItem[]): string {
         item.speed || '',
         item.eta || '',
         item.progressStatus || '',
+        item.recordingHealth || '',
         item.last_error || '',
+        item.mergeRecoveryBlocked ? 'blocked' : '',
         item.mergeGroup?.mergePhase || ''
     ].join(':'));
 
@@ -158,14 +248,41 @@ async function retryQueueItem(id: string): Promise<void> {
 let queueContextMenuInitialized = false;
 let activeQueueContextMenu: HTMLElement | null = null;
 let activeQueueContextMenuInvoker: HTMLElement | null = null;
+let activeQueueContextMenuCleanup: ((restoreFocus?: boolean) => void) | null = null;
 
 function closeQueueContextMenu(restoreFocus = false): void {
+    const cleanup = activeQueueContextMenuCleanup;
+    if (cleanup) {
+        activeQueueContextMenuCleanup = null;
+        cleanup(restoreFocus);
+        return;
+    }
     if (!activeQueueContextMenu) return;
     activeQueueContextMenu.remove();
     activeQueueContextMenu = null;
     const invoker = activeQueueContextMenuInvoker;
     activeQueueContextMenuInvoker = null;
     if (restoreFocus && invoker?.isConnected) invoker.focus();
+}
+
+function installQueueContextMenuDismissal(menu: HTMLElement, cleanupMenu: (restoreFocus: boolean) => void): (restoreFocus?: boolean) => void {
+    let cleaned = false;
+    let cleanup: (restoreFocus?: boolean) => void;
+    const dismissOnClick = (event: MouseEvent) => {
+        if (event.target instanceof Node && menu.contains(event.target)) return;
+        cleanup();
+    };
+    const dismissOnScroll = () => cleanup();
+    cleanup = (restoreFocus = false): void => {
+        if (cleaned) return;
+        cleaned = true;
+        document.removeEventListener('mousedown', dismissOnClick, true);
+        document.removeEventListener('scroll', dismissOnScroll, true);
+        cleanupMenu(restoreFocus);
+    };
+    document.addEventListener('mousedown', dismissOnClick, true);
+    document.addEventListener('scroll', dismissOnScroll, true);
+    return cleanup;
 }
 
 function initQueueContextMenu(): void {
@@ -203,8 +320,7 @@ function showQueueContextMenu(x: number, y: number, item: QueueItem, invoker: HT
     menu.className = 'context-menu';
     menu.setAttribute('role', 'menu');
 
-    let cleanup = (restoreFocus = false): void => closeQueueContextMenu(restoreFocus);
-    const makeItem = (label: string, onClick: () => void, disabled = false): HTMLElement => {
+    const makeItem = (label: string, onClick: () => void | Promise<void>, disabled = false): HTMLElement => {
         const el = document.createElement('button');
         el.type = 'button';
         el.textContent = label;
@@ -216,7 +332,8 @@ function showQueueContextMenu(x: number, y: number, item: QueueItem, invoker: HT
         }
         if (!disabled) {
             el.addEventListener('click', () => {
-                try { onClick(); } finally { cleanup(); }
+                closeQueueContextMenu();
+                void invokeQueueActionSafely(onClick);
             });
         }
         return el;
@@ -230,7 +347,7 @@ function showQueueContextMenu(x: number, y: number, item: QueueItem, invoker: HT
     };
 
     const isPending = item.status === 'pending' || item.status === 'paused';
-    const isFailed = item.status === 'error';
+    const isFailed = item.status === 'error' && !item.mergeRecoveryBlocked;
     const isCompleted = item.status === 'completed';
     const canSelectForMerge = item.status === 'pending' && !item.mergeGroup && !item.isLive;
 
@@ -246,37 +363,29 @@ function showQueueContextMenu(x: number, y: number, item: QueueItem, invoker: HT
     }
 
     if (isPending) {
-        menu.appendChild(makeItem(UI_TEXT.queue.ctxMoveTop, () => { void moveQueueItemTo(item.id, 'top'); }));
-        menu.appendChild(makeItem(UI_TEXT.queue.ctxMoveBottom, () => { void moveQueueItemTo(item.id, 'bottom'); }));
+        menu.appendChild(makeItem(UI_TEXT.queue.ctxMoveTop, () => moveQueueItemTo(item.id, 'top')));
+        menu.appendChild(makeItem(UI_TEXT.queue.ctxMoveBottom, () => moveQueueItemTo(item.id, 'bottom')));
         menu.appendChild(makeSeparator());
     }
 
     if (isFailed) {
-        menu.appendChild(makeItem(UI_TEXT.queue.retryItem, () => { void retryQueueItem(item.id); }));
+        menu.appendChild(makeItem(UI_TEXT.queue.retryItem, () => retryQueueItem(item.id)));
         menu.appendChild(makeSeparator());
     }
 
     if (isCompleted && item.outputFiles && item.outputFiles.length > 0) {
         const first = item.outputFiles[0];
         if (item.outputFiles.length === 1) {
-            menu.appendChild(makeItem(UI_TEXT.queue.openFile, () => { void window.api.openFile(first); }));
+            menu.appendChild(makeItem(UI_TEXT.queue.openFile, () => invokeOpenFile(first)));
         }
-        menu.appendChild(makeItem(UI_TEXT.queue.showInFolder, () => { void window.api.showInFolder(first); }));
+        menu.appendChild(makeItem(UI_TEXT.queue.showInFolder, () => invokeShowInFolder(first)));
         menu.appendChild(makeSeparator());
     }
 
-    menu.appendChild(makeItem(UI_TEXT.queue.ctxCopyUrl, () => {
-        try {
-            void navigator.clipboard.writeText(item.url);
-            const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
-            if (toast) toast(UI_TEXT.queue.ctxCopiedUrl, 'info');
-        } catch { /* ignore */ }
-    }));
-    menu.appendChild(makeItem(UI_TEXT.queue.ctxOpenOnTwitch, () => {
-        void window.api.openExternal(item.url);
-    }));
+    menu.appendChild(makeItem(UI_TEXT.queue.ctxCopyUrl, () => copyQueueUrl(item.url)));
+    menu.appendChild(makeItem(UI_TEXT.queue.ctxOpenOnTwitch, () => window.api.openExternal(item.url)));
     menu.appendChild(makeSeparator());
-    menu.appendChild(makeItem(UI_TEXT.queue.ctxRemove, () => { void removeFromQueue(item.id); }));
+    menu.appendChild(makeItem(UI_TEXT.queue.ctxRemove, () => removeFromQueue(item.id)));
 
     document.body.appendChild(menu);
     activeQueueContextMenu = menu;
@@ -290,20 +399,21 @@ function showQueueContextMenu(x: number, y: number, item: QueueItem, invoker: HT
     menu.style.left = `${left}px`;
     menu.style.top = `${top}px`;
 
-    const dismissOnClick = (ev: MouseEvent) => {
-        if (!activeQueueContextMenu) return;
-        if (ev.target instanceof Node && activeQueueContextMenu.contains(ev.target)) return;
-        cleanup();
-    };
-    const dismissOnScroll = () => cleanup();
-    cleanup = (restoreFocus = false): void => {
-        closeQueueContextMenu(restoreFocus);
-        document.removeEventListener('mousedown', dismissOnClick, true);
-        document.removeEventListener('scroll', dismissOnScroll, true);
-    };
-    document.addEventListener('mousedown', dismissOnClick, true);
-    document.addEventListener('scroll', dismissOnScroll, true);
-    RendererAccessibility.installMenuKeyboardNavigation(menu, () => cleanup(true));
+    let cleanup: (restoreFocus?: boolean) => void;
+    cleanup = installQueueContextMenuDismissal(menu, (restoreFocus) => {
+        if (activeQueueContextMenuCleanup === cleanup) activeQueueContextMenuCleanup = null;
+        if (activeQueueContextMenu === menu) {
+            activeQueueContextMenu = null;
+            const currentInvoker = activeQueueContextMenuInvoker;
+            activeQueueContextMenuInvoker = null;
+            menu.remove();
+            if (restoreFocus && currentInvoker?.isConnected) currentInvoker.focus();
+            return;
+        }
+        menu.remove();
+    });
+    activeQueueContextMenuCleanup = cleanup;
+    RendererAccessibility.installMenuKeyboardNavigation(menu, () => closeQueueContextMenu(true));
     RendererAccessibility.focusFirstMenuItem(menu);
 }
 
@@ -332,14 +442,15 @@ function getQueueProgressStatusText(item: QueueItem): string {
         return item.last_error;
     }
 
+    if (item.status === 'pending') return UI_TEXT.queue.readyToDownload;
+    if (item.status === 'paused') return UI_TEXT.queue.statusPaused;
+    if (item.status === 'completed') return UI_TEXT.queue.done;
+    if (item.status === 'error') return UI_TEXT.queue.failed;
+    if (item.status === 'downloading' && item.progressStatus) return item.progressStatus;
     if (item.currentPart && item.totalParts) {
         return `${UI_TEXT.queue.part} ${item.currentPart}/${item.totalParts}`;
     }
-
-    if (item.status === 'pending') return UI_TEXT.queue.readyToDownload;
-    if (item.status === 'paused') return UI_TEXT.queue.statusPaused;
-    if (item.status === 'downloading') return item.progressStatus || UI_TEXT.queue.started;
-    if (item.status === 'completed') return UI_TEXT.queue.done;
+    if (item.status === 'downloading') return UI_TEXT.queue.started;
     return UI_TEXT.queue.failed;
 }
 
@@ -349,8 +460,8 @@ function getQueueProgressMetricsText(item: QueueItem): string {
     if (item.status === 'downloading' && item.progress > 0) {
         parts.push(`${Math.max(0, Math.min(100, item.progress)).toFixed(1)}%`);
     }
-    if (item.speed) parts.push(item.speed);
-    if (item.eta) parts.push(item.eta);
+    if (item.status === 'downloading' && item.speed) parts.push(item.speed);
+    if (item.status === 'downloading' && item.eta) parts.push(item.eta);
     return parts.join(' | ');
 }
 
@@ -394,14 +505,40 @@ async function createMergeGroupFromSelection(): Promise<void> {
     updateMergeGroupButton();
 }
 
+function syncQueueRecordingHealth(el: HTMLElement, item: QueueItem): void {
+    const current = el.querySelector<HTMLElement>('.queue-health-dot');
+    const health = item.isLive && item.status === 'downloading' ? item.recordingHealth : undefined;
+    if (!health) {
+        current?.remove();
+        return;
+    }
+
+    const labels = UI_TEXT.queue.recordingHealth || { ok: 'Healthy', stale: 'Stalled', unknown: 'Pending data' };
+    const className = health === 'ok' ? 'health-ok' : (health === 'stale' ? 'health-stale' : 'health-unknown');
+    const label = labels[health] || '';
+    let badge = current;
+    if (!badge) {
+        const title = el.querySelector<HTMLElement>('.title');
+        if (!title) return;
+        badge = document.createElement('span');
+        const liveBadge = title.querySelector<HTMLElement>('.queue-live-badge');
+        if (liveBadge) liveBadge.insertAdjacentElement('afterend', badge);
+        else title.prepend(badge);
+    }
+    badge.className = `queue-health-dot ${className}`;
+    badge.title = label;
+    badge.setAttribute('aria-label', label);
+}
+
 function updateQueueItemProgress(progress: DownloadProgress): void {
-    // Lookup by data-id attribute, not array index — survives queue mutation between renders
-    const safeId = String(progress.id ?? '').replace(/"/g, '\\"');
-    if (!safeId) return;
-    const el = byId('queueList').querySelector(`[data-id="${safeId}"]`) as HTMLElement | null;
+    const progressId = String(progress.id ?? '');
+    if (!progressId) return;
+    const list = byId<HTMLElement>('queueList');
+    const el = Array.from(list.querySelectorAll<HTMLElement>('.queue-item'))
+        .find((candidate) => candidate.dataset.id === progressId) || null;
     if (!el) return;
 
-    const item = queue.find(i => i.id === progress.id);
+    const item = queue.find(i => String(i.id) === progressId);
     if (!item) return;
 
     const bar = el.querySelector('.queue-progress-bar') as HTMLElement | null;
@@ -418,6 +555,7 @@ function updateQueueItemProgress(progress: DownloadProgress): void {
     }
     if (status) status.textContent = getQueueProgressStatusText(item);
     if (metrics) metrics.textContent = getQueueProgressMetricsText(item);
+    syncQueueRecordingHealth(el, item);
 }
 
 function toggleQueueDetails(id: string): void {
@@ -488,10 +626,11 @@ function renderQueue(): void {
     }
 
     const list = byId('queueList');
+    initQueueActions();
     byId('queueCount').textContent = String(queue.length);
     const retryBtn = byId<HTMLButtonElement>('btnRetryFailed');
     const clearBtn = byId<HTMLButtonElement>('btnClear');
-    const hasFailed = queue.some((item) => item.status === 'error');
+    const hasFailed = queue.some((item) => item.status === 'error' && !item.mergeRecoveryBlocked);
     const hasCompleted = queue.some((item) => item.status === 'completed');
     retryBtn.disabled = !hasFailed;
     clearBtn.disabled = !hasCompleted;
@@ -516,7 +655,7 @@ function renderQueue(): void {
         return;
     }
 
-    list.innerHTML = queue.map((item: QueueItem) => {
+    list.innerHTML = queue.map((item: QueueItem, itemIndex: number) => {
         const safeTitle = escapeHtml(item.title || UI_TEXT.vods.untitled);
         const safeStatusLabel = escapeHtml(getQueueStatusLabel(item));
         const safeProgressStatus = escapeHtml(getQueueProgressStatusText(item));
@@ -546,16 +685,17 @@ function renderQueue(): void {
         const mergeMetaExtra = isMergeGroup
             ? ` (${UI_TEXT.mergeGroup.metaLabel.replace('{count}', String(item.mergeGroup!.items.length))})`
             : '';
+        const detailsId = `queue-details-${itemIndex}`;
 
         return `
-            <div class="queue-item${isMergeGroup ? ' merge-group' : ''}${isSelected ? ' merge-selected' : ''}" draggable="${item.status === 'pending' ? 'true' : 'false'}" data-id="${item.id}">
+            <div class="queue-item${isMergeGroup ? ' merge-group' : ''}${isSelected ? ' merge-selected' : ''}" draggable="${item.status === 'pending' ? 'true' : 'false'}" data-id="${escapeHtml(item.id)}">
                 ${isSelected ? `<span class="queue-selection-order" title="${selectionTitle}" aria-label="${selectionTitle}">${selectionPosition}</span>` : ''}
                 <div class="status ${item.status}"></div>
                 <div class="queue-main">
                     <div class="queue-title-row">
-                        <div class="title" title="${safeTitle}" role="button" tabindex="0" aria-expanded="${expandedQueueIds.has(item.id) ? 'true' : 'false'}" aria-controls="details-${item.id}" onclick="toggleQueueDetails('${item.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleQueueDetails('${item.id}');}">${liveBadge}${healthBadge}${mergeIcon}${isClip}${safeTitle}</div>
+                        <div class="title" title="${safeTitle}" role="button" tabindex="0" aria-expanded="${expandedQueueIds.has(item.id) ? 'true' : 'false'}" aria-controls="${detailsId}" data-queue-action="details">${liveBadge}${healthBadge}${mergeIcon}${isClip}${safeTitle}</div>
                         <div class="queue-status-label">${safeStatusLabel}</div>
-                        <span class="remove" role="button" tabindex="0" aria-label="${escapeHtml(UI_TEXT.streamers.removeAria)}" onclick="removeFromQueue('${item.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();removeFromQueue('${item.id}');}">x</span>
+                        <span class="remove" role="button" tabindex="0" aria-label="${escapeHtml(UI_TEXT.streamers.removeAria)}" data-queue-action="remove">x</span>
                     </div>
                     <div class="queue-meta"><span class="queue-date">${safeDate}</span>${mergeMetaExtra}</div>
                     <div class="queue-progress-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progressValue)}" aria-label="${escapeHtml(safeStatusLabel)}">
@@ -565,7 +705,7 @@ function renderQueue(): void {
                         <span class="queue-progress-status${progressStatusClass}">${safeProgressStatus}</span>
                         <span class="queue-progress-metrics">${safeProgressMetrics}</span>
                     </div>
-                    <div class="queue-details${expandedQueueIds.has(item.id) ? ' expanded' : ''}" id="details-${item.id}">
+                    <div class="queue-details${expandedQueueIds.has(item.id) ? ' expanded' : ''}" id="${detailsId}">
                         <div><span class="queue-detail-label">URL:</span> ${escapeHtml(item.url)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailStreamer)}</span> ${escapeHtml(item.streamer)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDuration)}</span> ${escapeHtml(item.duration_str)}</div>
@@ -573,7 +713,7 @@ function renderQueue(): void {
                         ${renderQueueItemFileActions(item)}
                     </div>
                 </div>
-                ${item.status === 'error' ? `<button class="queue-retry-btn" type="button" title="${escapeHtml(UI_TEXT.queue.retryItem)}" aria-label="${escapeHtml(UI_TEXT.queue.retryItem)}" onclick="retryQueueItem('${item.id}')">&#x21bb;</button>` : ''}
+                ${item.status === 'error' && !item.mergeRecoveryBlocked ? `<button class="queue-retry-btn" type="button" title="${escapeHtml(UI_TEXT.queue.retryItem)}" aria-label="${escapeHtml(UI_TEXT.queue.retryItem)}" data-queue-action="retry">&#x21bb;</button>` : ''}
             </div>
         `;
     }).join('');

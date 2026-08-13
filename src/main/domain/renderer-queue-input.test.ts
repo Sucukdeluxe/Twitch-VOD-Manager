@@ -87,4 +87,41 @@ describe('renderer queue input', () => {
             customClip: { startSec: -1, durationSec: 10, startPart: 1, filenameFormat: 'simple' },
         })).toBeNull();
     });
+
+    it('cleans interrupted merge artifacts without deleting completed published outputs', () => {
+        const base = createRendererQueueItem({
+            url: 'https://www.twitch.tv/videos/1',
+            title: 'Merge',
+            date: '2026-08-13T00:00:00.000Z',
+            streamer: 'fixture_streamer',
+            duration_str: '1h',
+        }, 'merge-id')!;
+        const interrupted = {
+            ...base,
+            status: 'error' as const,
+            mergeGroup: {
+                items: [],
+                mergePhase: 'splitting' as const,
+                currentItemIndex: 0,
+                downloadedFiles: { 0: 'C:\\downloads\\merge_tmp_0_1.mp4' },
+                mergedFile: 'C:\\downloads\\merged_2.mp4',
+                splitFiles: ['C:\\downloads\\Part01.mp4'],
+                splitTempFiles: ['C:\\downloads\\.merge_split_2_0.mp4'],
+            },
+        };
+        expect(getMergeGroupCleanupPaths(interrupted)).toEqual([
+            'C:\\downloads\\merge_tmp_0_1.mp4',
+            'C:\\downloads\\merged_2.mp4',
+            'C:\\downloads\\Part01.mp4',
+            'C:\\downloads\\.merge_split_2_0.mp4',
+        ]);
+        expect(getMergeGroupCleanupPaths({
+            ...interrupted,
+            status: 'completed',
+            mergeGroup: { ...interrupted.mergeGroup, mergePhase: 'done' },
+        })).toEqual([
+            'C:\\downloads\\merge_tmp_0_1.mp4',
+            'C:\\downloads\\merged_2.mp4',
+        ]);
+    });
 });

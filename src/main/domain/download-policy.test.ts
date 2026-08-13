@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
     decideDownloadStart,
+    decideStandaloneDownloadStart,
     isWithinLocalDownloadWindow,
     normalizeDownloadPolicy,
 } from './download-policy';
@@ -81,6 +82,25 @@ describe('manual download policy override', () => {
             reason: 'manual-override',
             maxBytesPerSecond: 256_000,
             nextStart: null
+        });
+    });
+});
+
+describe('standalone download policy', () => {
+    test('blocks an immediate standalone clip outside the configured window and keeps the throttle decision', () => {
+        const decision = decideStandaloneDownloadStart(
+            normalizeDownloadPolicy({
+                throttle: { maxBytesPerSecond: 256_000 },
+                windows: [{ start: '22:00', end: '06:00' }],
+            }),
+            new Date(2026, 0, 13, 13, 0),
+        );
+
+        expect(decision).toEqual({
+            allowed: false,
+            reason: 'outside-window',
+            maxBytesPerSecond: 256_000,
+            nextStart: new Date(2026, 0, 13, 22, 0),
         });
     });
 });

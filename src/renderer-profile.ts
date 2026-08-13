@@ -52,6 +52,7 @@ function streamerProfilesMatch(left: StreamerProfile, right: StreamerProfile): b
 }
 
 function hideStreamerProfileHeader(): void {
+    activeProfileRequestId += 1;
     activeProfileLogin = '';
     const el = document.getElementById('streamerProfileHeader');
     if (!el) return;
@@ -203,14 +204,14 @@ async function loadStreamerProfile(login: string, forceRefresh = false): Promise
         // while we were waiting on the API.
         if (reqId !== activeProfileRequestId) return;
         if (!profile) {
-            hideStreamerProfileHeader();
+            if (!cached) hideStreamerProfileHeader();
             return;
         }
         const rememberDisplayName = (window as unknown as { rememberStreamerDisplayName?: (login: string, displayName: string) => void }).rememberStreamerDisplayName;
         if (typeof rememberDisplayName === 'function') rememberDisplayName(profile.login, profile.displayName);
         if (!cached || !streamerProfilesMatch(cached, profile)) renderStreamerProfileCard(profile);
     } catch (_) {
-        if (reqId === activeProfileRequestId) hideStreamerProfileHeader();
+        if (reqId === activeProfileRequestId && !cached) hideStreamerProfileHeader();
     }
 }
 

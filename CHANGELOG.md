@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.18 - 2026-08-13
+
+- Keep update downloads, progress, errors and changelog controls contained and responsive throughout the complete update flow.
+- Preserve System Check results across language changes and keep repeated diagnostics in a clear terminal state.
+- Expand Live Debug Log and Runtime Metrics layouts, improve dark-theme controls and make navigation and settings labels easier to read.
+- Improve the video cutter with accessible new, open and save actions, unambiguous frame timecodes, multi-audio exports and verified VFR, AV1, HEVC, MKV, TS and AVI handling.
+- Make streamer switching, multi-selection and bulk queue operations race-safe while preserving failed selections for retry.
+- Keep queue status, progress, health, speed and remaining time accurate across pause, retry, completion and live recording changes.
+- Harden sensitive configuration migration, provider error redaction, process shutdown, crash recovery and Windows installer upgrades.
+- Add isolated validation for managed media tools, supported cutter media, Windows installation modes, Twitch provider access and published updater downloads.
+
 ## 1.0.17 - 2026-08-13
 
 - Keep the loaded video cutter focused at every supported window size and give recovery notices their own layout space.

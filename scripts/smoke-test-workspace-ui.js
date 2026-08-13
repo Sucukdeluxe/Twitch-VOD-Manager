@@ -477,6 +477,11 @@ async function run() {
     check(cutterDropUi.filePath === path.basename(cutterDropFixturePath), `Cutter drop displayed "${cutterDropUi.filePath}" instead of the safe file name`);
     check(typeof cutterDropPaths.mediaCapability === 'string' && cutterDropPaths.mediaCapability.length >= 32 && cutterDropPaths.mediaCapability !== cutterDropFixturePath, `Cutter drop did not send an opaque capability to media preparation: ${JSON.stringify(cutterDropPaths)}`);
     check(cutterDropUi.infoVisible && cutterDropUi.cutEnabled, 'Cutter drop did not populate the cutter controls');
+    checks.cutterDrop.fixtureInputRemoved = await win.evaluate(() => {
+      document.getElementById('workspaceCutterDropInput')?.remove();
+      return document.getElementById('workspaceCutterDropInput') === null;
+    });
+    check(checks.cutterDrop.fixtureInputRemoved, 'Cutter drop fixture input remains visible in later workspace states');
 
     const queueEmptyActions = await win.evaluate(() => ({
       count: document.getElementById('queueCount')?.textContent?.trim() || '',
@@ -644,6 +649,7 @@ async function run() {
       const changelogClosed = await captureUpdateChangelog();
       await win.evaluate(() => dismissUpdateModal());
       await win.emulateMedia({ reducedMotion: 'no-preference' });
+      await win.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       checks.updateChangelogMotion = {
         collapsed: changelogCollapsed,
         opening: changelogOpening,
@@ -1453,7 +1459,7 @@ async function run() {
         document.body.textContent || '',
         ...[...document.querySelectorAll('[title], [placeholder], [aria-label]')].flatMap((element) => [element.getAttribute('title') || '', element.getAttribute('placeholder') || '', element.getAttribute('aria-label') || ''])
       ].join('\n').toLocaleLowerCase('de-DE');
-      const forbidden = ['verfugbar', 'uberspringen', 'fur ', 'hinzufugen', 'hinzufuegen', 'schliessen', 'auswahlen', 'auswaehlen', 'auflosung', 'zusammenfugen', 'wahle ', 'uebersicht', 'groesse', 'groessen', 'aelteste', 'qualitaet', 'waehrend', 'loeschen', 'nuetzlich', 'geprueft', 'geraet', 'zurueck', 'ausfuehren', 'wuerde', 'aelter', 'eintraege', 'oeffnen', 'ungueltig', 'kuerzere', 'gleichmaessig', 'einfuegereihenfolge', 'noetig', 'behaelt', 'faellt', 'laeuft', 'gekuerzt', 'ausserhalb', 'fliessen', 'grosser', 'aktivitaet', 'gruene', 'laengste', 'kuerzeste', 'zugehoerige'];
+      const forbidden = ['verfugbar', 'uberspringen', 'fur ', 'hinzufugen', 'hinzufuegen', 'schliessen', 'auswahlen', 'auswaehlen', 'ausgewahlt', 'auflosung', 'zusammenfugen', 'zusammengefugt', 'wahle ', 'uebersicht', 'groesse', 'groessen', 'aelteste', 'qualitaet', 'waehrend', 'loeschen', 'nuetzlich', 'geprueft', 'geraet', 'zurueck', 'ausfuehren', 'wuerde', 'aelter', 'eintraege', 'offnen', 'oeffnen', 'ungultig', 'ungueltig', 'kuerzere', 'gleichmaessig', 'einfuegereihenfolge', 'noetig', 'behaelt', 'faellt', 'lauft', 'laeuft', 'gekuerzt', 'ausserhalb', 'fliessen', 'grosser', 'aktivitaet', 'gruene', 'laengste', 'kuerzeste', 'zugehoerige', 'aenderungen', 'oeffnet', 'unterstutzte', 'teil-lange', 'aufraumen', 'prufung', 'stabilitat', 'integritat'];
       return {
         localeMatches: forbidden.filter((token) => localeText.includes(token)),
         domMatches: forbidden.filter((token) => domText.includes(token))

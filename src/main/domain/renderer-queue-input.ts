@@ -60,8 +60,12 @@ export function createRendererQueueItem(value: unknown, id: string): QueueItem |
 
 export function getMergeGroupCleanupPaths(item: QueueItem | undefined): string[] {
     if (!item?.mergeGroup) return [];
+    const interruptedSplitFiles = item.mergeGroup.mergePhase === 'done'
+        ? []
+        : [...(item.mergeGroup.splitFiles ?? []), ...(item.mergeGroup.splitTempFiles ?? [])];
     return [
         ...Object.values(item.mergeGroup.downloadedFiles),
         ...(item.mergeGroup.mergedFile ? [item.mergeGroup.mergedFile] : []),
+        ...interruptedSplitFiles,
     ];
 }

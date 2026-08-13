@@ -6,7 +6,10 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' file: blob:;">
     <title>Twitch VOD Manager</title>
     <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./styles-workflows.css">
+    <link rel="stylesheet" href="./styles-overlays.css">
     <link rel="stylesheet" href="./workspace.css">
+    <link rel="stylesheet" href="./workspace-refinements.css">
 </head>
 <body class="theme-twitch">
     <div class="modal-overlay" id="updateModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="updateModalTitle" onclick="handleUpdateModalOverlayClick(event)">
@@ -240,7 +243,7 @@
                     </div>
                     <div class="workspace-update-popover-actions">
                         <button type="button" id="updateButton" onclick="downloadUpdate()">Jetzt herunterladen</button>
-                        <button type="button" id="workspaceUpdateLater" onclick="postponeWorkspaceUpdatePopover()">Spater</button>
+                        <button type="button" id="workspaceUpdateLater" onclick="postponeWorkspaceUpdatePopover()">Später</button>
                     </div>
                 </div>
             </div>
@@ -294,7 +297,7 @@
             <section class="context-panel" data-context-for="cutter" hidden>
                 <div class="context-panel-heading" data-context-heading>Video schneiden</div>
                 <nav class="context-list" aria-label="Cutter sections">
-                    <button type="button" class="context-link active" onclick="focusWorkspaceTarget('cutterBrowseBtn', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path></svg><span data-label-source="cutterSelectTitle">Video auswählen</span></button>
+                    <button type="button" class="context-link active" onclick="selectCutterVideo()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path></svg><span data-label-source="cutterSelectTitle">Video auswählen</span></button>
                     <button type="button" class="context-link" onclick="focusWorkspaceTarget('timelineContainer', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12h16M7 8v8M17 8v8"></path></svg><span data-label-source="cutterInfoSelectionLabel">Auswahl</span></button>
                     <button type="button" class="context-link" onclick="focusWorkspaceTarget('btnCut', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="6" cy="7" r="3"></circle><circle cx="6" cy="17" r="3"></circle><path d="m8.5 8.5 11 7M8.5 15.5 20 8"></path></svg><span data-label-source="btnCut">Schneiden</span></button>
                 </nav>
@@ -357,7 +360,9 @@
                     <button type="button" class="toolbar-icon-button" id="toolbarClipDownloadBtn" onclick="downloadClip()" aria-label="Download clip" title="Download clip"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 20h16"></path></svg></button>
                 </div>
                 <div class="toolbar-context" data-toolbar-for="cutter" hidden>
-                    <button type="button" class="toolbar-primary" onclick="selectCutterVideo()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path></svg><span data-label-source="cutterBrowseBtn">Durchsuchen</span></button>
+                    <button type="button" class="toolbar-primary" id="cutterNewVideoBtn" onclick="selectCutterVideo()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path></svg><span id="cutterNewVideoText">Neues Video</span></button>
+                    <button type="button" class="toolbar-icon-button" id="cutterOpenProjectBtn" onclick="openCutterProject()" disabled aria-label="Projekt öffnen" title="Projekt öffnen"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path><path d="m9 13 3 3 3-3"></path></svg></button>
+                    <button type="button" class="toolbar-icon-button" id="cutterSaveProjectBtn" onclick="saveCutterProject()" disabled aria-label="Projekt speichern" title="Projekt speichern"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5z"></path><path d="M8 4v6h8V4M8 20v-6h8v6"></path></svg></button>
                     <button type="button" class="toolbar-icon-button" id="toolbarCutBtn" onclick="startCutting()" aria-label="Cut video" title="Cut video"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="6" cy="7" r="3"></circle><circle cx="6" cy="17" r="3"></circle><path d="m8.5 8.5 11 7M8.5 15.5 20 8"></path></svg></button>
                 </div>
                 <div class="toolbar-context" data-toolbar-for="merge" hidden>
@@ -437,7 +442,7 @@
                     <div class="settings-card centered">
                         <h3 id="clipsInfoTitle">Info</h3>
                         <p id="clipsInfoText" class="info-text">
-                            Unterstutzte Formate:
+                            Unterstützte Formate:
                             - https://clips.twitch.tv/ClipName
                             - https://www.twitch.tv/streamer/clip/ClipName
 
@@ -455,13 +460,11 @@
                                 <input type="text" id="cutterFilePath" readonly aria-labelledby="cutterSelectTitle" placeholder="Keine Datei ausgewählt…">
                             </div>
                             <button type="button" class="btn-secondary" id="cutterBrowseBtn" onclick="selectCutterVideo()">Durchsuchen</button>
-                            <button type="button" class="btn-secondary" id="cutterOpenProjectBtn" onclick="openCutterProject()" disabled>Projekt öffnen</button>
-                            <button type="button" class="btn-secondary" id="cutterSaveProjectBtn" onclick="saveCutterProject()" disabled>Projekt speichern</button>
                         </div>
                         <div class="cutter-recovery-panel" id="cutterRecoveryPanel" role="status" hidden>
                             <span id="cutterRecoveryText">Gespeicherte Bearbeitung gefunden</span>
-                            <button type="button" class="btn-secondary" onclick="recoverCutterProject()">Wiederherstellen</button>
-                            <button type="button" class="btn-secondary" onclick="discardCutterProject()">Verwerfen</button>
+                            <button type="button" class="btn-secondary" id="cutterRecoveryRestoreBtn" onclick="recoverCutterProject()">Wiederherstellen</button>
+                            <button type="button" class="btn-secondary" id="cutterRecoveryDiscardBtn" onclick="discardCutterProject()">Verwerfen</button>
                         </div>
 
                         <div class="cutter-workspace" id="cutterWorkspace">
@@ -484,31 +487,31 @@
                                     <span class="cutter-toggle-track" aria-hidden="true"></span>
                                 </label>
                                 <div class="cutter-export-options">
-                                    <label for="cutterExportProfile">Exportprofil</label>
+                                    <label for="cutterExportProfile" id="cutterExportProfileLabel">Exportprofil</label>
                                     <select id="cutterExportProfile" onchange="setCutterExportProfile(this.value)" disabled>
-                                        <option value="quality">Quality</option>
-                                        <option value="balanced" selected>Balanced</option>
-                                        <option value="fast">Fast</option>
-                                        <option value="archive">Archive</option>
+                                        <option value="quality" id="cutterProfileQualityOption">Qualität</option>
+                                        <option value="balanced" id="cutterProfileBalancedOption" selected>Ausgewogen</option>
+                                        <option value="fast" id="cutterProfileFastOption">Schnell</option>
+                                        <option value="archive" id="cutterProfileArchiveOption">Archiv</option>
                                     </select>
-                                    <label for="cutterExportEncoder">Encoder</label>
+                                    <label for="cutterExportEncoder" id="cutterExportEncoderLabel">Encoder</label>
                                     <select id="cutterExportEncoder" onchange="setCutterExportEncoder(this.value)" disabled>
-                                        <option value="software">Software</option>
+                                        <option value="software" id="cutterEncoderSoftwareOption">Software</option>
                                     </select>
-                                    <label for="cutterAudioStream">Audiospur</label>
+                                    <label for="cutterAudioStream" id="cutterAudioStreamLabel">Audiospur</label>
                                     <select id="cutterAudioStream" onchange="setCutterAudioStream(this.value)" disabled>
-                                        <option value="0">Keine Audiospur</option>
+                                        <option value="0" id="cutterAudioStreamEmptyOption">Keine Audiospur</option>
                                     </select>
                                 </div>
                                 <div class="cutter-trim-card">
                                     <div class="cutter-card-title" id="cutterGlobalTrimLabel">Gesamtauswahl</div>
                                     <div class="cutter-time-field-row">
                                         <label for="startTime" id="cutterStartLabel">Start</label>
-                                        <input type="text" id="startTime" value="00:00:00" spellcheck="false" onchange="updateTimeFromInput()">
+                                        <input type="text" id="startTime" value="00:00:00:00" placeholder="HH:MM:SS:FF" title="HH:MM:SS:FF" spellcheck="false" onchange="updateTimeFromInput()">
                                     </div>
                                     <div class="cutter-time-field-row">
                                         <label for="endTime" id="cutterEndLabel">Ende</label>
-                                        <input type="text" id="endTime" value="00:00:00" spellcheck="false" onchange="updateTimeFromInput()">
+                                        <input type="text" id="endTime" value="00:00:00:00" placeholder="HH:MM:SS:FF" title="HH:MM:SS:FF" spellcheck="false" onchange="updateTimeFromInput()">
                                     </div>
                                 </div>
                                 <div class="cutter-cut-section">
@@ -553,7 +556,7 @@
                                             </button>
                                             <input type="range" class="cutter-volume" id="cutterVolume" min="0" max="1" step="0.05" value="1" disabled aria-label="Lautstärke">
                                         </div>
-                                        <span class="cutter-player-time"><span id="cutterCurrentTime">00:00:00</span><span>/</span><span id="cutterTotalTime">00:00:00</span></span>
+                                        <span class="cutter-player-time"><span id="cutterCurrentTime">00:00:00:00</span><span>/</span><span id="cutterTotalTime">00:00:00:00</span></span>
                                         <select id="cutterPlaybackRate" hidden disabled aria-label="Wiedergabegeschwindigkeit">
                                             <option value="0.5">0,5×</option>
                                             <option value="0.75">0,75×</option>
@@ -571,7 +574,7 @@
                                                 <div class="cutter-speed-options">
                                                     <button type="button" data-rate="0.5" onclick="setCutterPlaybackRate(0.5)">0,5×</button>
                                                     <button type="button" data-rate="0.75" onclick="setCutterPlaybackRate(0.75)">0,75×</button>
-                                                    <button type="button" class="active" data-rate="1" onclick="setCutterPlaybackRate(1)">Normal</button>
+                                                    <button type="button" class="active" id="cutterSpeedNormalBtn" data-rate="1" onclick="setCutterPlaybackRate(1)">Normal</button>
                                                     <button type="button" data-rate="1.25" onclick="setCutterPlaybackRate(1.25)">1,25×</button>
                                                     <button type="button" data-rate="1.5" onclick="setCutterPlaybackRate(1.5)">1,5×</button>
                                                     <button type="button" data-rate="2" onclick="setCutterPlaybackRate(2)">2×</button>
@@ -595,7 +598,7 @@
 
                         <div class="timeline-container" id="timelineContainer">
                             <div class="cutter-timeline-toolbar">
-                                <div class="cutter-timeline-timecode" id="cutterTimelineTimecode">00:00:00</div>
+                                <div class="cutter-timeline-timecode" id="cutterTimelineTimecode">00:00:00:00</div>
                                 <div class="cutter-history-controls">
                                     <button type="button" class="cutter-icon-button" id="cutterUndoBtn" onclick="undoCutterEdit()" disabled aria-label="Rückgängig" title="Rückgängig (Strg+Z)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 7 4 12l5 5v-3h5a5 5 0 0 1 5 5v1h2v-1a7 7 0 0 0-7-7H9V7z"></path></svg></button>
                                     <button type="button" class="cutter-icon-button" id="cutterRedoBtn" onclick="redoCutterEdit()" disabled aria-label="Wiederholen" title="Wiederholen (Strg+Y)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 7 5 5-5 5v-3h-5a5 5 0 0 0-5 5v1H3v-1a7 7 0 0 1 7-7h5V7z"></path></svg></button>
@@ -659,7 +662,7 @@
                         <div class="file-list" id="mergeFileList">
                             <div class="empty-state merge-empty-state">
                                 <svg aria-hidden="true" width="48" height="48" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                                <p id="mergeEmptyText">Keine Videos ausgewahlt</p>
+                                <p id="mergeEmptyText">Keine Videos ausgewählt</p>
                             </div>
                         </div>
 
@@ -825,7 +828,7 @@
                             <div class="form-row">
                                 <input type="text" id="downloadPath" readonly>
                                 <button type="button" class="btn-secondary" id="selectFolderBtn" onclick="selectFolder()">Ordner</button>
-                                <button type="button" class="btn-secondary" id="openFolderBtn" onclick="openFolder()">Offnen</button>
+                                <button type="button" class="btn-secondary" id="openFolderBtn" onclick="openFolder()">Öffnen</button>
                             </div>
                         </div>
                         <div class="download-settings-layout">
@@ -840,7 +843,7 @@
                                         </select>
                                     </div>
                                     <div class="form-group">
-                                        <label id="partMinutesLabel" for="partMinutes">Teil-Lange (Minuten)</label>
+                                        <label id="partMinutesLabel" for="partMinutes">Teil-Länge (Minuten)</label>
                                         <input type="number" id="partMinutes" value="120" min="10" max="480">
                                     </div>
                                     <div class="form-group">
@@ -865,7 +868,7 @@
                                     <div class="form-group">
                                         <label id="performanceModeLabel" for="performanceMode">Performance-Profil</label>
                                         <select id="performanceMode">
-                                            <option value="stability" id="performanceModeStability">Max Stabilitat</option>
+                                            <option value="stability" id="performanceModeStability">Max Stabilität</option>
                                             <option value="balanced" id="performanceModeBalanced">Ausgewogen</option>
                                             <option value="speed" id="performanceModeSpeed">Max Geschwindigkeit</option>
                                         </select>
@@ -942,7 +945,7 @@
 
                     <div class="settings-card" data-settings-pane="updates" hidden>
                         <h3 id="updateTitle">Updates</h3>
-                        <p id="versionInfo" class="card-intro">Version: v1.0.17</p>
+                        <p id="versionInfo" class="card-intro">Version: v1.0.18</p>
                         <button type="button" class="btn-secondary" id="checkUpdateBtn" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
 

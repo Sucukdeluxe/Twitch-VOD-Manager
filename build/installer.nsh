@@ -3,20 +3,27 @@
   nsExec::ExecToLog 'taskkill /F /IM "Twitch VOD Manager.exe"'
 !macroend
 
-!macro preInit
-  ReadRegStr $0 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
-  ${if} $0 != ""
-  ${ifNot} ${FileExists} "$0\${APP_EXECUTABLE_FILENAME}"
-    DeleteRegKey HKCU "${INSTALL_REGISTRY_KEY}"
-    DeleteRegKey HKCU "${UNINSTALL_REGISTRY_KEY}"
-  ${endIf}
+!macro removeOrphanedRegistration ROOT
+  ReadRegStr $0 ${ROOT} "${INSTALL_REGISTRY_KEY}" InstallLocation
+  ${if} $0 == ""
+  ${orIfNot} ${FileExists} "$0\${APP_EXECUTABLE_FILENAME}"
+    ClearErrors
+    DeleteRegKey ${ROOT} "${INSTALL_REGISTRY_KEY}"
+    DeleteRegKey ${ROOT} "${UNINSTALL_REGISTRY_KEY}"
+    ClearErrors
   ${endIf}
 !macroend
 
+!macro preInit
+  !ifndef BUILD_UNINSTALLER
+    !insertmacro check64BitAndSetRegView
+    !insertmacro removeOrphanedRegistration HKCU
+    !insertmacro removeOrphanedRegistration HKLM
+  !endif
+!macroend
+
 !macro customInstall
-  CreateDirectory "$LOCALAPPDATA\Twitch VOD Manager\Shortcut Icons"
-  CopyFiles /SILENT "$INSTDIR\resources\app-icons\icon-${VERSION}.ico" "$LOCALAPPDATA\Twitch VOD Manager\Shortcut Icons"
-  StrCpy $0 "$LOCALAPPDATA\Twitch VOD Manager\Shortcut Icons\icon-${VERSION}.ico"
+  StrCpy $0 "$INSTDIR\resources\app-icons\icon-${VERSION}.ico"
   Delete "$SMPROGRAMS\Twitch VOD Manager v*.lnk"
   Delete "$DESKTOP\Twitch VOD Manager v*.lnk"
   ${if} ${FileExists} "$newDesktopLink"

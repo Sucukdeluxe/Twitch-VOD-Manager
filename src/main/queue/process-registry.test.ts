@@ -67,7 +67,7 @@ describe('waitForChildProcessExit', () => {
         }
     });
 
-    it('settles and releases resources when close never arrives after forced termination', async () => {
+    it('settles on process exit without waiting for delayed stream closure', async () => {
         vi.useFakeTimers();
         try {
             const child = Object.assign(new EventEmitter(), {
@@ -75,23 +75,41 @@ describe('waitForChildProcessExit', () => {
                 signalCode: null,
                 kill: vi.fn(() => true),
             }) as unknown as ChildProcess;
-            let settled = false;
-            const waiting = waitForChildProcessExit(child, 25).then(() => {
-                settled = true;
-            });
+            const waiting = waitForChildProcessExit(child, 25);
+
+            child.emit('exit', null, 'SIGTERM');
+            await waiting;
+
+            expect(child.kill).not.toHaveBeenCalled();
+            expect(child.listenerCount('close')).toBe(0);
+            expect(child.listenerCount('exit')).toBe(0);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('rejects within a bounded deadline when close never arrives after forced termination', async () => {
+        vi.useFakeTimers();
+        try {
+            const child = Object.assign(new EventEmitter(), {
+                exitCode: null,
+                signalCode: null,
+                kill: vi.fn(() => true),
+            }) as unknown as ChildProcess;
+            const waiting = waitForChildProcessExit(child, 25);
+            const rejected = expect(waiting).rejects.toThrow('Child process did not exit after forced termination');
 
             await vi.advanceTimersByTimeAsync(25);
 
             expect(child.kill).toHaveBeenCalledOnce();
             expect(child.kill).toHaveBeenCalledWith('SIGKILL');
-            expect(settled).toBe(false);
 
             await vi.advanceTimersByTimeAsync(25);
 
-            expect(settled).toBe(true);
             expect(child.listenerCount('close')).toBe(0);
             expect(vi.getTimerCount()).toBe(0);
-            await waiting;
+            await rejected;
         } finally {
             vi.useRealTimers();
         }
@@ -179,6 +197,57 @@ describe('QueueProcessRegistry', () => {
         expect(registry.isPaused('item-a')).toBe(false);
     });
 
+    it('does not resume resources when a pause operation fails', async () => {
+        const registry = new QueueProcessRegistry();
+        const pauseError = new Error('process exit was not confirmed');
+        const resource = createResource();
+        resource.pause = vi.fn(() => Promise.reject(pauseError));
+
+        registry.register('item-a', 'merge', resource);
+        const pausing = registry.pauseItem('item-a');
+        const resuming = registry.resumeItem('item-a');
+
+        await expect(pausing).rejects.toBe(pauseError);
+        await expect(resuming).rejects.toBe(pauseError);
+
+        expect(resource.resume).not.toHaveBeenCalled();
+        expect(registry.isPaused('item-a')).toBe(true);
+    });
+
+    it('resumes after a later pause retry succeeds', async () => {
+        const registry = new QueueProcessRegistry();
+        const resource = createResource();
+        resource.pause = vi.fn()
+            .mockRejectedValueOnce(new Error('process exit was not confirmed'))
+            .mockResolvedValueOnce(undefined);
+
+        registry.register('item-a', 'merge', resource);
+        await expect(registry.pauseItem('item-a')).rejects.toThrow('process exit was not confirmed');
+        await expect(registry.pauseItem('item-a')).resolves.toBeUndefined();
+        await expect(registry.resumeItem('item-a')).resolves.toBeUndefined();
+
+        expect(resource.pause).toHaveBeenCalledTimes(2);
+        expect(resource.resume).toHaveBeenCalledOnce();
+        expect(registry.isPaused('item-a')).toBe(false);
+    });
+
+    it('keeps a paused boundary controllable after the completed process registration releases', async () => {
+        const registry = new QueueProcessRegistry();
+        const registration = registry.register('item-a', 'merge', createResource());
+        await registry.pauseItem('item-a');
+        registration.release();
+
+        expect(registry.activeItemIds()).toEqual(['item-a']);
+
+        let resumed = false;
+        const waiting = registry.whenResumed('item-a').then(() => { resumed = true; });
+        await registry.resumeItem('item-a');
+        await waiting;
+
+        expect(resumed).toBe(true);
+        expect(registry.activeItemIds()).toEqual([]);
+    });
+
     it.each(['merge', 'split'] as const)('waits for %s termination before removing partial output', async (phase) => {
         const registry = new QueueProcessRegistry();
         const closed = deferred();
@@ -196,6 +265,18 @@ describe('QueueProcessRegistry', () => {
 
         expect(resource.cancel).toHaveBeenCalledOnce();
         expect(resource.cleanup).toHaveBeenCalledOnce();
+        expect(registry.activeItemIds()).toEqual([]);
+    });
+
+    it('retains partial output when process exit cannot be confirmed', async () => {
+        const registry = new QueueProcessRegistry();
+        const resource = createResource(Promise.reject(new Error('exit timeout')));
+
+        registry.register('item-a', 'merge', resource);
+        await registry.cancelItem('item-a');
+
+        expect(resource.kill).toHaveBeenCalledOnce();
+        expect(resource.cleanup).not.toHaveBeenCalled();
         expect(registry.activeItemIds()).toEqual([]);
     });
 
@@ -265,5 +346,48 @@ describe('QueueRunLifecycle', () => {
         expect(late.cleanup).toHaveBeenCalledOnce();
         expect(persist).toHaveBeenCalledOnce();
         expect(registry.activeItemIds()).toEqual([]);
+    });
+
+    it('reports a persistence failure without rejecting shutdown', async () => {
+        const registry = new QueueProcessRegistry();
+        const lifecycle = new QueueRunLifecycle(registry);
+        const persistenceError = new Error('disk unavailable');
+        const reportError = vi.fn();
+
+        await expect(lifecycle.shutdown(
+            () => undefined,
+            () => { throw persistenceError; },
+            reportError,
+        )).resolves.toBeUndefined();
+
+        expect(reportError).toHaveBeenCalledOnce();
+        expect(reportError).toHaveBeenCalledWith(persistenceError);
+    });
+
+    it('finishes shutdown when process exit and the scheduled run never settle', async () => {
+        vi.useFakeTimers();
+        try {
+            const registry = new QueueProcessRegistry();
+            const lifecycle = new QueueRunLifecycle(registry, 25);
+            const neverFinishes = deferred();
+            const resource = createResource(Promise.reject(new Error('exit timeout')));
+            const persist = vi.fn(async () => undefined);
+            const reportTimeout = vi.fn();
+
+            lifecycle.schedule(async () => neverFinishes.promise);
+            registry.register('item-a', 'merge', resource);
+
+            const shutdown = lifecycle.shutdown(() => undefined, persist, undefined, reportTimeout);
+            await vi.advanceTimersByTimeAsync(25);
+            await shutdown;
+
+            expect(resource.kill).toHaveBeenCalledOnce();
+            expect(resource.cleanup).not.toHaveBeenCalled();
+            expect(persist).toHaveBeenCalledOnce();
+            expect(reportTimeout).toHaveBeenCalledWith(expect.objectContaining({ message: 'Queue run did not settle after process cancellation' }));
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

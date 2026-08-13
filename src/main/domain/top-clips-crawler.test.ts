@@ -15,6 +15,15 @@ function fakeFetch(rows: Array<Record<string, unknown>>, status = 200): typeof f
     }) as unknown as typeof fetch;
 }
 
+async function captureError(run: () => Promise<unknown>): Promise<Error> {
+    try {
+        await run();
+    } catch (error) {
+        if (error instanceof Error) return error;
+    }
+    throw new Error('Expected the operation to reject with an Error');
+}
+
 describe('fetchTopClips', () => {
     test('returns parsed clips sorted by view_count desc', async () => {
         const fakeRows = [
@@ -98,17 +107,27 @@ describe('fetchTopClips', () => {
     });
 
     test('throws on non-2xx response', async () => {
-        await expect(fetchTopClips({
+        const responseFetch = (async (): Promise<Response> => new Response('{"Authorization":"Bearer response-token","cookie":"response-cookie"}', { status: 503 })) as unknown as typeof fetch;
+        const error = await captureError(() => fetchTopClips({
             clientId: 'C', accessToken: 'T', broadcasterId: 'b',
-            fetchImpl: fakeFetch([], 503),
-        })).rejects.toThrow(/503/);
+            fetchImpl: responseFetch,
+        }));
+
+        expect(error.message).toBe('top-clips-crawler: helix returned HTTP 503');
+        expect(error.cause).toBeUndefined();
+        expect(JSON.stringify(error)).not.toContain('response-token');
+        expect(JSON.stringify(error)).not.toContain('response-cookie');
     });
 
     test('throws on malformed JSON', async () => {
-        const brokenFetch = (async (): Promise<Response> => new Response('{not-json', { status: 200 })) as unknown as typeof fetch;
-        await expect(fetchTopClips({
+        const brokenFetch = (async (): Promise<Response> => new Response('{"accessToken":"parse-token"', { status: 200 })) as unknown as typeof fetch;
+        const error = await captureError(() => fetchTopClips({
             clientId: 'C', accessToken: 'T', broadcasterId: 'b', fetchImpl: brokenFetch,
-        })).rejects.toThrow(/parse failed/);
+        }));
+
+        expect(error.message).toBe('top-clips-crawler: invalid helix response');
+        expect(error.cause).toBeUndefined();
+        expect(`${error.message}${JSON.stringify(error)}`).not.toContain('parse-token');
     });
 
     test('empty data returns empty array (not null)', async () => {

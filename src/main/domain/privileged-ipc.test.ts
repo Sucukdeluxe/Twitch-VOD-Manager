@@ -11,7 +11,7 @@ describe('privileged IPC behavior', () => {
         for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
     });
 
-    it.each(['add-to-queue', 'remove-from-queue', 'download-clip', 'run-preflight', 'get-debug-log'])(
+    it.each(['add-to-queue', 'add-to-queue-with-result', 'remove-from-queue', 'download-clip', 'run-preflight', 'get-debug-log'])(
         'registers %s so an untrusted renderer event cannot execute it',
         async (channel) => {
             const directory = mkdtempSync(join(tmpdir(), 'tvm-privileged-ipc-'));

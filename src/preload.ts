@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import { CustomClip, MergeGroupItem, MergeGroup, QueueItem, DownloadProgress } from './types';
+import type { DownloadProgress, QueueAdditionResult, QueueItem } from './types';
 
 let chatReadSequence = 0;
 
@@ -93,12 +93,6 @@ interface VideoEditExportRequest {
     cuts: Array<{ id: string; start: number; end: number }>;
 }
 
-interface FileCapabilityReference {
-    token: string;
-    name: string;
-    displayPath?: string;
-}
-
 // Expose protected methods to renderer
 contextBridge.exposeInMainWorld('api', {
     // Config
@@ -121,6 +115,7 @@ contextBridge.exposeInMainWorld('api', {
     // Queue
     getQueue: () => ipcRenderer.invoke('get-queue'),
     addToQueue: (item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip'>) => ipcRenderer.invoke('add-to-queue', item),
+    addToQueueWithResult: (item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip'>): Promise<QueueAdditionResult> => ipcRenderer.invoke('add-to-queue-with-result', item),
     startLiveRecording: (streamerName: string) => ipcRenderer.invoke('start-live-recording', streamerName),
     removeFromQueue: (id: string) => ipcRenderer.invoke('remove-from-queue', id),
     reorderQueue: (orderIds: string[]) => ipcRenderer.invoke('reorder-queue', orderIds),
@@ -216,6 +211,7 @@ contextBridge.exposeInMainWorld('api', {
     openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
     runPreflight: (autoFix: boolean) => ipcRenderer.invoke('run-preflight', autoFix),
     getManagedToolStatus: () => ipcRenderer.invoke('get-managed-tool-status'),
+    getManagedToolExecutionDiagnostics: (): Promise<{ ffmpeg: { path: string | null; count: number }; ffprobe: { path: string | null; count: number }; streamlink: { path: string | null; count: number } } | null> => ipcRenderer.invoke('get-managed-tool-execution-diagnostics'),
     repairManagedTools: () => ipcRenderer.invoke('repair-managed-tools'),
     resetManagedTools: () => ipcRenderer.invoke('reset-managed-tools'),
     getDebugLog: (lines: number) => ipcRenderer.invoke('get-debug-log', lines),
@@ -276,7 +272,7 @@ contextBridge.exposeInMainWorld('api', {
     onUpdateDownloaded: (callback: (info: { version: string; releaseDate?: string; releaseName?: string; releaseNotes?: string }) => void) => {
         ipcRenderer.on('update-downloaded', (_, info) => callback(info));
     },
-    onUpdateError: (callback: (payload: { message: string }) => void) => {
+    onUpdateError: (callback: (payload: { message: string; kind: 'check' | 'download'; version?: string }) => void) => {
         ipcRenderer.on('update-error', (_, payload) => callback(payload));
     }
 });

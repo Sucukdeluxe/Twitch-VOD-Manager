@@ -7,13 +7,11 @@ import { pathToFileURL } from 'node:url';
 import type { Transform } from 'node:stream';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
-import { compareUpdateVersions, isNewerUpdateVersion, normalizeUpdateVersion } from './main/domain/update-version-utils';
-import { createUpdateCheckCoordinator } from './main/domain/update-check-operation';
+import { compareUpdateVersions, createUpdateCheckCoordinator, normalizeUpdateVersion, UpdateLifecycle } from './main/updates';
 import { writeFileAtomicSync } from './main/infra/fs-atomic';
 import { parseDuration, formatDuration, formatDurationDashed } from './main/infra/duration';
 import {
     sanitizeFilenamePart,
-    formatTwitchDurationFromSeconds,
     formatDateWithPattern,
     getMergeGroupPhaseText as getMergeGroupPhaseTextCore,
 } from './main/infra/format-helpers';
@@ -21,10 +19,24 @@ import { tBackend as tBackendCore, type BackendMessageKey } from './main/domain/
 import { watchRendererChanges } from './main/dev-reload';
 import { createPausableOutput, type PausableOutput } from './main/domain/pausable-output';
 import { createTokenBucketBudget, createTokenBucketTransform } from './main/domain/token-bucket-transform';
-import { decideDownloadStart, normalizeDownloadPolicy, type DownloadPolicy } from './main/domain/download-policy';
+import { decideDownloadStart, decideStandaloneDownloadStart, normalizeDownloadPolicy, type DownloadPolicy } from './main/domain/download-policy';
 import { PartialDownloadRegistry } from './main/domain/partial-download';
-import { QueueProcessRegistry, QueueRunLifecycle, waitForChildProcessExit } from './main/queue/process-registry';
-import { openDatabase, type DbHandle } from './main/infra/db';
+import {
+    applyQueueSnapshotPreservingActiveItems,
+    commitQueueAddition,
+    commitQueueMutation,
+    createPhaseBoundaryProcessResource,
+    createRendererQueueItem,
+    getMergeGroupCleanupPaths,
+    persistStateChange,
+    QueueProcessRegistry,
+    QueueRunLifecycle,
+    recoverInterruptedMergeArtifacts,
+    resolveMergeArtifactRoot,
+    waitForChildProcessExit,
+    waitForPhaseBoundary,
+    type QueueAdditionResult,
+} from './main/queue';
 import {
     normalizeLogin,
     normalizeAutoRecordPollSeconds,
@@ -40,21 +52,40 @@ import {
     type PerformanceMode,
 } from './main/domain/config-normalize';
 import { CustomClip, MergeGroupItem, MergeGroup, QueueItem, DownloadProgress, DownloadResult } from './types';
-import { buildVodPreviewFrameUrls } from './main/domain/vod-preview';
-import { createWindowsTaskbarDetails, getWindowsAppIdentity, resolveWindowsAppIconPath } from './main/domain/app-identity';
-import { addCutAt, createVideoEditorState, getPlayableSegments, setTrimRange, type EditorCut } from './main/domain/video-editor';
 import {
+    buildVodPreviewFrameUrls,
+    parseGraphqlUser,
+    refreshTwitchProviderData,
+    requestPublicTwitchGraphql,
+    requestPublicTwitchVodsByLogin,
+    requestTwitchAppAccessToken,
+    requestTwitchHelixUsers,
+    requestTwitchHelixVideos,
+    TwitchAppTokenService,
+    type RefreshOutcome,
+    type TwitchHelixUser,
+    type TwitchVod,
+} from './main/twitch';
+import { createWindowsTaskbarDetails, getWindowsAppIdentity, resolveWindowsAppIconPath } from './main/domain/app-identity';
+import {
+    addCutAt,
     calculateCutterExportProgress,
     createCutterExportPlan,
+    createCutterProjectAutosaveStore,
+    createVideoEditorState,
     CUTTER_EXPORT_PROFILES,
+    getPlayableSegments,
     getCutterExportProfile,
     parseCutterHardwareEncoders,
     probeCutterHardwareEncoders,
+    setTrimRange,
     type CutterExportEncoder,
     type CutterExportProfile,
     type CutterHardwareEncoder,
-} from './main/domain/cutter-export';
-import { createCutterProjectAutosaveStore, type CutterProject, type CutterProjectSource } from './main/domain/cutter-project';
+    type CutterProject,
+    type CutterProjectSource,
+    type EditorCut,
+} from './main/cutter';
 import {
     CUTTER_SESSION_CAPABILITY_TTL_MS,
     FileCapabilityStore,
@@ -64,24 +95,43 @@ import {
     type FileCapabilityReference,
 } from './main/domain/file-capability';
 import { registerTrustedIpcHandler } from './main/domain/privileged-ipc';
-import { createRendererQueueItem, getMergeGroupCleanupPaths } from './main/domain/renderer-queue-input';
-import { createAppStateStore, type AppStateStore } from './main/domain/app-state-store';
-import { createExportableConfig } from './main/domain/config-export';
-import { commitQueueMutation, persistStateChange } from './main/domain/persistence-commit';
-import { resolveSecretInputUpdate } from './main/domain/secret-input';
-import { createSecretStore, type SecretStore } from './main/domain/secret-store';
-import { migrateJsonToSqlite } from './main/domain/migrator';
-import { createElectronSecureStorage } from './main/infra/secure-storage';
+import {
+    createAppStateStore,
+    createElectronSecureStorage,
+    createExportableConfig,
+    createSecretStore,
+    migrateJsonToSqlite,
+    normalizeStreamerLogins,
+    openDatabase,
+    resolveSecretInputUpdate,
+    sanitizeConfigInput,
+    sanitizeImportedConfig,
+    type AppStateStore,
+    type DbHandle,
+    type SecretStore,
+} from './main/storage';
+import { projectExternalError, sanitizeLogDetails } from './main/domain/external-error';
+import { LastGoodCache } from './main/domain/last-good-cache';
 import { readChatFile } from './main/domain/chat-reader';
 import {
+    canonicalQueueItemIdentity,
+    applyQueueTransferState,
+    clearQueueTransferState,
+    getQueueCreatedAtMs,
+    isValidPersistedQueueId,
+    mergeQueueProgressState,
+    prepareQueueRetryProgress,
+} from './main/domain/queue-runtime';
+import { createManagedToolExecutionTracker, readSecretSafely, runResilientSteps, secureImportedConfigTransition, type ManagedToolExecutionKind } from './main/domain/runtime-safety';
+import {
     setDebugLogFn, initToolDirs,
-    getStreamlinkPath, getStreamlinkCommand, getFFmpegPath, getFFprobePath,
+    getStreamlinkCommand, getFFmpegPath, getFFprobePath,
     refreshBundledToolPaths, ensureStreamlinkInstalled, ensureFfmpegInstalled,
     getManagedToolStatuses, repairManagedTools, resetManagedTools,
     canExecute, canExecuteCommand,
     cacheVerifiedStreamlinkCommand, isVerifiedStreamlinkCommand,
     cacheVerifiedFfmpegCommands, isVerifiedFfmpegCommands,
-    invalidateVerifiedToolCaches
+    invalidateVerifiedToolCaches, setManagedToolExecutionObserver
 } from './tools';
 
 // ==========================================
@@ -136,12 +186,30 @@ const CACHE_CLEANUP_INTERVAL_MS = 60 * 1000;
 const MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES = 4096;
 const MAX_VOD_LIST_CACHE_ENTRIES = 512;
 const MAX_CLIP_INFO_CACHE_ENTRIES = 4096;
+const MAX_CONFIG_IMPORT_BYTES = 1024 * 1024;
 
 // Timeouts
 const API_TIMEOUT = 10000;
 const DEFAULT_RETRY_DELAY_SECONDS = 5;
 const MIN_FILE_BYTES = 256 * 1024;
-const TWITCH_WEB_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+const managedToolExecutionTracker = createManagedToolExecutionTracker(Boolean(process.env.TWITCH_VOD_MANAGER_E2E_CUTTER_OUTPUT_ROOT));
+
+function managedToolKindFromCommand(command: string): ManagedToolExecutionKind | null {
+    const executable = path.basename(command).toLowerCase();
+    if (executable.startsWith('ffmpeg')) return 'ffmpeg';
+    if (executable.startsWith('ffprobe')) return 'ffprobe';
+    if (executable.startsWith('streamlink')) return 'streamlink';
+    return null;
+}
+
+function recordManagedToolExecution(kind: ManagedToolExecutionKind, command: string): void {
+    managedToolExecutionTracker.record(kind, command);
+}
+
+setManagedToolExecutionObserver((command) => {
+    const kind = managedToolKindFromCommand(command);
+    if (kind) recordManagedToolExecution(kind, command);
+});
 
 type RetryErrorClass = 'network' | 'rate_limit' | 'auth' | 'tooling' | 'integrity' | 'io' | 'validation' | 'unknown';
 type UpdateCheckSource = 'startup' | 'interval' | 'manual';
@@ -270,16 +338,7 @@ interface CacheEntry<T> {
     expiresAt: number;
 }
 
-interface VOD {
-    id: string;
-    title: string;
-    created_at: string;
-    duration: string;
-    thumbnail_url: string;
-    url: string;
-    view_count: number;
-    stream_id: string;
-}
+type VOD = TwitchVod;
 
 interface PreflightChecks {
     internet: boolean;
@@ -455,6 +514,7 @@ function normalizeConfigTemplates(input: Config): Config {
 
     return {
         ...input,
+        streamers: normalizeStreamerLogins(input.streamers) ?? [],
         streamer_display_names: displayNames,
         filename_template_vod: normalizeFilenameTemplate(input.filename_template_vod, DEFAULT_FILENAME_TEMPLATE_VOD),
         filename_template_parts: normalizeFilenameTemplate(input.filename_template_parts, DEFAULT_FILENAME_TEMPLATE_PARTS),
@@ -586,6 +646,7 @@ function sanitizeMergeGroup(raw: unknown): MergeGroup | undefined {
         downloadedFiles,
         mergedFile: typeof raw.mergedFile === 'string' ? raw.mergedFile : undefined,
         splitFiles: Array.isArray(raw.splitFiles) ? raw.splitFiles.filter((f): f is string => typeof f === 'string') : undefined,
+        splitTempFiles: Array.isArray(raw.splitTempFiles) ? raw.splitTempFiles.filter((f): f is string => typeof f === 'string') : undefined,
         totalDurationSec: typeof raw.totalDurationSec === 'number' && Number.isFinite(raw.totalDurationSec) ? raw.totalDurationSec : undefined
     };
 }
@@ -611,7 +672,6 @@ function sanitizeCustomClip(raw: unknown): CustomClip | undefined {
 
 function sanitizeQueueItem(raw: unknown): QueueItem | null {
     if (!isPlainObject(raw)) return null;
-    if (typeof raw.id !== 'string' || !raw.id) return null;
     if (typeof raw.url !== 'string' || !raw.url) return null;
     if (!isValidQueueStatus(raw.status)) return null;
 
@@ -623,8 +683,14 @@ function sanitizeQueueItem(raw: unknown): QueueItem | null {
     const progressNum = Number(raw.progress);
     const safeProgress = Number.isFinite(progressNum) ? Math.max(0, Math.min(100, progressNum)) : 0;
 
+    const id = isValidPersistedQueueId(raw.id) ? raw.id : generateQueueItemId();
+    const createdAtMs = getQueueCreatedAtMs({
+        id,
+        createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : undefined,
+    }, Date.now());
     const item: QueueItem = {
-        id: raw.id,
+        id,
+        createdAt: new Date(createdAtMs).toISOString(),
         url: raw.url,
         title: typeof raw.title === 'string' ? raw.title : '',
         date: typeof raw.date === 'string' ? raw.date : '',
@@ -636,12 +702,19 @@ function sanitizeQueueItem(raw: unknown): QueueItem | null {
 
     if (typeof raw.currentPart === 'number' && Number.isFinite(raw.currentPart)) item.currentPart = raw.currentPart;
     if (typeof raw.totalParts === 'number' && Number.isFinite(raw.totalParts)) item.totalParts = raw.totalParts;
-    if (typeof raw.speed === 'string') item.speed = raw.speed;
-    if (typeof raw.eta === 'string') item.eta = raw.eta;
-    if (typeof raw.progressStatus === 'string') item.progressStatus = raw.progressStatus;
+    if (finalStatus === 'downloading' || finalStatus === 'paused') {
+        if (typeof raw.speed === 'string') item.speed = raw.speed;
+        if (typeof raw.eta === 'string') item.eta = raw.eta;
+        if (typeof raw.progressStatus === 'string') item.progressStatus = raw.progressStatus;
+        if (raw.recordingHealth === 'ok' || raw.recordingHealth === 'stale' || raw.recordingHealth === 'unknown') {
+            item.recordingHealth = raw.recordingHealth;
+        }
+    }
     if (typeof raw.last_error === 'string') item.last_error = raw.last_error;
-    if (typeof raw.downloadedBytes === 'number' && Number.isFinite(raw.downloadedBytes)) item.downloadedBytes = raw.downloadedBytes;
-    if (typeof raw.totalBytes === 'number' && Number.isFinite(raw.totalBytes)) item.totalBytes = raw.totalBytes;
+    if (finalStatus === 'paused') {
+        if (typeof raw.downloadedBytes === 'number' && Number.isFinite(raw.downloadedBytes)) item.downloadedBytes = raw.downloadedBytes;
+        if (typeof raw.totalBytes === 'number' && Number.isFinite(raw.totalBytes)) item.totalBytes = raw.totalBytes;
+    }
 
     if (Array.isArray(raw.outputFiles)) {
         const files = raw.outputFiles.filter((f): f is string => typeof f === 'string' && f.length > 0);
@@ -657,32 +730,52 @@ function sanitizeQueueItem(raw: unknown): QueueItem | null {
 
     const mergeGroup = sanitizeMergeGroup(raw.mergeGroup);
     if (mergeGroup) item.mergeGroup = mergeGroup;
+    if (raw.mergeRecoveryBlocked === true) item.mergeRecoveryBlocked = true;
+    if (typeof raw.artifactRoot === 'string' && path.isAbsolute(raw.artifactRoot)) item.artifactRoot = path.resolve(raw.artifactRoot);
 
     return item;
 }
 
-function loadQueue(): QueueItem[] {
+interface QueueLoadResult {
+    queue: QueueItem[];
+    interruptedMergeItemIds: Set<string>;
+}
+
+function loadQueue(): QueueLoadResult {
     if (config.persist_queue_on_restart === false) {
-        return [];
+        return { queue: [], interruptedMergeItemIds: new Set() };
     }
 
     try {
-        const parsed = appStateStore?.loadQueue<QueueItem>() ?? [];
+        const parsed = appStateStore?.loadQueue<Record<string, unknown>>() ?? [];
+        const interruptedMergeItemIds = new Set<string>();
         const items: QueueItem[] = [];
+        const loadedIds = new Set<string>();
         let droppedCount = 0;
         for (const raw of parsed) {
+            const wasInterruptedMerge = isPlainObject(raw) && raw.status === 'downloading' && isPlainObject(raw.mergeGroup);
             const sanitized = sanitizeQueueItem(raw);
-            if (sanitized) items.push(sanitized);
+            if (sanitized) {
+                if (loadedIds.has(sanitized.id)) {
+                    do {
+                        sanitized.id = generateQueueItemId();
+                    } while (loadedIds.has(sanitized.id));
+                    sanitized.createdAt = new Date().toISOString();
+                }
+                loadedIds.add(sanitized.id);
+                if (wasInterruptedMerge) interruptedMergeItemIds.add(sanitized.id);
+                items.push(sanitized);
+            }
             else droppedCount++;
         }
         if (droppedCount > 0) {
             console.error(`loadQueue: dropped ${droppedCount} invalid queue item(s)`);
         }
-        return items;
+        return { queue: items, interruptedMergeItemIds };
     } catch (e) {
         console.error('Error loading queue:', e);
     }
-    return [];
+    return { queue: [], interruptedMergeItemIds: new Set() };
 }
 
 let queueSaveTimer: NodeJS.Timeout | null = null;
@@ -768,18 +861,17 @@ let config = normalizeConfigTemplates(defaultConfig);
 let lastPersistedConfig = cloneConfig(config);
 let twitchClientSecret = '';
 let discordWebhookUrl = '';
-let accessToken: string | null = null;
+const twitchAppTokenService = new TwitchAppTokenService(
+    (credentials) => requestTwitchAppAccessToken(axios, credentials, API_TIMEOUT),
+    (error) => console.error('Login error:', error),
+);
 let downloadQueue: QueueItem[] = [];
 let lastPersistedQueueSnapshot: QueueItem[] = [];
 let queueIdCounter = 0;
 let lastQueueBroadcastFingerprint = '';
 let isDownloading = false;
 let queuePaused = false;
-// Process handle for the standalone video editor pipeline (cutter / merger /
-// splitter). Queue downloads track their own children via activeDownloads,
-// and clip downloads via activeClipProcesses. Keeping these separate
-// prevents cancel-download from killing an unrelated cutter ffmpeg.
-let currentEditorProcess: ChildProcess | null = null;
+const currentEditorProcesses = new Set<ChildProcess>();
 let currentCutterProcess: ChildProcess | null = null;
 let currentCutterPartialFile: string | null = null;
 let cutterExportActive = false;
@@ -806,6 +898,8 @@ const currentCutterProbeProcesses = new Set<ChildProcess>();
 const currentCutterInfoProcesses = new Set<ChildProcess>();
 const currentCutterExportProcesses = new Set<ChildProcess>();
 const currentCutterPreviewProcesses = new Set<ChildProcess>();
+const currentCutterFrameProcesses = new Set<ChildProcess>();
+const currentCutterFrameFiles = new Set<string>();
 // Per-item cancellation lives in `cancelledItemIds`. The previous global
 // `currentDownloadCancelled` flag was redundant once pause/cancel/remove
 // started iterating activeDownloads and adding each item to that Set; it
@@ -835,6 +929,33 @@ function registerQueuePartialFile(itemId: string, filePath: string): void {
         cleanup: () => { try { fs.rmSync(filePath, { force: true }); } catch { } },
     });
 }
+
+async function waitForQueuePhaseBoundary(itemId: string | null): Promise<boolean> {
+    return await waitForPhaseBoundary(itemId, queueProcessRegistry, {
+        onPaused: () => {
+            if (!itemId) return;
+            const item = downloadQueue.find((candidate) => candidate.id === itemId);
+            if (!item) return;
+            item.status = 'paused';
+            item.speed = '';
+            item.eta = '';
+            item.progressStatus = tBackend('downloadPaused');
+            saveQueue(downloadQueue);
+            emitQueueUpdated(true);
+        },
+        onResumed: () => {
+            if (!itemId) return;
+            const item = downloadQueue.find((candidate) => candidate.id === itemId);
+            if (!item) return;
+            item.status = 'downloading';
+            delete item.speed;
+            delete item.eta;
+            delete item.progressStatus;
+            saveQueue(downloadQueue);
+            emitQueueUpdated(true);
+        },
+    });
+}
 // userId -> login reverse map. Bounded via Map insertion-order eviction so
 // a long-running session doesn't grow it unbounded across thousands of
 // streamer lookups. Values are short (~20 char each) but accumulate.
@@ -854,6 +975,7 @@ function setUserIdLogin(userId: string, login: string): void {
 }
 const loginToUserIdCache = new Map<string, CacheEntry<string>>();
 const vodListCache = new Map<string, CacheEntry<VOD[]>>();
+const vodListLastGood = new LastGoodCache<VOD[]>(MAX_VOD_LIST_CACHE_ENTRIES);
 const clipInfoCache = new Map<string, CacheEntry<any>>();
 const inFlightUserIdRequests = new Map<string, Promise<string | null>>();
 const inFlightVodRequests = new Map<string, Promise<VOD[]>>();
@@ -882,15 +1004,12 @@ let pendingDebugLogLines: string[] = [];
 let autoUpdaterInitialized = false;
 let autoUpdateCheckTimer: NodeJS.Timeout | null = null;
 let autoUpdateStartupTimer: NodeJS.Timeout | null = null;
-let autoUpdateCheckInProgress = false;
+let autoUpdaterSetupTimer: NodeJS.Timeout | null = null;
 const autoUpdateCheckCoordinator = createUpdateCheckCoordinator();
-let autoUpdateReadyToInstall = false;
-let autoUpdateDownloadInProgress = false;
+const autoUpdateLifecycle = new UpdateLifecycle();
 let lastAutoUpdateCheckAt = 0;
 let latestKnownUpdateVersion: string | null = null;
-let downloadedUpdateVersion: string | null = null;
 let latestReleaseUpdateInfo: ReleaseUpdateInfo | null = null;
-let twitchLoginInFlight: Promise<boolean> | null = null;
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1095,9 +1214,10 @@ function readDebugLog(lines = 200): string {
 function appendDebugLog(message: string, details?: unknown): void {
     try {
         const ts = new Date().toISOString();
+        const sanitizedDetails = sanitizeLogDetails(details);
         const payload = details === undefined
             ? ''
-            : ` | ${typeof details === 'string' ? details : JSON.stringify(details)}`;
+            : ` | ${typeof sanitizedDetails === 'string' ? sanitizedDetails : JSON.stringify(sanitizedDetails)}`;
 
         pendingDebugLogLines.push(`[${ts}] ${message}${payload}\n`);
 
@@ -1594,7 +1714,8 @@ function getQueueBroadcastFingerprint(queueData: QueueItem[] = downloadQueue): s
         item.totalParts || 0,
         item.speed || '',
         item.eta || '',
-        item.last_error || ''
+        item.last_error || '',
+        item.recordingHealth || ''
     ].join(':')).join('|');
 }
 
@@ -1618,18 +1739,10 @@ function emitQueueUpdated(force = false): void {
 const activeDownloadProgress = new Map<string, number>();
 
 function recordDownloadProgress(progress: DownloadProgress): void {
+    if (queuePaused) return;
     const p = Number(progress.progress);
     const item = downloadQueue.find((candidate) => candidate.id === progress.id);
-    if (item) {
-        if (Number.isFinite(p) && p > 0 && p <= 100) item.progress = Math.max(item.progress, p);
-        item.speed = progress.speed || '';
-        item.eta = progress.eta || '';
-        item.progressStatus = progress.status;
-        if (typeof progress.currentPart === 'number') item.currentPart = progress.currentPart;
-        if (typeof progress.totalParts === 'number') item.totalParts = progress.totalParts;
-        if (typeof progress.downloadedBytes === 'number') item.downloadedBytes = progress.downloadedBytes;
-        if (typeof progress.totalBytes === 'number') item.totalBytes = progress.totalBytes;
-    }
+    if (item) mergeQueueProgressState(item, progress, false);
     const fraction = Number.isFinite(p) && p > 0 && p <= 100 ? p / 100 : 0.3;
     activeDownloadProgress.set(progress.id, fraction);
     updateTaskbarProgress();
@@ -1679,29 +1792,8 @@ function getRuntimeMetricsSnapshot(): RuntimeMetricsSnapshot {
     };
 }
 
-function normalizeQueueUrlForFingerprint(url: string): string {
-    return (url || '').trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
-}
-
 function getQueueItemFingerprint(item: Pick<QueueItem, 'url' | 'streamer' | 'date' | 'customClip'>): string {
-    const clip = item.customClip;
-    const clipFingerprint = clip
-        ? [
-            'clip',
-            clip.startSec,
-            clip.durationSec,
-            clip.startPart,
-            clip.filenameFormat,
-            (clip.filenameTemplate || '').trim().toLowerCase()
-        ].join(':')
-        : 'vod';
-
-    return [
-        normalizeQueueUrlForFingerprint(item.url),
-        (item.streamer || '').trim().toLowerCase(),
-        (item.date || '').trim(),
-        clipFingerprint
-    ].join('|');
+    return canonicalQueueItemIdentity(item);
 }
 
 function isQueueItemActive(item: QueueItem): boolean {
@@ -1719,7 +1811,7 @@ function hasActiveDuplicate(candidate: Pick<QueueItem, 'url' | 'streamer' | 'dat
 
 function getQueuePriorityScore(item: QueueItem): number {
     const now = Date.now();
-    const createdMs = Number(item.id) || now;
+    const createdMs = getQueueCreatedAtMs(item, now);
     const waitSeconds = Math.max(0, Math.floor((now - createdMs) / 1000));
     const durationSeconds = Math.max(0, parseDuration(item.duration_str || '0s'));
     const clipBoost = item.customClip ? 1500 : 0;
@@ -1769,6 +1861,7 @@ function probeMediaFile(filePath: string): { durationSeconds: number; hasVideo: 
             return null;
         }
 
+        recordManagedToolExecution('ffprobe', ffprobePath);
         const res = spawnSync(ffprobePath, [
             '-v', 'error',
             '-print_format', 'json',
@@ -1835,128 +1928,30 @@ function validateDownloadedFileIntegrity(filePath: string, expectedDurationSecon
 // ==========================================
 // TWITCH API
 // ==========================================
-async function twitchLogin(): Promise<boolean> {
-    if (!config.client_id || !twitchClientSecret) {
-        return false;
-    }
-
-    try {
-        const response = await axios.post('https://id.twitch.tv/oauth2/token', null, {
-            params: {
-                client_id: config.client_id,
-                client_secret: twitchClientSecret,
-                grant_type: 'client_credentials'
-            },
-            timeout: API_TIMEOUT
-        });
-        accessToken = response.data.access_token;
-        return true;
-    } catch (e) {
-        console.error('Login error:', e);
-        return false;
-    }
-}
-
-function requestTwitchLogin(): Promise<boolean> {
-    if (twitchLoginInFlight) {
-        return twitchLoginInFlight;
-    }
-
-    const loginPromise: Promise<boolean> = twitchLogin().finally(() => {
-        if (twitchLoginInFlight === loginPromise) {
-            twitchLoginInFlight = null;
-        }
-    });
-
-    twitchLoginInFlight = loginPromise;
-    return loginPromise;
-}
-
-async function ensureTwitchAuth(forceRefresh = false): Promise<boolean> {
-    if (!config.client_id || !twitchClientSecret) {
-        accessToken = null;
-        return false;
-    }
-
-    if (!forceRefresh && accessToken) {
-        return true;
-    }
-
-    return await requestTwitchLogin();
-}
-
-// Transient HTTP errors that warrant a retry (5xx, 408 timeout, 429 rate limit).
-// 4xx (other than 408/429) are application errors and not retried.
-function isTransientAxiosError(err: unknown): boolean {
-    if (!axios.isAxiosError(err)) {
-        // Non-axios errors thrown from axios.post are typically network-layer
-        // failures (DNS, ECONNRESET, socket hangup) — retry those too.
-        return true;
-    }
-    const status = err.response?.status;
-    if (status === undefined) {
-        // No response means the request never reached / never returned —
-        // treat as transient (network blip, timeout).
-        return true;
-    }
-    return status === 408 || status === 429 || (status >= 500 && status < 600);
+async function ensureTwitchAuth(forceRefresh = false): Promise<string | null> {
+    return await twitchAppTokenService.ensure({
+        clientId: config.client_id,
+        clientSecret: twitchClientSecret,
+    }, forceRefresh);
 }
 
 const TWITCH_GQL_RETRY_ATTEMPTS = 3;
-const TWITCH_GQL_RETRY_BASE_DELAY_MS = 400;
+
+async function fetchPublicTwitchGqlOutcome<T>(query: string, variables: Record<string, unknown>): Promise<RefreshOutcome<T>> {
+    const outcome = await requestPublicTwitchGraphql<T>(
+        axios,
+        query,
+        variables,
+        API_TIMEOUT,
+        TWITCH_GQL_RETRY_ATTEMPTS,
+    );
+    if (outcome.status === 'unavailable') appendDebugLog('public-gql-failed');
+    return outcome;
+}
 
 async function fetchPublicTwitchGql<T>(query: string, variables: Record<string, unknown>): Promise<T | null> {
-    let lastError: unknown = null;
-
-    for (let attempt = 1; attempt <= TWITCH_GQL_RETRY_ATTEMPTS; attempt++) {
-        try {
-            const response = await axios.post<{ data?: T; errors?: Array<{ message: string }> }>(
-                'https://gql.twitch.tv/gql',
-                { query, variables },
-                {
-                    headers: {
-                        'Client-ID': TWITCH_WEB_CLIENT_ID,
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: API_TIMEOUT
-                }
-            );
-
-            // GraphQL errors (in `errors[]`) are application-level and not
-            // retried — the query itself is rejected.
-            if (response.data.errors?.length) {
-                const messages = response.data.errors.map((err) => err.message).join('; ');
-                appendDebugLog('public-gql-errors', { messages, attempt });
-                console.error('Public Twitch GQL errors:', messages);
-                return null;
-            }
-
-            if (attempt > 1) {
-                appendDebugLog('public-gql-recovered', { attempt });
-            }
-            return response.data.data || null;
-        } catch (e) {
-            lastError = e;
-            const transient = isTransientAxiosError(e);
-            const willRetry = transient && attempt < TWITCH_GQL_RETRY_ATTEMPTS;
-            appendDebugLog('public-gql-failed', {
-                attempt,
-                maxAttempts: TWITCH_GQL_RETRY_ATTEMPTS,
-                transient,
-                willRetry,
-                error: String(e)
-            });
-            if (!willRetry) {
-                break;
-            }
-            // Exponential backoff with jitter
-            const delay = TWITCH_GQL_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 250);
-            await sleep(delay);
-        }
-    }
-
-    console.error('Public Twitch GQL request failed:', lastError);
-    return null;
+    const outcome = await fetchPublicTwitchGqlOutcome<T>(query, variables);
+    return outcome.status === 'success' ? outcome.value : null;
 }
 
 async function getPublicUserId(username: string): Promise<string | null> {
@@ -1985,51 +1980,10 @@ async function getPublicUserId(username: string): Promise<string | null> {
     return user.id;
 }
 
-async function getPublicVODsByLogin(loginName: string): Promise<VOD[]> {
+async function getPublicVODsByLogin(loginName: string): Promise<RefreshOutcome<VOD[]>> {
     const login = normalizeLogin(loginName);
-    if (!login) return [];
-
-    type VideoNode = {
-        id: string;
-        title: string;
-        publishedAt: string;
-        lengthSeconds: number;
-        viewCount: number;
-        previewThumbnailURL: string;
-    };
-
-    type VodsQueryResult = {
-        user: {
-            videos: {
-                edges: Array<{ node: VideoNode }>;
-            };
-        } | null;
-    };
-
-    const data = await fetchPublicTwitchGql<VodsQueryResult>(
-        'query($login:String!,$first:Int!){ user(login:$login){ videos(first:$first, type:ARCHIVE, sort:TIME){ edges{ node{ id title publishedAt lengthSeconds viewCount previewThumbnailURL(width:320,height:180) } } } } }',
-        { login, first: 100 }
-    );
-
-    const edges = data?.user?.videos?.edges || [];
-
-    return edges
-        .map(({ node }) => {
-            const id = node?.id;
-            if (!id) return null;
-
-            return {
-                id,
-                title: node.title || 'Untitled VOD',
-                created_at: node.publishedAt || new Date(0).toISOString(),
-                duration: formatTwitchDurationFromSeconds(node.lengthSeconds || 0),
-                thumbnail_url: node.previewThumbnailURL || '',
-                url: `https://www.twitch.tv/videos/${id}`,
-                view_count: node.viewCount || 0,
-                stream_id: ''
-            } as VOD;
-        })
-        .filter((vod): vod is VOD => Boolean(vod));
+    if (!login) return { status: 'not-found' };
+    return await requestPublicTwitchVodsByLogin(axios, login, 100, API_TIMEOUT, TWITCH_GQL_RETRY_ATTEMPTS);
 }
 
 async function getUserId(username: string): Promise<string | null> {
@@ -2055,46 +2009,26 @@ async function getUserId(username: string): Promise<string | null> {
             return await getPublicUserId(login);
         };
 
-        if (!(await ensureTwitchAuth())) return await getUserViaPublicApi();
-
-        const fetchUser = async () => {
-            return await axios.get('https://api.twitch.tv/helix/users', {
-                params: { login },
-                headers: {
-                    'Client-ID': config.client_id,
-                    'Authorization': `Bearer ${accessToken}`
-                },
-                timeout: API_TIMEOUT
-            });
-        };
-
-        try {
-            const response = await fetchUser();
-            const user = response.data.data[0];
-            if (!user?.id) return await getUserViaPublicApi();
-
-            setCachedValue(loginToUserIdCache, login, user.id, MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES);
-            setUserIdLogin(user.id, user.login || login);
-            return user.id;
-        } catch (e) {
-            if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
-                try {
-                    const retryResponse = await fetchUser();
-                    const user = retryResponse.data.data[0];
-                    if (!user?.id) return await getUserViaPublicApi();
-
-                    setCachedValue(loginToUserIdCache, login, user.id, MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES);
-                    setUserIdLogin(user.id, user.login || login);
-                    return user.id;
-                } catch (retryError) {
-                    console.error('Error getting user after relogin:', retryError);
-                    return await getUserViaPublicApi();
-                }
+        let twitchAccessToken = await ensureTwitchAuth();
+        if (!twitchAccessToken) return await getUserViaPublicApi();
+        let outcome = await requestTwitchHelixUsers(axios, login, {
+            clientId: config.client_id,
+            accessToken: twitchAccessToken,
+        }, API_TIMEOUT);
+        if (outcome.status === 'unauthorized') {
+            twitchAccessToken = await ensureTwitchAuth(true);
+            if (twitchAccessToken) {
+                outcome = await requestTwitchHelixUsers(axios, login, {
+                    clientId: config.client_id,
+                    accessToken: twitchAccessToken,
+                }, API_TIMEOUT);
             }
-
-            console.error('Error getting user:', e);
-            return await getUserViaPublicApi();
         }
+        if (outcome.status !== 'success' || !outcome.value[0]) return await getUserViaPublicApi();
+        const user = outcome.value[0];
+        setCachedValue(loginToUserIdCache, login, user.id, MAX_LOGIN_TO_USER_ID_CACHE_ENTRIES);
+        setUserIdLogin(user.id, user.login || login);
+        return user.id;
     });
 }
 
@@ -2108,8 +2042,7 @@ async function getVODs(userId: string, forceRefresh = false): Promise<VOD[]> {
         }
     }
 
-    const requestKey = `${cacheKey}|${forceRefresh ? 'force' : 'default'}`;
-    return await withInFlightDedup(inFlightVodRequests, requestKey, async () => {
+    return await withInFlightDedup(inFlightVodRequests, cacheKey, async () => {
         if (!forceRefresh) {
             const refreshedCachedVods = getCachedValue(vodListCache, cacheKey);
             if (refreshedCachedVods !== undefined) {
@@ -2119,81 +2052,43 @@ async function getVODs(userId: string, forceRefresh = false): Promise<VOD[]> {
         }
 
         runtimeMetrics.cacheMisses += 1;
-
-        const getVodsViaPublicApi = async () => {
-            const login = userIdLoginCache.get(userId);
-            if (!login) return [];
-
-            const vods = await getPublicVODsByLogin(login);
-            setCachedValue(vodListCache, cacheKey, vods, MAX_VOD_LIST_CACHE_ENTRIES);
-            return vods;
-        };
-
-        if (!(await ensureTwitchAuth())) return await getVodsViaPublicApi();
-
-        const MAX_VOD_PAGES = 50; // 50 pages x 100 per page = 5000 VODs max
-
-        const fetchVodsPage = async (cursor?: string) => {
-            const params: Record<string, string | number> = {
-                user_id: userId,
-                type: 'archive',
-                first: 100
-            };
-            if (cursor) params.after = cursor;
-
-            return await axios.get('https://api.twitch.tv/helix/videos', {
-                params,
-                headers: {
-                    'Client-ID': config.client_id,
-                    'Authorization': `Bearer ${accessToken}`
+        let twitchAccessToken = await ensureTwitchAuth();
+        const refreshed = await refreshTwitchProviderData(
+            userId,
+            vodListLastGood.get(cacheKey),
+            {
+                requestHelix: async () => {
+                    if (!twitchAccessToken) return { status: 'unavailable' };
+                    return await requestTwitchHelixVideos(axios, userId, {
+                        clientId: config.client_id,
+                        accessToken: twitchAccessToken,
+                    }, API_TIMEOUT);
                 },
-                timeout: API_TIMEOUT
-            });
-        };
-
-        const fetchAllVodPages = async (): Promise<VOD[]> => {
-            const allVods: VOD[] = [];
-            let cursor: string | undefined;
-            let pageCount = 0;
-
-            do {
-                const response = await fetchVodsPage(cursor);
-                const pageVods = response.data.data || [];
-                allVods.push(...pageVods);
-
-                if (pageCount === 0) {
-                    const login = pageVods[0]?.user_login;
-                    if (login) {
-                        setUserIdLogin(userId, normalizeLogin(login));
-                    }
-                }
-
-                cursor = response.data.pagination?.cursor;
-                pageCount++;
-            } while (cursor && pageCount < MAX_VOD_PAGES);
-
-            return allVods;
-        };
-
-        try {
-            const vods = await fetchAllVodPages();
+                refreshToken: async () => {
+                    twitchAccessToken = await ensureTwitchAuth(true);
+                    return twitchAccessToken !== null;
+                },
+                requestPublic: async () => {
+                    const login = userIdLoginCache.get(userId);
+                    return login ? await getPublicVODsByLogin(login) : { status: 'unavailable' };
+                },
+            },
+        );
+        if (refreshed.source === 'helix' || refreshed.source === 'public') {
+            const vods = refreshed.value ?? [];
+            const login = vods[0]?.user_login;
+            if (login) setUserIdLogin(userId, normalizeLogin(login));
+            vodListLastGood.set(cacheKey, vods);
             setCachedValue(vodListCache, cacheKey, vods, MAX_VOD_LIST_CACHE_ENTRIES);
             return vods;
-        } catch (e) {
-            if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
-                try {
-                    const vods = await fetchAllVodPages();
-                    setCachedValue(vodListCache, cacheKey, vods, MAX_VOD_LIST_CACHE_ENTRIES);
-                    return vods;
-                } catch (retryError) {
-                    console.error('Error getting VODs after relogin:', retryError);
-                    return await getVodsViaPublicApi();
-                }
-            }
-
-            console.error('Error getting VODs:', e);
-            return await getVodsViaPublicApi();
         }
+        if (refreshed.source === 'not-found') {
+            vodListLastGood.delete(cacheKey);
+            vodListCache.delete(cacheKey);
+            return [];
+        }
+        if (refreshed.source === 'last-good') appendDebugLog('vod-refresh-kept-last-good', { userId });
+        return refreshed.value ?? [];
     });
 }
 
@@ -2211,13 +2106,14 @@ async function getLiveStreamInfo(login: string): Promise<LiveStreamInfo | null> 
     const normalized = normalizeLogin(login);
     if (!normalized) return null;
 
-    if (await ensureTwitchAuth()) {
+    const twitchAccessToken = await ensureTwitchAuth();
+    if (twitchAccessToken) {
         try {
             const response = await axios.get('https://api.twitch.tv/helix/streams', {
                 params: { user_login: normalized, first: 1 },
                 headers: {
                     'Client-ID': config.client_id,
-                    'Authorization': `Bearer ${accessToken}`
+                    'Authorization': `Bearer ${twitchAccessToken}`
                 },
                 timeout: API_TIMEOUT
             });
@@ -2230,7 +2126,7 @@ async function getLiveStreamInfo(login: string): Promise<LiveStreamInfo | null> 
                 gameName: typeof e.game_name === 'string' ? e.game_name : undefined
             };
         } catch (e) {
-            appendDebugLog('helix-streams-failed', { login: normalized, error: String(e) });
+            appendDebugLog('helix-streams-failed', { login: normalized, error: projectExternalError('twitch-helix-streams', e) });
             // fall through to public GQL
         }
     }
@@ -2283,6 +2179,7 @@ interface StreamerProfile {
 
 const MAX_STREAMER_PROFILE_CACHE_ENTRIES = 512;
 const streamerProfileCache = new Map<string, CacheEntry<StreamerProfile>>();
+const streamerProfileLastGood = new LastGoodCache<StreamerProfile>(MAX_STREAMER_PROFILE_CACHE_ENTRIES);
 const inFlightProfileRequests = new Map<string, Promise<StreamerProfile | null>>();
 
 // Avatar bytes get embedded as data URLs in the profile so the renderer
@@ -2323,33 +2220,26 @@ async function fetchAvatarAsDataUrl(url: string): Promise<string> {
     }
 }
 
-interface HelixUser {
-    id: string;
-    login: string;
-    display_name: string;
-    description: string;
-    profile_image_url: string;
-    broadcaster_type: string;
-}
+type HelixUser = TwitchHelixUser;
 
-async function fetchHelixUserInfo(login: string): Promise<HelixUser | null> {
-    if (!(await ensureTwitchAuth())) return null;
-    try {
-        const response = await axios.get('https://api.twitch.tv/helix/users', {
-            params: { login },
-            headers: {
-                'Client-ID': config.client_id,
-                'Authorization': `Bearer ${accessToken}`
-            },
-            timeout: API_TIMEOUT
-        });
-        const u = response.data?.data?.[0];
-        if (!u?.id) return null;
-        return u as HelixUser;
-    } catch (e) {
-        appendDebugLog('helix-user-info-failed', { login, error: String(e) });
-        return null;
+async function fetchHelixUserInfo(login: string): Promise<RefreshOutcome<HelixUser>> {
+    let twitchAccessToken = await ensureTwitchAuth();
+    if (!twitchAccessToken) return { status: 'unavailable' };
+    let outcome = await requestTwitchHelixUsers(axios, login, {
+        clientId: config.client_id,
+        accessToken: twitchAccessToken,
+    }, API_TIMEOUT);
+    if (outcome.status === 'unauthorized') {
+        twitchAccessToken = await ensureTwitchAuth(true);
+        if (!twitchAccessToken) return { status: 'unavailable' };
+        outcome = await requestTwitchHelixUsers(axios, login, {
+            clientId: config.client_id,
+            accessToken: twitchAccessToken,
+        }, API_TIMEOUT);
     }
+    if (outcome.status === 'unauthorized' || outcome.status === 'unavailable') return { status: 'unavailable' };
+    if (outcome.status === 'not-found') return outcome;
+    return { status: 'success', value: outcome.value[0] };
 }
 
 interface PublicProfileQueryResult {
@@ -2481,10 +2371,10 @@ interface PublicStreamInfo {
     game: string | null;
 }
 
-async function fetchPublicStreamerProfile(login: string): Promise<PublicStreamerProfileResult | null> {
+async function fetchPublicStreamerProfile(login: string): Promise<RefreshOutcome<PublicStreamerProfileResult>> {
     // Same query also pulls bannerImageURL and the current stream's
     // preview + viewer count when live — saves a separate roundtrip.
-    const data = await fetchPublicTwitchGql<PublicProfileQueryResult>(
+    const outcome = await fetchPublicTwitchGqlOutcome<PublicProfileQueryResult>(
         `query($login: String!) {
             user(login: $login) {
                 id
@@ -2507,32 +2397,44 @@ async function fetchPublicStreamerProfile(login: string): Promise<PublicStreamer
         }`,
         { login }
     );
-    if (!data?.user) return null;
-    const roles = data.user.roles;
+    if (outcome.status !== 'success') return outcome;
+    const userOutcome = parseGraphqlUser(outcome.value);
+    if (userOutcome.status !== 'success') return userOutcome;
+    const user = userOutcome.value;
+    if (typeof user.id !== 'string'
+        || typeof user.login !== 'string'
+        || typeof user.displayName !== 'string'
+        || (user.description !== null && typeof user.description !== 'string')
+        || (user.profileImageURL !== null && typeof user.profileImageURL !== 'string')
+        || (user.bannerImageURL !== null && typeof user.bannerImageURL !== 'string')) return { status: 'unavailable' };
+    const roles = isPlainObject(user.roles) ? user.roles : null;
     const broadcasterType: '' | 'partner' | 'affiliate' = roles?.isPartner
         ? 'partner'
         : (roles?.isAffiliate ? 'affiliate' : '');
-    const s = data.user.stream;
+    const s = isPlainObject(user.stream) ? user.stream : null;
+    const game = s && isPlainObject(s.game) ? s.game : null;
     const stream = (s && s.type === 'live') ? {
-        previewUrl: s.previewImageURL || '',
+        previewUrl: typeof s.previewImageURL === 'string' ? s.previewImageURL : '',
         viewers: typeof s.viewersCount === 'number' ? s.viewersCount : null,
-        title: s.title || null,
-        game: s.game?.name || null
+        title: typeof s.title === 'string' ? s.title : null,
+        game: typeof game?.name === 'string' ? game.name : null
     } : null;
-    return {
-        displayName: data.user.displayName || login,
-        avatarUrl: data.user.profileImageURL || '',
-        bannerUrl: data.user.bannerImageURL || '',
-        description: data.user.description || '',
+    const followers = isPlainObject(user.followers) ? user.followers : null;
+    return { status: 'success', value: {
+        displayName: user.displayName || login,
+        avatarUrl: typeof user.profileImageURL === 'string' ? user.profileImageURL : '',
+        bannerUrl: typeof user.bannerImageURL === 'string' ? user.bannerImageURL : '',
+        description: typeof user.description === 'string' ? user.description : '',
         broadcasterType,
-        followerCount: typeof data.user.followers?.totalCount === 'number' ? data.user.followers.totalCount : null,
+        followerCount: typeof followers?.totalCount === 'number' ? followers.totalCount : null,
         stream
-    };
+    } };
 }
 
 async function getStreamerProfile(login: string, forceRefresh = false): Promise<StreamerProfile | null> {
     const normalized = normalizeLogin(login);
     if (!normalized) return null;
+    const previousProfile = streamerProfileLastGood.get(normalized);
 
     if (!forceRefresh) {
         const cached = getCachedValue(streamerProfileCache, normalized);
@@ -2551,27 +2453,52 @@ async function getStreamerProfile(login: string, forceRefresh = false): Promise<
         // stream preview in one shot, and skipping it would mean two
         // extra roundtrips. Helix takes precedence for displayName /
         // description (those fields are sometimes richer there).
-        let displayName = normalized;
-        let avatarUrl = '';
-        let bannerUrl = '';
-        let description = '';
-        let broadcasterType: '' | 'partner' | 'affiliate' = '';
-        let streamFromPublic: PublicStreamInfo | null = null;
-        let followerCountFromPublic: number | null = null;
+        let displayName = previousProfile?.displayName ?? normalized;
+        let avatarUrl = previousProfile?.avatarUrl ?? '';
+        let bannerUrl = previousProfile?.bannerUrl ?? '';
+        let description = previousProfile?.description ?? '';
+        let broadcasterType: '' | 'partner' | 'affiliate' = previousProfile?.broadcasterType ?? '';
+        let followerCount = previousProfile?.followerCount ?? null;
+        let vodCount = previousProfile?.vodCount ?? 0;
+        let lastStreamAt = previousProfile?.lastStreamAt ?? null;
+        let isLive = previousProfile?.isLive ?? false;
+        let currentTitle = previousProfile?.currentTitle ?? null;
+        let currentGame = previousProfile?.currentGame ?? null;
+        let currentStreamPreviewRemoteUrl = previousProfile?.currentStreamPreviewUrl ?? '';
+        let currentStreamViewers = previousProfile?.currentStreamViewers ?? null;
+        let publicLiveResolved = false;
+        let hasFreshSource = false;
 
-        const publicProfile = await fetchPublicStreamerProfile(normalized);
-        if (publicProfile) {
+        const publicOutcome = await fetchPublicStreamerProfile(normalized);
+        if (publicOutcome.status === 'success') {
+            const publicProfile = publicOutcome.value;
+            hasFreshSource = true;
             displayName = publicProfile.displayName;
             avatarUrl = publicProfile.avatarUrl;
             bannerUrl = publicProfile.bannerUrl;
             description = publicProfile.description;
             broadcasterType = publicProfile.broadcasterType;
-            followerCountFromPublic = publicProfile.followerCount;
-            streamFromPublic = publicProfile.stream;
+            followerCount = publicProfile.followerCount;
+            publicLiveResolved = true;
+            if (publicProfile.stream) {
+                isLive = true;
+                currentTitle = publicProfile.stream.title;
+                currentGame = publicProfile.stream.game;
+                currentStreamPreviewRemoteUrl = publicProfile.stream.previewUrl;
+                currentStreamViewers = publicProfile.stream.viewers;
+            } else {
+                isLive = false;
+                currentTitle = null;
+                currentGame = null;
+                currentStreamPreviewRemoteUrl = '';
+                currentStreamViewers = null;
+            }
         }
 
-        const helixUser = await fetchHelixUserInfo(normalized);
-        if (helixUser) {
+        const helixOutcome = await fetchHelixUserInfo(normalized);
+        if (helixOutcome.status === 'success') {
+            const helixUser = helixOutcome.value;
+            hasFreshSource = true;
             displayName = helixUser.display_name || displayName;
             if (helixUser.profile_image_url) avatarUrl = helixUser.profile_image_url;
             if (helixUser.description) description = helixUser.description;
@@ -2579,14 +2506,20 @@ async function getStreamerProfile(login: string, forceRefresh = false): Promise<
             if (bt === 'partner' || bt === 'affiliate') broadcasterType = bt;
         }
 
-        // followerCountFromPublic comes from the public profile query
-        // above — no separate follower roundtrip needed.
-        const followerCount = followerCountFromPublic;
+        if (!hasFreshSource) {
+            if (publicOutcome.status === 'unavailable' && helixOutcome.status === 'unavailable' && previousProfile) {
+                appendDebugLog('profile-refresh-kept-last-good', { login: normalized });
+                return previousProfile;
+            }
+            if (publicOutcome.status === 'not-found' || helixOutcome.status === 'not-found') {
+                streamerProfileCache.delete(normalized);
+                streamerProfileLastGood.delete(normalized);
+            }
+            return null;
+        }
 
         // Derive vod count + last stream from the already-cached VOD list
         // when we have an id. No extra network hit.
-        let vodCount = 0;
-        let lastStreamAt: string | null = null;
         const userId = await getUserId(normalized);
         if (userId) {
             try {
@@ -2600,22 +2533,7 @@ async function getStreamerProfile(login: string, forceRefresh = false): Promise<
             }
         }
 
-        let isLive = false;
-        let currentTitle: string | null = null;
-        let currentGame: string | null = null;
-        let currentStreamPreviewRemoteUrl = '';
-        let currentStreamViewers: number | null = null;
-
-        if (streamFromPublic) {
-            // Public-GQL already told us this user is live and gave us a
-            // preview frame URL + viewer count + game/title. Don't double-
-            // call getLiveStreamInfo when we already have a fresh answer.
-            isLive = true;
-            currentTitle = streamFromPublic.title;
-            currentGame = streamFromPublic.game;
-            currentStreamPreviewRemoteUrl = streamFromPublic.previewUrl;
-            currentStreamViewers = streamFromPublic.viewers;
-        } else {
+        if (!publicLiveResolved) {
             try {
                 const live = await getLiveStreamInfo(normalized);
                 if (live) {
@@ -2636,9 +2554,9 @@ async function getStreamerProfile(login: string, forceRefresh = false): Promise<
             ? `${currentStreamPreviewRemoteUrl}${currentStreamPreviewRemoteUrl.includes('?') ? '&' : '?'}_=${Date.now()}`
             : '';
         const [avatarDataUrl, bannerDataUrl, livePreviewDataUrl] = await Promise.all([
-            avatarUrl ? fetchAvatarAsDataUrl(avatarUrl) : Promise.resolve(''),
-            bannerUrl ? fetchAvatarAsDataUrl(bannerUrl) : Promise.resolve(''),
-            livePreviewUrlForFetch ? fetchAvatarAsDataUrl(livePreviewUrlForFetch) : Promise.resolve('')
+            /^https?:\/\//i.test(avatarUrl) ? fetchAvatarAsDataUrl(avatarUrl) : Promise.resolve(''),
+            /^https?:\/\//i.test(bannerUrl) ? fetchAvatarAsDataUrl(bannerUrl) : Promise.resolve(''),
+            /^https?:\/\//i.test(livePreviewUrlForFetch) ? fetchAvatarAsDataUrl(livePreviewUrlForFetch) : Promise.resolve('')
         ]);
 
         const profile: StreamerProfile = {
@@ -2661,6 +2579,7 @@ async function getStreamerProfile(login: string, forceRefresh = false): Promise<
         };
 
         setCachedValue(streamerProfileCache, normalized, profile, MAX_STREAMER_PROFILE_CACHE_ENTRIES);
+        streamerProfileLastGood.set(normalized, profile);
         return profile;
     });
 }
@@ -2816,14 +2735,15 @@ async function getClipInfo(clipId: string): Promise<any | null> {
 
         runtimeMetrics.cacheMisses += 1;
 
-        if (!(await ensureTwitchAuth())) return null;
+        let twitchAccessToken = await ensureTwitchAuth();
+        if (!twitchAccessToken) return null;
 
         const fetchClip = async () => {
             return await axios.get('https://api.twitch.tv/helix/clips', {
                 params: { id: clipId },
                 headers: {
                     'Client-ID': config.client_id,
-                    'Authorization': `Bearer ${accessToken}`
+                    'Authorization': `Bearer ${twitchAccessToken}`
                 },
                 timeout: API_TIMEOUT
             });
@@ -2837,7 +2757,11 @@ async function getClipInfo(clipId: string): Promise<any | null> {
             }
             return clip;
         } catch (e) {
-            if (axios.isAxiosError(e) && e.response?.status === 401 && (await ensureTwitchAuth(true))) {
+            const refreshedToken = axios.isAxiosError(e) && e.response?.status === 401
+                ? await ensureTwitchAuth(true)
+                : null;
+            if (refreshedToken) {
+                twitchAccessToken = refreshedToken;
                 try {
                     const retryResponse = await fetchClip();
                     const clip = retryResponse.data.data[0] || null;
@@ -2846,12 +2770,12 @@ async function getClipInfo(clipId: string): Promise<any | null> {
                     }
                     return clip;
                 } catch (retryError) {
-                    console.error('Error getting clip after relogin:', retryError);
+                    console.error('Error getting clip after relogin:', projectExternalError('twitch-helix-clips', retryError));
                     return null;
                 }
             }
 
-            console.error('Error getting clip:', e);
+            console.error('Error getting clip:', projectExternalError('twitch-helix-clips', e));
             return null;
         }
     });
@@ -2896,6 +2820,7 @@ async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProces
             filePath
         ];
 
+        recordManagedToolExecution('ffprobe', ffprobe);
         const proc = spawn(ffprobe, args, { windowsHide: true });
         trackedProcesses?.add(proc);
         proc.stderr?.resume();
@@ -2982,8 +2907,11 @@ async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProces
 }
 
 async function runCutterFfmpegProbe(args: string[], captureOutput: boolean): Promise<{ success: boolean; output: string }> {
+    if (appShutdownStarted) return { success: false, output: '' };
     return await new Promise((resolve) => {
-        const proc = spawn(getFFmpegPath(), args, { windowsHide: true });
+        const ffmpegPath = getFFmpegPath();
+        recordManagedToolExecution('ffmpeg', ffmpegPath);
+        const proc = spawn(ffmpegPath, args, { windowsHide: true });
         currentCutterProbeProcesses.add(proc);
         proc.stderr?.resume();
         let output = '';
@@ -3056,7 +2984,9 @@ function runEditorMediaProcess(args: string[], runGeneration: number): Promise<b
             resolve(false);
             return;
         }
-        const proc = spawn(getFFmpegPath(), args, { windowsHide: true });
+        const ffmpegPath = getFFmpegPath();
+        recordManagedToolExecution('ffmpeg', ffmpegPath);
+        const proc = spawn(ffmpegPath, args, { windowsHide: true });
         currentCutterMediaProcesses.add(proc);
         proc.stderr?.resume();
         let settled = false;
@@ -3077,7 +3007,9 @@ function runEditorWaveformProcess(args: string[], runGeneration: number): Promis
             resolve(false);
             return;
         }
-        const proc = spawn(getFFmpegPath(), args, { windowsHide: true });
+        const ffmpegPath = getFFmpegPath();
+        recordManagedToolExecution('ffmpeg', ffmpegPath);
+        const proc = spawn(ffmpegPath, args, { windowsHide: true });
         currentCutterWaveformProcesses.add(proc);
         proc.stderr?.resume();
         let settled = false;
@@ -3098,7 +3030,9 @@ function runEditorPreviewProcess(args: string[], requestGeneration: number): Pro
             resolve(false);
             return;
         }
-        const proc = spawn(getFFmpegPath(), args, { windowsHide: true });
+        const ffmpegPath = getFFmpegPath();
+        recordManagedToolExecution('ffmpeg', ffmpegPath);
+        const proc = spawn(ffmpegPath, args, { windowsHide: true });
         currentCutterPreviewProcesses.add(proc);
         proc.stderr?.resume();
         let settled = false;
@@ -3158,7 +3092,7 @@ async function prepareVideoEditorMedia(filePath: string): Promise<VideoEditorMed
     if (!identityBefore) return null;
     const info = await getVideoInfo(filePath, currentCutterProbeProcesses);
     const identityAfter = getCutterInputIdentity(filePath);
-    if (!info || info.variableFrameRate || requestGeneration !== cutterMediaRequestGeneration || !cutterInputIdentitiesMatch(identityBefore, identityAfter) || appShutdownStarted) return null;
+    if (!info || requestGeneration !== cutterMediaRequestGeneration || !cutterInputIdentitiesMatch(identityBefore, identityAfter) || appShutdownStarted) return null;
     const preview = info.previewCompatible
         ? { sourceUrl: pathToFileURL(filePath).href, directory: null }
         : await createVideoEditorPreview(filePath, info, requestGeneration);
@@ -3428,7 +3362,9 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
     if (plan.filterComplex.length > 24000 || cutterExportCancelled) return false;
     currentCutterPartialFile = partialFile;
     const runPlan = async (activePlan: ReturnType<typeof createCutterExportPlan>): Promise<boolean> => await new Promise<boolean>((resolve) => {
-        const proc = spawn(getFFmpegPath(), activePlan.ffmpegArgs, { windowsHide: true });
+        const ffmpegPath = getFFmpegPath();
+        recordManagedToolExecution('ffmpeg', ffmpegPath);
+        const proc = spawn(ffmpegPath, activePlan.ffmpegArgs, { windowsHide: true });
         currentCutterProcess = proc;
         currentCutterExportProcesses.add(proc);
         proc.stderr?.resume();
@@ -3519,15 +3455,16 @@ async function exportVideoEdit(request: VideoEditExportRequest, onProgress: (per
 // VIDEO CUTTER
 // ==========================================
 async function extractFrame(filePath: string, timeSeconds: number): Promise<string | null> {
+    if (appShutdownStarted) return null;
     const ffmpegReady = await ensureFfmpegInstalled();
-    if (!ffmpegReady) {
+    if (!ffmpegReady || appShutdownStarted) {
         appendDebugLog('extract-frame-missing-ffmpeg');
         return null;
     }
 
     return new Promise((resolve) => {
         const ffmpeg = getFFmpegPath();
-        const tempFile = path.join(app.getPath('temp'), `frame_${Date.now()}.jpg`);
+        const tempFile = path.join(app.getPath('temp'), `frame_${process.pid}_${Date.now()}.jpg`);
 
         const args = [
             '-ss', timeSeconds.toString(),
@@ -3538,21 +3475,36 @@ async function extractFrame(filePath: string, timeSeconds: number): Promise<stri
             tempFile
         ];
 
-        const proc = spawn(ffmpeg, args, { windowsHide: true });
+        let proc: ChildProcess;
+        try {
+            recordManagedToolExecution('ffmpeg', ffmpeg);
+            proc = spawn(ffmpeg, args, { windowsHide: true });
+        } catch {
+            resolve(null);
+            return;
+        }
+        let settled = false;
+        currentCutterFrameProcesses.add(proc);
+        currentCutterFrameFiles.add(tempFile);
         proc.stderr?.resume();
 
-        proc.on('close', (code) => {
-            if (code === 0 && fs.existsSync(tempFile)) {
-                const imageData = fs.readFileSync(tempFile);
-                const base64 = `data:image/jpeg;base64,${imageData.toString('base64')}`;
-                fs.unlinkSync(tempFile);
-                resolve(base64);
-            } else {
-                resolve(null);
-            }
-        });
+        const finish = (code: number | null): void => {
+            if (settled) return;
+            settled = true;
+            currentCutterFrameProcesses.delete(proc);
+            currentCutterFrameFiles.delete(tempFile);
+            let frame: string | null = null;
+            try {
+                if (code === 0 && !appShutdownStarted && fs.existsSync(tempFile)) {
+                    frame = `data:image/jpeg;base64,${fs.readFileSync(tempFile).toString('base64')}`;
+                }
+            } catch { }
+            try { fs.rmSync(tempFile, { force: true }); } catch { }
+            resolve(frame);
+        };
 
-        proc.on('error', () => resolve(null));
+        proc.once('close', finish);
+        proc.once('error', () => finish(null));
     });
 }
 
@@ -3597,28 +3549,29 @@ async function concatVideoFiles(inputFiles: string[], outputFile: string, itemId
     ];
 
     try {
-        while (true) {
-            const success = await new Promise<boolean>((resolve) => {
+        const success = await new Promise<boolean>((resolve) => {
+                recordManagedToolExecution('ffmpeg', ffmpeg);
                 const proc = spawn(ffmpeg, args, { windowsHide: true });
                 const registration = itemId
-                    ? queueProcessRegistry.register(itemId, 'post-processing', {
-                        kill: () => proc.kill(),
-                        wait: () => waitForChildProcessExit(proc),
-                        pause: async () => {
-                            try { proc.kill(); } catch { }
-                            await waitForChildProcessExit(proc);
-                        },
-                        cleanup: () => {
+                    ? queueProcessRegistry.register(itemId, 'post-processing', createPhaseBoundaryProcessResource(
+                        proc,
+                        () => waitForChildProcessExit(proc),
+                        () => {
                             try { fs.rmSync(outputFile, { force: true }); } catch { }
                             try { fs.rmSync(listFile, { force: true }); } catch { }
                         },
-                    })
+                    ))
                     : null;
+                if (registration && !registration.accepted) {
+                    proc.once('error', () => undefined);
+                    resolve(false);
+                    return;
+                }
                 let stderrBuf = '';
                 proc.stderr?.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString(); });
                 proc.on('close', (code) => {
                     registration?.release();
-                    if (code === 0 && (!itemId || (!queueProcessRegistry.isCancelled(itemId) && !queueProcessRegistry.isPaused(itemId))) && fs.existsSync(outputFile) && fs.statSync(outputFile).size > 0) {
+                    if (code === 0 && (!itemId || !queueProcessRegistry.isCancelled(itemId)) && fs.existsSync(outputFile) && fs.statSync(outputFile).size > 0) {
                         appendDebugLog('concat-ok', { output: outputFile, parts: inputFiles.length });
                         resolve(true);
                     } else {
@@ -3632,12 +3585,17 @@ async function concatVideoFiles(inputFiles: string[], outputFile: string, itemId
                     appendDebugLog('concat-spawn-error', String(err));
                     resolve(false);
                 });
-            });
-            if (success) return true;
-            if (!itemId || !queueProcessRegistry.isPaused(itemId)) return false;
-            await queueProcessRegistry.whenResumed(itemId);
-            if (queueProcessRegistry.isCancelled(itemId)) return false;
+        });
+        if (itemId && queueProcessRegistry.isPaused(itemId) && !(await waitForQueuePhaseBoundary(itemId))) {
+            try { fs.rmSync(outputFile, { force: true }); } catch { }
+            return false;
         }
+        if (!success) return false;
+        if (!(await waitForQueuePhaseBoundary(itemId))) {
+            try { fs.rmSync(outputFile, { force: true }); } catch { }
+            return false;
+        }
+        return true;
     } finally {
         try { fs.rmSync(listFile, { force: true }); } catch { }
     }
@@ -3650,7 +3608,9 @@ async function cutVideo(
     endTime: number,
     onProgress: (percent: number) => void
 ): Promise<boolean> {
+    if (appShutdownStarted) return false;
     const ffmpegReady = await ensureFfmpegInstalled();
+    if (appShutdownStarted) return false;
     if (!ffmpegReady) {
         appendDebugLog('cut-video-missing-ffmpeg');
         return false;
@@ -3677,6 +3637,7 @@ async function cutVideo(
     }
 
     const runCutAttempt = async (copyMode: boolean): Promise<boolean> => {
+        if (appShutdownStarted) return false;
         const args = [
             '-ss', formatDuration(startTime),
             '-i', inputFile,
@@ -3701,8 +3662,9 @@ async function cutVideo(
         appendDebugLog('cut-video-attempt', { copyMode, args });
 
         return await new Promise((resolve) => {
+            recordManagedToolExecution('ffmpeg', ffmpeg);
             const proc = spawn(ffmpeg, args, { windowsHide: true });
-            currentEditorProcess = proc;
+            currentEditorProcesses.add(proc);
 
             proc.stdout?.on('data', (data) => {
                 const line = data.toString();
@@ -3715,8 +3677,8 @@ async function cutVideo(
             });
 
             proc.on('close', (code) => {
-                currentEditorProcess = null;
-                if (code === 0 && fs.existsSync(outputFile)) {
+                currentEditorProcesses.delete(proc);
+                if (!appShutdownStarted && code === 0 && fs.existsSync(outputFile)) {
                     const stats = fs.statSync(outputFile);
                     if (stats.size <= 256) {
                         appendDebugLog('cut-video-empty-output', { outputFile, bytes: stats.size });
@@ -3730,13 +3692,14 @@ async function cutVideo(
             });
 
             proc.on('error', () => {
-                currentEditorProcess = null;
+                currentEditorProcesses.delete(proc);
                 resolve(false);
             });
         });
     };
 
     const copySuccess = await runCutAttempt(true);
+    if (appShutdownStarted) return false;
     if (copySuccess) {
         return true;
     }
@@ -3759,7 +3722,9 @@ async function mergeVideos(
     totalDurationSec?: number,
     itemId: string | null = null
 ): Promise<boolean> {
+    if (appShutdownStarted) return false;
     const ffmpegReady = await ensureFfmpegInstalled();
+    if (appShutdownStarted) return false;
     if (!ffmpegReady) {
         appendDebugLog('merge-videos-missing-ffmpeg');
         return false;
@@ -3806,6 +3771,7 @@ async function mergeVideos(
         const ffprobe = getFFprobePath();
         for (const filePath of inputFiles) {
             try {
+                recordManagedToolExecution('ffprobe', ffprobe);
                 const result = execSync(
                     `"${ffprobe}" -v quiet -show_entries format=duration -of csv=p=0 "${filePath}"`,
                     { timeout: 10000, windowsHide: true }
@@ -3821,6 +3787,7 @@ async function mergeVideos(
     }
 
     const runMergeAttempt = async (copyMode: boolean): Promise<boolean> => {
+        if (appShutdownStarted) return false;
         const args = [
             '-f', 'concat',
             '-safe', '0',
@@ -3844,22 +3811,24 @@ async function mergeVideos(
         appendDebugLog('merge-video-attempt', { copyMode, argsCount: args.length });
 
         return await new Promise((resolve) => {
+            recordManagedToolExecution('ffmpeg', ffmpeg);
             const proc = spawn(ffmpeg, args, { windowsHide: true });
             const registration = itemId
-                ? queueProcessRegistry.register(itemId, 'merge', {
-                    kill: () => proc.kill(),
-                    wait: () => waitForChildProcessExit(proc),
-                    pause: async () => {
-                        try { proc.kill(); } catch { }
-                        await waitForChildProcessExit(proc);
-                    },
-                    cleanup: () => {
+                ? queueProcessRegistry.register(itemId, 'merge', createPhaseBoundaryProcessResource(
+                    proc,
+                    () => waitForChildProcessExit(proc),
+                    () => {
                         try { fs.rmSync(outputFile, { force: true }); } catch { }
                         try { fs.rmSync(concatFile, { force: true }); } catch { }
                     },
-                })
+                ))
                 : null;
-            if (!itemId) currentEditorProcess = proc;
+            if (registration && !registration.accepted) {
+                proc.once('error', () => undefined);
+                resolve(false);
+                return;
+            }
+            if (!itemId) currentEditorProcesses.add(proc);
 
             proc.stdout?.on('data', (data) => {
                 const line = data.toString();
@@ -3876,8 +3845,8 @@ async function mergeVideos(
 
             proc.on('close', (code) => {
                 registration?.release();
-                if (!itemId && currentEditorProcess === proc) currentEditorProcess = null;
-                const success = code === 0 && (!itemId || !queueProcessRegistry.isCancelled(itemId)) && fs.existsSync(outputFile);
+                if (!itemId) currentEditorProcesses.delete(proc);
+                const success = !appShutdownStarted && code === 0 && (!itemId || !queueProcessRegistry.isCancelled(itemId)) && fs.existsSync(outputFile);
                 if (success) {
                     onProgress(100);
                 }
@@ -3886,7 +3855,7 @@ async function mergeVideos(
 
             proc.on('error', () => {
                 registration?.release();
-                if (!itemId && currentEditorProcess === proc) currentEditorProcess = null;
+                if (!itemId) currentEditorProcesses.delete(proc);
                 resolve(false);
             });
         });
@@ -3894,11 +3863,18 @@ async function mergeVideos(
 
     try {
         const copySuccess = await runMergeAttempt(true);
+        if (appShutdownStarted) return false;
         if (copySuccess) {
             return true;
         }
 
-        if (itemId && (queueProcessRegistry.isCancelled(itemId) || queueProcessRegistry.isPaused(itemId))) {
+        if (itemId && queueProcessRegistry.isCancelled(itemId)) {
+            try { fs.rmSync(outputFile, { force: true }); } catch { }
+            return false;
+        }
+
+        const boundaryReady = await waitForQueuePhaseBoundary(itemId);
+        if (appShutdownStarted || !boundaryReady) {
             try { fs.rmSync(outputFile, { force: true }); } catch { }
             return false;
         }
@@ -3909,6 +3885,7 @@ async function mergeVideos(
         } catch { }
 
         const reencodeSuccess = await runMergeAttempt(false);
+        if (appShutdownStarted) return false;
         if (!reencodeSuccess) {
             try { fs.rmSync(outputFile, { force: true }); } catch { }
         }
@@ -3930,9 +3907,12 @@ async function splitMergedFile(
     totalDurationSec: number,
     filenameGenerator: (partNum: number) => string,
     onProgress: (currentPart: number, totalParts: number) => void,
+    onPartState: (partIndex: number, outputFile: string, temporaryFile: string | null) => void,
     itemId: string | null = null
 ): Promise<{ success: boolean; files: string[] }> {
+    if (appShutdownStarted) return { success: false, files: [] };
     const ffmpegReady = await ensureFfmpegInstalled();
+    if (appShutdownStarted) return { success: false, files: [] };
     if (!ffmpegReady) {
         appendDebugLog('split-merged-missing-ffmpeg');
         return { success: false, files: [] };
@@ -3950,7 +3930,9 @@ async function splitMergedFile(
         const startSec = i * partDurationSec;
         const thisDuration = Math.min(partDurationSec, totalDurationSec - startSec);
         const outputFile = ensureUniqueFilename(path.join(outputFolder, filenameGenerator(i + 1)), itemId);
+        const temporaryFile = ensureUniqueFilename(path.join(outputFolder, `.merge_split_${Date.now()}_${process.pid}_${i}.mp4`), itemId);
 
+        onPartState(i, outputFile, temporaryFile);
         onProgress(i + 1, numParts);
 
         const args = [
@@ -3958,47 +3940,61 @@ async function splitMergedFile(
             '-i', inputFile,
             '-t', formatDuration(thisDuration),
             '-c', 'copy',
-            '-y', outputFile
+            '-y', temporaryFile
         ];
 
         appendDebugLog('split-merged-part', { part: i + 1, total: numParts, startSec, duration: thisDuration });
 
         const success = await new Promise<boolean>((resolve) => {
+            recordManagedToolExecution('ffmpeg', ffmpeg);
             const proc = spawn(ffmpeg, args, { windowsHide: true });
             const registration = itemId
-                ? queueProcessRegistry.register(itemId, 'split', {
-                    kill: () => proc.kill(),
-                    wait: () => waitForChildProcessExit(proc),
-                    pause: async () => {
-                        try { proc.kill(); } catch { }
-                        await waitForChildProcessExit(proc);
-                    },
-                    cleanup: () => { try { fs.rmSync(outputFile, { force: true }); } catch { } },
-                })
+                ? queueProcessRegistry.register(itemId, 'split', createPhaseBoundaryProcessResource(
+                    proc,
+                    () => waitForChildProcessExit(proc),
+                    () => { try { fs.rmSync(temporaryFile, { force: true }); } catch { } },
+                ))
                 : null;
-            if (!itemId) currentEditorProcess = proc;
+            if (registration && !registration.accepted) {
+                proc.once('error', () => undefined);
+                resolve(false);
+                return;
+            }
+            if (!itemId) currentEditorProcesses.add(proc);
 
             proc.on('close', (code) => {
                 registration?.release();
-                if (!itemId && currentEditorProcess === proc) currentEditorProcess = null;
-                resolve(code === 0 && (!itemId || !queueProcessRegistry.isCancelled(itemId)) && fs.existsSync(outputFile));
+                if (!itemId) currentEditorProcesses.delete(proc);
+                resolve(!appShutdownStarted && code === 0 && (!itemId || !queueProcessRegistry.isCancelled(itemId)) && fs.existsSync(temporaryFile));
             });
 
             proc.on('error', () => {
                 registration?.release();
-                if (!itemId && currentEditorProcess === proc) currentEditorProcess = null;
+                if (!itemId) currentEditorProcesses.delete(proc);
                 resolve(false);
             });
         });
 
         if (!success) {
             appendDebugLog('split-merged-part-failed', { part: i + 1, outputFile });
-            try { fs.rmSync(outputFile, { force: true }); } catch { }
+            try { fs.rmSync(temporaryFile, { force: true }); } catch { }
+            if (!fs.existsSync(temporaryFile)) onPartState(i, '', null);
             return { success: false, files: splitFiles };
         }
 
+        try {
+            fs.renameSync(temporaryFile, outputFile);
+        } catch {
+            try { fs.rmSync(temporaryFile, { force: true }); } catch { }
+            if (!fs.existsSync(temporaryFile)) onPartState(i, '', null);
+            return { success: false, files: splitFiles };
+        }
+        onPartState(i, outputFile, null);
         splitFiles.push(outputFile);
         if (itemId) registerQueuePartialFile(itemId, outputFile);
+        if (!(await waitForQueuePhaseBoundary(itemId))) {
+            return { success: false, files: splitFiles };
+        }
     }
 
     return { success: true, files: splitFiles };
@@ -4058,6 +4054,7 @@ function downloadVODPart(
         appendDebugLog('download-part-start', { itemId, command: streamlinkCmd.command, filename, args });
 
         const partialFilename = partialDownloadRegistry.begin(filename);
+        recordManagedToolExecution('streamlink', streamlinkCmd.command);
         const proc = spawn(streamlinkCmd.command, args, { windowsHide: true });
         const outputStream = fs.createWriteStream(partialFilename, { flags: 'w' });
         if (!proc.stdout) {
@@ -4081,8 +4078,6 @@ function downloadVODPart(
             cleanup: () => partialDownloadRegistry.discard(partialFilename),
         });
 
-        // Register in per-item tracking map for parallel downloads
-        // (no longer mirrored on a global — currentEditorProcess is editor-only)
         const itemTracking: ActiveDownloadTracking = { process: proc, cancelled: false, startTime: Date.now(), bytes: 0, output, partialFilename };
         activeDownloads.set(itemId, itemTracking);
         if (queuePaused) output.pause();
@@ -4313,6 +4308,7 @@ function downloadVODPart(
 // auto-record enabled.
 const autoRecordLastLiveState = new Map<string, boolean>();
 let autoRecordPollTimer: NodeJS.Timeout | null = null;
+let autoRecordStartupTimer: NodeJS.Timeout | null = null;
 let autoRecordPollInFlight = false;
 let autoRecordLastRunAt = 0;
 let autoRecordNextRunAt = 0;
@@ -4322,6 +4318,10 @@ function stopAutoRecordPoller(): void {
     if (autoRecordPollTimer) {
         clearInterval(autoRecordPollTimer);
         autoRecordPollTimer = null;
+    }
+    if (autoRecordStartupTimer) {
+        clearTimeout(autoRecordStartupTimer);
+        autoRecordStartupTimer = null;
     }
 }
 
@@ -4339,11 +4339,14 @@ function restartAutoRecordPoller(): void {
     autoRecordNextRunAt = Date.now() + seconds * 1000;
     // Kick off an immediate first poll so a freshly-enabled streamer that's
     // already live gets picked up without waiting a full interval.
-    setTimeout(() => { void runAutoRecordPoll(); }, 1500);
+    autoRecordStartupTimer = setTimeout(() => {
+        autoRecordStartupTimer = null;
+        if (!appShutdownStarted) void runAutoRecordPoll();
+    }, 1500);
 }
 
 async function runAutoRecordPoll(): Promise<number> {
-    if (autoRecordPollInFlight) return 0;
+    if (appShutdownStarted || autoRecordPollInFlight) return 0;
     autoRecordPollInFlight = true;
     let triggered = 0;
     try {
@@ -4379,6 +4382,7 @@ async function runAutoRecordPoll(): Promise<number> {
 
             const liveItem: QueueItem = {
                 id: generateQueueItemId(),
+                createdAt: new Date().toISOString(),
                 title: info.title || `${streamer} (LIVE)`,
                 url: `https://www.twitch.tv/${streamer}`,
                 date: new Date().toISOString(),
@@ -4388,9 +4392,11 @@ async function runAutoRecordPoll(): Promise<number> {
                 progress: 0,
                 isLive: true
             };
-            downloadQueue.push(liveItem);
-            saveQueue(downloadQueue);
-            emitQueueUpdated();
+            const addition = commitQueueItemWithResult(liveItem, false);
+            if (!addition.accepted) {
+                if (addition.reason === 'shutting-down' || addition.reason === 'persistence-failed') return triggered;
+                continue;
+            }
             triggered++;
             appendDebugLog('auto-record-triggered', { streamer, title: liveItem.title });
 
@@ -4420,6 +4426,7 @@ async function runAutoRecordPoll(): Promise<number> {
 // live-status check, and new VODs only appear after a stream ends, so
 // minute-level lag is fine.
 let autoVodPollTimer: NodeJS.Timeout | null = null;
+let autoVodStartupTimer: NodeJS.Timeout | null = null;
 let autoVodPollInFlight = false;
 let autoVodLastRunAt = 0;
 let autoVodNextRunAt = 0;
@@ -4429,6 +4436,10 @@ function stopAutoVodPoller(): void {
     if (autoVodPollTimer) {
         clearInterval(autoVodPollTimer);
         autoVodPollTimer = null;
+    }
+    if (autoVodStartupTimer) {
+        clearTimeout(autoVodStartupTimer);
+        autoVodStartupTimer = null;
     }
 }
 
@@ -4448,11 +4459,14 @@ function restartAutoVodPoller(): void {
     autoVodPollTimer = setInterval(() => { void runAutoVodPoll(); }, minutes * 60 * 1000);
     autoVodPollTimer.unref?.();
     autoVodNextRunAt = Date.now() + minutes * 60 * 1000;
-    setTimeout(() => { void runAutoVodPoll(); }, 5000);
+    autoVodStartupTimer = setTimeout(() => {
+        autoVodStartupTimer = null;
+        if (!appShutdownStarted) void runAutoVodPoll();
+    }, 5000);
 }
 
 async function runAutoVodPoll(): Promise<number> {
-    if (autoVodPollInFlight) return 0;
+    if (appShutdownStarted || autoVodPollInFlight) return 0;
     autoVodPollInFlight = true;
     let queuedCount = 0;
     try {
@@ -4467,8 +4481,6 @@ async function runAutoVodPoll(): Promise<number> {
         const cutoffMs = Date.now() - maxAgeHours * 3600 * 1000;
 
         const downloadedSet = new Set(Array.isArray(config.downloaded_vod_ids) ? config.downloaded_vod_ids : []);
-        const queuedUrls = new Set(downloadQueue.map((it) => it.url));
-
         for (const streamer of list) {
             if (!config.auto_vod_download_streamers.includes(streamer)) continue;
 
@@ -4490,13 +4502,13 @@ async function runAutoVodPoll(): Promise<number> {
             for (const vod of vods) {
                 if (!vod || !vod.id || !vod.url) continue;
                 if (downloadedSet.has(vod.id)) continue;
-                if (queuedUrls.has(vod.url)) continue;
 
                 const createdMs = Date.parse(vod.created_at || '');
                 if (!Number.isFinite(createdMs) || createdMs < cutoffMs) continue;
 
                 const queueItem: QueueItem = {
                     id: generateQueueItemId(),
+                    createdAt: new Date().toISOString(),
                     title: vod.title || `${streamer} VOD ${vod.id}`,
                     url: vod.url,
                     date: vod.created_at,
@@ -4505,8 +4517,11 @@ async function runAutoVodPoll(): Promise<number> {
                     status: 'pending',
                     progress: 0
                 };
-                downloadQueue.push(queueItem);
-                queuedUrls.add(vod.url);
+                const addition = commitQueueItemWithResult(queueItem, false);
+                if (!addition.accepted) {
+                    if (addition.reason === 'shutting-down' || addition.reason === 'persistence-failed') return queuedCount;
+                    continue;
+                }
                 queuedCount++;
                 appendDebugLog('auto-vod-queued', { streamer, vodId: vod.id, title: queueItem.title });
 
@@ -4526,9 +4541,6 @@ async function runAutoVodPoll(): Promise<number> {
                 }
             }
         }
-
-        saveQueue(downloadQueue);
-        emitQueueUpdated();
 
         if (!isDownloading && downloadQueue.some((it) => it.status === 'pending')) {
             scheduleQueueProcessing();
@@ -4956,6 +4968,7 @@ function runStorageCleanup(opts: { dryRun: boolean }): CleanupReport {
 }
 
 let autoCleanupTimer: NodeJS.Timeout | null = null;
+let autoCleanupStartupTimer: NodeJS.Timeout | null = null;
 let lastAutoCleanupAt = 0;
 
 function stopAutoCleanupTimer(): void {
@@ -4963,16 +4976,22 @@ function stopAutoCleanupTimer(): void {
         clearInterval(autoCleanupTimer);
         autoCleanupTimer = null;
     }
+    if (autoCleanupStartupTimer) {
+        clearTimeout(autoCleanupStartupTimer);
+        autoCleanupStartupTimer = null;
+    }
 }
 
 function restartAutoCleanupTimer(): void {
     stopAutoCleanupTimer();
+    if (appShutdownStarted) return;
     if (!config.auto_cleanup_enabled) return;
     // Run every 6 hours while the app is running. Skip the first cycle if
     // the previous run was less than 6h ago to avoid hammering on every
     // settings save.
     const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
     autoCleanupTimer = setInterval(() => {
+        if (appShutdownStarted) return;
         if (Date.now() - lastAutoCleanupAt < SIX_HOURS_MS) return;
         lastAutoCleanupAt = Date.now();
         try { runStorageCleanup({ dryRun: false }); } catch (e) { appendDebugLog('auto-cleanup-failed', String(e)); }
@@ -4980,8 +4999,9 @@ function restartAutoCleanupTimer(): void {
     autoCleanupTimer.unref?.();
 
     // First run is delayed 60s so it doesn't compete with startup IO.
-    setTimeout(() => {
-        if (!config.auto_cleanup_enabled) return;
+    autoCleanupStartupTimer = setTimeout(() => {
+        autoCleanupStartupTimer = null;
+        if (appShutdownStarted || !config.auto_cleanup_enabled) return;
         if (Date.now() - lastAutoCleanupAt < 60 * 1000) return;
         lastAutoCleanupAt = Date.now();
         try { runStorageCleanup({ dryRun: false }); } catch (e) { appendDebugLog('auto-cleanup-failed', String(e)); }
@@ -6432,6 +6452,18 @@ async function processDownloadMergeGroup(
     onProgress: (progress: DownloadProgress) => void
 ): Promise<DownloadResult> {
     const mg = item.mergeGroup!;
+    const artifactRootResolution = resolveMergeArtifactRoot(item, config.download_path);
+    if (!artifactRootResolution.artifactRoot) {
+        item.mergeRecoveryBlocked = true;
+        item.last_error = tBackend('mergeRecoveryBlocked');
+        saveQueue(downloadQueue);
+        return { success: false, error: item.last_error };
+    }
+    const artifactRoot = artifactRootResolution.artifactRoot;
+    if (item.artifactRoot !== artifactRoot) {
+        item.artifactRoot = artifactRoot;
+        saveQueue(downloadQueue);
+    }
     const totalDurationSec = mg.totalDurationSec || mg.items.reduce((sum, i) => sum + parseDuration(i.duration_str), 0);
     mg.totalDurationSec = totalDurationSec;
 
@@ -6450,7 +6482,7 @@ async function processDownloadMergeGroup(
         const streamer = mg.items[0].streamer.replace(/[^a-zA-Z0-9_-]/g, '');
         const date = new Date(mg.items[0].date);
         const dateStr = `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getFullYear()}`;
-        const folder = path.join(config.download_path, streamer, dateStr);
+        const folder = path.join(artifactRoot, streamer, dateStr);
         fs.mkdirSync(folder, { recursive: true });
 
         // Disk space pre-check: 3x total estimated size
@@ -6563,13 +6595,17 @@ async function processDownloadMergeGroup(
         const streamer = mg.items[0].streamer.replace(/[^a-zA-Z0-9_-]/g, '');
         const date = new Date(mg.items[0].date);
         const dateStr = `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getFullYear()}`;
-        const folder = path.join(config.download_path, streamer, dateStr);
-        const mergedFilePath = path.join(folder, `merged_${Date.now()}.mp4`);
+        const folder = path.join(artifactRoot, streamer, dateStr);
+        const mergedFilePath = ensureUniqueFilename(path.join(folder, `.merge_output_${Date.now()}_${process.pid}.mp4`), item.id);
 
         // Get files in correct order (explicit sort by index — do NOT rely on Object.values ordering)
         const sortedFiles = Object.keys(mg.downloadedFiles)
             .sort((a, b) => Number(a) - Number(b))
             .map(k => mg.downloadedFiles[Number(k)]);
+
+        mg.mergedFile = mergedFilePath;
+        saveQueue(downloadQueue);
+        registerQueuePartialFile(item.id, mergedFilePath);
 
         const mergeSuccess = await mergeVideos(
             sortedFiles,
@@ -6591,12 +6627,22 @@ async function processDownloadMergeGroup(
         );
 
         if (!mergeSuccess) {
+            try { fs.rmSync(mergedFilePath, { force: true }); } catch { }
+            if (fs.existsSync(mergedFilePath)) {
+                item.mergeRecoveryBlocked = true;
+                item.last_error = tBackend('mergeRecoveryBlocked');
+                saveQueue(downloadQueue);
+                return { success: false, error: item.last_error };
+            }
+            delete mg.mergedFile;
+            saveQueue(downloadQueue);
             return { success: false, error: tBackend('ffmpegMergeFailed') };
         }
 
-        mg.mergedFile = mergedFilePath;
-        registerQueuePartialFile(item.id, mergedFilePath);
         saveQueue(downloadQueue);
+        if (!(await waitForQueuePhaseBoundary(item.id))) {
+            return { success: false, error: tBackend('downloadCancelled') };
+        }
     }
 
     // ---- PHASE 3: SPLITTING ----
@@ -6612,9 +6658,10 @@ async function processDownloadMergeGroup(
     const streamer = mg.items[0].streamer.replace(/[^a-zA-Z0-9_-]/g, '');
     const date = new Date(mg.items[0].date);
     const dateStr = `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getFullYear()}`;
-    const folder = path.join(config.download_path, streamer, dateStr);
+    const folder = path.join(artifactRoot, streamer, dateStr);
     const vodId = parseVodId(mg.items[0].url) || 'merged';
 
+    const splitTempFilesByPart = new Map<number, string>();
     const splitResult = await splitMergedFile(
         mg.mergedFile!,
         folder,
@@ -6649,39 +6696,86 @@ async function processDownloadMergeGroup(
                 totalParts
             });
         },
+        (partIndex, outputFile, temporaryFile) => {
+            const nextSplitFiles = [...(mg.splitFiles ?? [])];
+            if (outputFile) nextSplitFiles[partIndex] = outputFile;
+            else nextSplitFiles.splice(partIndex, 1);
+            if (temporaryFile) splitTempFilesByPart.set(partIndex, temporaryFile);
+            else splitTempFilesByPart.delete(partIndex);
+            if (nextSplitFiles.length > 0) mg.splitFiles = nextSplitFiles;
+            else delete mg.splitFiles;
+            const nextTemporaryFiles = [...splitTempFilesByPart.values()];
+            if (nextTemporaryFiles.length > 0) mg.splitTempFiles = nextTemporaryFiles;
+            else delete mg.splitTempFiles;
+            saveQueue(downloadQueue);
+        },
         item.id
     );
 
     if (!splitResult.success) {
-        // Clean up any partial split files
-        for (const partFile of splitResult.files) {
+        const failedCleanup = new Set<string>();
+        const cleanupCandidates = new Set([
+            ...splitResult.files,
+            ...(mg.splitFiles ?? []),
+            ...(mg.splitTempFiles ?? []),
+        ]);
+        for (const partFile of cleanupCandidates) {
             try { if (fs.existsSync(partFile)) fs.unlinkSync(partFile); } catch { }
+            if (fs.existsSync(partFile)) failedCleanup.add(partFile);
         }
+        if (failedCleanup.size > 0) {
+            mg.splitFiles = (mg.splitFiles ?? []).filter((filePath) => failedCleanup.has(filePath));
+            mg.splitTempFiles = (mg.splitTempFiles ?? []).filter((filePath) => failedCleanup.has(filePath));
+            item.mergeRecoveryBlocked = true;
+            item.last_error = tBackend('mergeRecoveryBlocked');
+            saveQueue(downloadQueue);
+            return { success: false, error: item.last_error };
+        }
+        delete mg.splitFiles;
+        delete mg.splitTempFiles;
+        saveQueue(downloadQueue);
         return { success: false, error: tBackend('ffmpegSplitFailed') };
     }
 
     mg.splitFiles = splitResult.files;
+    delete mg.splitTempFiles;
 
     // ---- PHASE 4: CLEANUP ----
     mg.mergePhase = 'cleanup';
     saveQueue(downloadQueue);
 
-    // Delete individual downloads
+    const failedCleanup = new Set<string>();
     for (const key of Object.keys(mg.downloadedFiles)) {
         const filePath = mg.downloadedFiles[Number(key)];
         try {
             if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-        } catch { }
+            if (fs.existsSync(filePath)) failedCleanup.add(filePath);
+        } catch {
+            failedCleanup.add(filePath);
+        }
     }
 
-    // Delete merged file
     if (mg.mergedFile) {
         try {
             if (fs.existsSync(mg.mergedFile)) fs.unlinkSync(mg.mergedFile);
-        } catch { }
+            if (fs.existsSync(mg.mergedFile)) failedCleanup.add(mg.mergedFile);
+        } catch {
+            failedCleanup.add(mg.mergedFile);
+        }
     }
 
+    if (failedCleanup.size > 0) {
+        item.mergeRecoveryBlocked = true;
+        item.last_error = tBackend('mergeRecoveryBlocked');
+        saveQueue(downloadQueue);
+        appendDebugLog('merge-group-cleanup-failed', { itemId: item.id, files: failedCleanup.size });
+        return { success: false, error: item.last_error };
+    }
+
+    mg.downloadedFiles = {};
+    delete mg.mergedFile;
     mg.mergePhase = 'done';
+    saveQueue(downloadQueue);
     appendDebugLog('merge-group-complete', {
         itemId: item.id,
         parts: splitResult.files.length,
@@ -6717,7 +6811,7 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
     activeQueueItemId = item.id;
 
     cancelledItemIds.delete(item.id);
-    item.status = 'downloading';
+    applyQueueTransferState(item, 'downloading', item.progress);
     saveQueue(downloadQueue);
     emitQueueUpdated();
 
@@ -6750,6 +6844,8 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
             }
 
             finalResult = result;
+
+            if (item.mergeRecoveryBlocked) break;
 
             if (queueProcessRegistry.isPaused(item.id)) {
                 await queueProcessRegistry.whenResumed(item.id);
@@ -6784,15 +6880,12 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
                 runtimeMetrics.lastRetryDelaySeconds = retryDelaySeconds;
 
                 item.last_error = tBackend('attemptFailed', { attempt, max: maxAttempts, errorClass, error: result.error || tBackend('unknownDownloadError') });
-                mainWindow?.webContents.send('download-progress', {
-                    id: item.id,
-                    progress: -1,
-                    speed: '',
-                    eta: '',
-                    status: tBackend('retryingIn', { seconds: retryDelaySeconds, errorClass }),
-                    currentPart: item.currentPart,
-                    totalParts: item.totalParts
-                } as DownloadProgress);
+                const retryProgress = prepareQueueRetryProgress(
+                    item,
+                    tBackend('retryingIn', { seconds: retryDelaySeconds, errorClass }),
+                );
+                recordDownloadProgress(retryProgress);
+                if (!queuePaused) mainWindow?.webContents.send('download-progress', retryProgress);
                 saveQueue(downloadQueue);
                 emitQueueUpdated();
                 await Promise.race([
@@ -6809,8 +6902,11 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
             return;
         }
 
-        item.status = finalResult.success ? 'completed' : 'error';
-        item.progress = finalResult.success ? 100 : item.progress;
+        applyQueueTransferState(
+            item,
+            finalResult.success ? 'completed' : 'error',
+            finalResult.success ? 100 : item.progress,
+        );
         item.last_error = finalResult.success ? '' : (finalResult.error || tBackend('unknownDownloadError'));
 
         if (finalResult.success && Array.isArray(finalResult.outputFiles) && finalResult.outputFiles.length > 0) {
@@ -7137,8 +7233,9 @@ function createWindow(): void {
             mainWindow?.webContents.send('download-started');
         }
 
-        if (autoUpdateReadyToInstall && downloadedUpdateVersion) {
-            mainWindow?.webContents.send('update-downloaded', buildUpdateInfoPayload(downloadedUpdateVersion));
+        const updateLifecycleSnapshot = autoUpdateLifecycle.snapshot;
+        if (updateLifecycleSnapshot.phase === 'ready') {
+            mainWindow?.webContents.send('update-downloaded', buildUpdateInfoPayload(updateLifecycleSnapshot.version));
         }
 
         // Auto-resume: if the user opted in AND the persisted queue has
@@ -7149,7 +7246,7 @@ function createWindow(): void {
             if (hasPending) {
                 appendDebugLog('auto-resume-queue-scheduled', { pending: downloadQueue.filter((it) => it.status === 'pending').length });
                 setTimeout(() => {
-                    if (config.auto_resume_queue_on_startup && !isDownloading
+                    if (!appShutdownStarted && config.auto_resume_queue_on_startup && !isDownloading
                         && downloadQueue.some((it) => it.status === 'pending')) {
                         scheduleQueueProcessing();
                     }
@@ -7163,22 +7260,15 @@ function createWindow(): void {
     });
 
     // Setup auto-updater after window is ready
-    setTimeout(() => {
-        setupAutoUpdater();
+    autoUpdaterSetupTimer = setTimeout(() => {
+        autoUpdaterSetupTimer = null;
+        if (!appShutdownStarted) setupAutoUpdater();
     }, 3000);
 }
 
 // ==========================================
 // AUTO-UPDATER (electron-updater)
 // ==========================================
-function hasNewerKnownUpdateThanDownloaded(): boolean {
-    if (!latestKnownUpdateVersion || !downloadedUpdateVersion) {
-        return false;
-    }
-
-    return isNewerUpdateVersion(latestKnownUpdateVersion, downloadedUpdateVersion);
-}
-
 function normalizeReleaseVersionCandidate(value: unknown): string | undefined {
     if (typeof value !== 'string') {
         return undefined;
@@ -7236,6 +7326,7 @@ function buildUpdateInfoPayload(version: string, releaseDate?: string): {
 }
 
 async function requestUpdateCheck(source: UpdateCheckSource, force = false): Promise<{ started: boolean; reason?: string }> {
+    if (appShutdownStarted) return { started: false, reason: 'shutting-down' };
     if (autoUpdateCheckCoordinator.inProgress) {
         return { started: false, reason: 'in-progress' };
     }
@@ -7245,78 +7336,83 @@ async function requestUpdateCheck(source: UpdateCheckSource, force = false): Pro
         return { started: false, reason: 'throttled' };
     }
 
+    const lifecycleStart = autoUpdateLifecycle.beginCheck();
+    if (!lifecycleStart.started) return lifecycleStart;
+
     const result = await autoUpdateCheckCoordinator.run(async () => {
-        autoUpdateCheckInProgress = true;
         lastAutoUpdateCheckAt = now;
         appendDebugLog('update-check-start', { source });
         try {
-            try {
-                const githubReleaseResponse = await axios.get(GITHUB_RELEASES_API_LATEST_URL, {
-                    timeout: 5000,
-                    headers: {
-                        'Accept': 'application/json',
-                        'User-Agent': 'Twitch-VOD-Manager'
-                    }
-                });
-                cacheLatestReleaseUpdateInfo(githubReleaseResponse.data);
-                const tagName = latestReleaseUpdateInfo?.tagName || githubReleaseResponse.data?.tag_name;
-                if (tagName) {
-                    autoUpdater.setFeedURL({
-                        provider: 'generic',
-                        url: `${GITHUB_RELEASES_DOWNLOAD_BASE_URL}/${tagName}`
-                    });
-                    appendDebugLog('github-feed-url-set', { tagName, owner: GITHUB_REPO_OWNER, repo: GITHUB_REPO_NAME });
+            const githubReleaseResponse = await axios.get(GITHUB_RELEASES_API_LATEST_URL, {
+                timeout: 5000,
+                headers: {
+                    'Accept': 'application/json',
+                    'User-Agent': 'Twitch-VOD-Manager'
                 }
-            } catch (apiErr) {
-                appendDebugLog('github-api-failed', String(apiErr));
+            });
+            cacheLatestReleaseUpdateInfo(githubReleaseResponse.data);
+            const tagName = latestReleaseUpdateInfo?.tagName || githubReleaseResponse.data?.tag_name;
+            if (tagName) {
+                autoUpdater.setFeedURL({
+                    provider: 'generic',
+                    url: `${GITHUB_RELEASES_DOWNLOAD_BASE_URL}/${tagName}`
+                });
+                appendDebugLog('github-feed-url-set', { tagName, owner: GITHUB_REPO_OWNER, repo: GITHUB_REPO_NAME });
             }
-            await autoUpdater.checkForUpdates();
-        } finally {
-            autoUpdateCheckInProgress = false;
+        } catch (apiErr) {
+            appendDebugLog('github-api-failed', String(apiErr));
         }
+        await autoUpdater.checkForUpdates();
     }, AUTO_UPDATE_CHECK_TIMEOUT_MS);
 
     if (result.state === 'completed') {
         return { started: true };
     }
     if (result.state === 'timed-out') {
-        appendDebugLog('update-check-ui-timeout', { source, timeoutMs: AUTO_UPDATE_CHECK_TIMEOUT_MS });
+        const failed = autoUpdateLifecycle.failCheck();
+        appendDebugLog('update-check-ui-timeout', { source, timeoutMs: AUTO_UPDATE_CHECK_TIMEOUT_MS, stateChanged: failed });
         return { started: false, reason: 'timed-out' };
     }
     if (result.state === 'in-progress') {
         return { started: false, reason: 'in-progress' };
     }
 
-    appendDebugLog('update-check-failed', { source, error: String(result.error) });
+    const failed = autoUpdateLifecycle.failCheck();
+    appendDebugLog('update-check-failed', { source, error: String(result.error), stateChanged: failed });
+    if (failed) {
+        mainWindow?.webContents.send('update-error', { message: String(result.error), kind: 'check' });
+    }
     console.error('Update check failed:', result.error);
     return { started: false, reason: 'error' };
 }
 
 async function requestUpdateDownload(source: UpdateDownloadSource): Promise<{ started: boolean; reason?: string }> {
-    if (autoUpdateReadyToInstall && !hasNewerKnownUpdateThanDownloaded()) {
-        return { started: false, reason: 'ready-to-install' };
-    }
-
-    if (autoUpdateDownloadInProgress) {
-        return { started: false, reason: 'in-progress' };
-    }
-
-    autoUpdateDownloadInProgress = true;
-    appendDebugLog('update-download-start', { source });
+    if (appShutdownStarted) return { started: false, reason: 'shutting-down' };
+    const lifecycleSnapshot = autoUpdateLifecycle.snapshot;
+    const version = lifecycleSnapshot.phase === 'available' ? lifecycleSnapshot.version : latestKnownUpdateVersion || '';
+    const lifecycleStart = autoUpdateLifecycle.beginDownload(version);
+    if (!lifecycleStart.started) return lifecycleStart;
+    appendDebugLog('update-download-start', { source, version });
 
     try {
         await autoUpdater.downloadUpdate();
         return { started: true };
     } catch (err) {
-        appendDebugLog('update-download-failed', { source, error: String(err) });
+        const failed = autoUpdateLifecycle.failDownload(version);
+        appendDebugLog('update-download-failed', { source, version, error: String(err), stateChanged: failed });
+        if (failed) {
+            mainWindow?.webContents.send('update-error', { message: String(err), kind: 'download', version });
+        }
         console.error('Download failed:', err);
         return { started: false, reason: 'error' };
-    } finally {
-        autoUpdateDownloadInProgress = false;
     }
 }
 
 function stopAutoUpdatePolling(): void {
+    if (autoUpdaterSetupTimer) {
+        clearTimeout(autoUpdaterSetupTimer);
+        autoUpdaterSetupTimer = null;
+    }
     if (autoUpdateCheckTimer) {
         clearInterval(autoUpdateCheckTimer);
         autoUpdateCheckTimer = null;
@@ -7329,6 +7425,7 @@ function stopAutoUpdatePolling(): void {
 }
 
 function startAutoUpdatePolling(): void {
+    if (appShutdownStarted) return;
     if (!autoUpdateCheckTimer) {
         autoUpdateCheckTimer = setInterval(() => {
             void requestUpdateCheck('interval');
@@ -7349,6 +7446,7 @@ function startAutoUpdatePolling(): void {
 }
 
 function setupAutoUpdater() {
+    if (appShutdownStarted) return;
     if (autoUpdaterInitialized) {
         startAutoUpdatePolling();
         return;
@@ -7360,6 +7458,10 @@ function setupAutoUpdater() {
     autoUpdater.autoRunAppAfterInstall = true;
 
     autoUpdater.on('checking-for-update', () => {
+        if (autoUpdateLifecycle.snapshot.phase !== 'checking') {
+            appendDebugLog('auto-updater-checking-ignored');
+            return;
+        }
         appendDebugLog('auto-updater-checking');
         mainWindow?.webContents.send('update-checking');
     });
@@ -7369,6 +7471,7 @@ function setupAutoUpdater() {
         const displayVersion = incomingVersion || info.version;
 
         if (latestKnownUpdateVersion && compareUpdateVersions(incomingVersion, latestKnownUpdateVersion) < 0) {
+            autoUpdateLifecycle.failCheck();
             appendDebugLog('update-available-ignored-older', {
                 incomingVersion: displayVersion,
                 knownVersion: latestKnownUpdateVersion
@@ -7376,27 +7479,17 @@ function setupAutoUpdater() {
             return;
         }
 
-        latestKnownUpdateVersion = incomingVersion || latestKnownUpdateVersion;
-
-        const hasAlreadyDownloadedThisVersion = Boolean(
-            autoUpdateReadyToInstall &&
-            downloadedUpdateVersion &&
-            compareUpdateVersions(downloadedUpdateVersion, incomingVersion) === 0
-        );
-
-        appendDebugLog('auto-updater-update-available', { version: displayVersion });
-        if (!hasAlreadyDownloadedThisVersion) {
-            autoUpdateReadyToInstall = false;
-        }
-
-        autoUpdateDownloadInProgress = false;
-
-        if (hasAlreadyDownloadedThisVersion) {
-            if (mainWindow) {
-                mainWindow.webContents.send('update-downloaded', buildUpdateInfoPayload(displayVersion, info.releaseDate));
-            }
+        if (!autoUpdateLifecycle.completeCheckAvailable(incomingVersion)) {
+            appendDebugLog('update-available-ignored-state', {
+                incomingVersion: displayVersion,
+                phase: autoUpdateLifecycle.snapshot.phase,
+            });
             return;
         }
+
+        latestKnownUpdateVersion = incomingVersion || latestKnownUpdateVersion;
+
+        appendDebugLog('auto-updater-update-available', { version: displayVersion });
 
         if (mainWindow) {
             mainWindow.webContents.send('update-available', buildUpdateInfoPayload(displayVersion, info.releaseDate));
@@ -7408,6 +7501,10 @@ function setupAutoUpdater() {
     });
 
     autoUpdater.on('update-not-available', () => {
+        if (!autoUpdateLifecycle.completeCheckNotAvailable()) {
+            appendDebugLog('auto-updater-update-not-available-ignored', { phase: autoUpdateLifecycle.snapshot.phase });
+            return;
+        }
         appendDebugLog('auto-updater-update-not-available');
         mainWindow?.webContents.send('update-not-available');
     });
@@ -7416,6 +7513,10 @@ function setupAutoUpdater() {
         // No per-tick stdout — the autoUpdater fires this ~10x/sec during
         // an in-flight download. The renderer banner is the user-visible
         // surface; appendDebugLog already captures phase transitions.
+        if (autoUpdateLifecycle.snapshot.phase !== 'downloading') {
+            appendDebugLog('auto-updater-download-progress-ignored', { phase: autoUpdateLifecycle.snapshot.phase });
+            return;
+        }
         if (mainWindow) {
             mainWindow.webContents.send('update-download-progress', {
                 percent: progress.percent,
@@ -7428,10 +7529,14 @@ function setupAutoUpdater() {
 
     autoUpdater.on('update-downloaded', (info) => {
         const downloadedVersion = normalizeUpdateVersion(info.version) || info.version;
+        if (!autoUpdateLifecycle.completeDownload(downloadedVersion)) {
+            appendDebugLog('auto-updater-update-downloaded-ignored', {
+                version: downloadedVersion,
+                phase: autoUpdateLifecycle.snapshot.phase,
+            });
+            return;
+        }
         appendDebugLog('auto-updater-update-downloaded', { version: downloadedVersion });
-        autoUpdateReadyToInstall = true;
-        autoUpdateDownloadInProgress = false;
-        downloadedUpdateVersion = downloadedVersion;
         if (!latestKnownUpdateVersion || compareUpdateVersions(downloadedVersion, latestKnownUpdateVersion) > 0) {
             latestKnownUpdateVersion = downloadedVersion;
         }
@@ -7441,10 +7546,19 @@ function setupAutoUpdater() {
     });
 
     autoUpdater.on('error', (err) => {
-        autoUpdateDownloadInProgress = false;
         const message = String(err);
-        appendDebugLog('auto-updater-error', message);
-        mainWindow?.webContents.send('update-error', { message });
+        const lifecycleSnapshot = autoUpdateLifecycle.snapshot;
+        if (lifecycleSnapshot.phase === 'checking') {
+            autoUpdateLifecycle.failCheck();
+            appendDebugLog('auto-updater-error', { message, kind: 'check' });
+            mainWindow?.webContents.send('update-error', { message, kind: 'check' });
+        } else if (lifecycleSnapshot.phase === 'downloading') {
+            autoUpdateLifecycle.failDownload(lifecycleSnapshot.version);
+            appendDebugLog('auto-updater-error', { message, kind: 'download', version: lifecycleSnapshot.version });
+            mainWindow?.webContents.send('update-error', { message, kind: 'download', version: lifecycleSnapshot.version });
+        } else {
+            appendDebugLog('auto-updater-error-ignored', { message, phase: lifecycleSnapshot.phase });
+        }
         console.error('Auto-updater error:', err);
     });
 
@@ -7474,8 +7588,7 @@ ipcMain.handle('set-client-secret', (event, value: string) => {
     if (update.action !== 'set') return appSecretStore.status();
     appSecretStore.set('twitch_client_secret', update.value);
     twitchClientSecret = update.value;
-    accessToken = null;
-    twitchLoginInFlight = null;
+    twitchAppTokenService.clear();
     return appSecretStore.status();
 });
 
@@ -7483,8 +7596,7 @@ ipcMain.handle('clear-client-secret', (event) => {
     if (!isTrustedRendererEvent(event) || !appSecretStore) return appSecretStore?.status() ?? null;
     appSecretStore.clear('twitch_client_secret');
     twitchClientSecret = '';
-    accessToken = null;
-    twitchLoginInFlight = null;
+    twitchAppTokenService.clear();
     return appSecretStore.status();
 });
 
@@ -7533,32 +7645,18 @@ ipcMain.handle('trigger-auto-vod-scan', async (event) => {
     return { queuedCount };
 });
 
-ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability?: string) => {
-    if (!isTrustedRendererEvent(event)) return config;
-    const previousClientId = config.client_id;
-    const previousCacheMinutes = config.metadata_cache_minutes;
-    const previousPersistQueueOnRestart = config.persist_queue_on_restart;
-    const previousTheme = config.theme;
-    const previousAutoRecordList = JSON.stringify(config.auto_record_streamers || []);
-    const previousAutoRecordSeconds = config.auto_record_poll_seconds;
-    const previousAutoVodList = JSON.stringify(config.auto_vod_download_streamers || []);
-    const previousAutoVodMinutes = config.auto_vod_download_poll_minutes;
-    const previousStreamerList = JSON.stringify(config.streamers || []);
-    const previousDownloadPolicy = JSON.stringify(config.download_policy);
-
-    const acceptedConfig = { ...newConfig };
-    delete (acceptedConfig as Record<string, unknown>).client_secret;
-    delete (acceptedConfig as Record<string, unknown>).discord_webhook_url;
-    if (typeof acceptedConfig.download_path === 'string' && acceptedConfig.download_path !== config.download_path) {
-        const selectedPath = typeof fileCapability === 'string'
-            ? resolveFileCapability(event, fileCapability, 'selected-folder')
-            : null;
-        if (!selectedPath || normalizeComparablePath(selectedPath) !== normalizeComparablePath(acceptedConfig.download_path)) {
-            delete acceptedConfig.download_path;
-        }
-    }
-    const nextConfig = normalizeConfigTemplates({ ...config, ...acceptedConfig });
-    config = persistStateChange(config, () => nextConfig, saveConfig);
+function applyConfigTransition(previousConfig: Config, nextConfig: Config): Config {
+    const previousClientId = previousConfig.client_id;
+    const previousCacheMinutes = previousConfig.metadata_cache_minutes;
+    const previousPersistQueueOnRestart = previousConfig.persist_queue_on_restart;
+    const previousTheme = previousConfig.theme;
+    const previousAutoRecordList = JSON.stringify(previousConfig.auto_record_streamers || []);
+    const previousAutoRecordSeconds = previousConfig.auto_record_poll_seconds;
+    const previousAutoVodList = JSON.stringify(previousConfig.auto_vod_download_streamers || []);
+    const previousAutoVodMinutes = previousConfig.auto_vod_download_poll_minutes;
+    const previousStreamerList = JSON.stringify(previousConfig.streamers || []);
+    const previousDownloadPolicy = JSON.stringify(previousConfig.download_policy);
+    config = persistStateChange(previousConfig, () => nextConfig, saveConfig);
     downloadThrottleBudget.setMaxBytesPerSecond(config.download_policy.throttle?.maxBytesPerSecond ?? null);
     if (JSON.stringify(config.download_policy) !== previousDownloadPolicy && !isDownloading && downloadQueue.some((item) => item.status === 'pending')) {
         scheduleQueueProcessing();
@@ -7567,8 +7665,7 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
     }
 
     if (config.client_id !== previousClientId) {
-        accessToken = null;
-        twitchLoginInFlight = null;
+        twitchAppTokenService.clear();
     }
 
     if (config.metadata_cache_minutes !== previousCacheMinutes) {
@@ -7590,10 +7687,6 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
         saveQueue(downloadQueue, true);
     }
 
-    // Restart auto-record poller if its inputs changed (added/removed
-    // streamers or interval changed). Drop transition state for any
-    // streamer no longer being watched so re-enabling them later doesn't
-    // suppress an immediate first-poll trigger.
     const newAutoRecordList = JSON.stringify(config.auto_record_streamers || []);
     if (newAutoRecordList !== previousAutoRecordList || config.auto_record_poll_seconds !== previousAutoRecordSeconds) {
         const watched = new Set(config.auto_record_streamers || []);
@@ -7603,31 +7696,39 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
         restartAutoRecordPoller();
     }
 
-    // Same dance for the auto-VOD poller — independent cadence from
-    // auto-record because VOD listings are heavier to fetch.
     const newAutoVodList = JSON.stringify(config.auto_vod_download_streamers || []);
     if (newAutoVodList !== previousAutoVodList || config.auto_vod_download_poll_minutes !== previousAutoVodMinutes) {
         restartAutoVodPoller();
     }
 
-    // Live-status batch poller — fire an immediate refresh when the
-    // streamer list itself changes (added/removed) so the sidebar dots
-    // update instantly instead of waiting for the next 60s tick.
     const newStreamerList = JSON.stringify(config.streamers || []);
     if (newStreamerList !== previousStreamerList) {
         restartLiveStatusPoller();
     }
 
-    // Restart cleanup timer when the toggle flips; harmless to call when
-    // unchanged because restartAutoCleanupTimer just resets the interval.
     restartAutoCleanupTimer();
-
     return config;
+}
+
+ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability?: string) => {
+    if (!isTrustedRendererEvent(event)) return config;
+    const acceptedConfig = sanitizeConfigInput(newConfig) as Partial<Config>;
+    if (typeof acceptedConfig.download_path === 'string' && acceptedConfig.download_path !== config.download_path) {
+        const selectedPath = typeof fileCapability === 'string'
+            ? resolveFileCapability(event, fileCapability, 'selected-folder')
+            : null;
+        if (!selectedPath || normalizeComparablePath(selectedPath) !== normalizeComparablePath(acceptedConfig.download_path)) {
+            delete acceptedConfig.download_path;
+        }
+    }
+    const previousConfig = config;
+    const nextConfig = normalizeConfigTemplates({ ...previousConfig, ...acceptedConfig });
+    return applyConfigTransition(previousConfig, nextConfig);
 });
 
 ipcMain.handle('login', async (event) => {
     if (!isTrustedRendererEvent(event)) return false;
-    return await twitchLogin();
+    return (await ensureTwitchAuth(true)) !== null;
 });
 
 ipcMain.handle('get-user-id', async (_, username: string) => {
@@ -7645,7 +7746,7 @@ ipcMain.handle('get-queue', (event) => {
 });
 
 ipcMain.handle('start-live-recording', async (event, streamerName: string) => {
-    if (!isTrustedRendererEvent(event)) return { success: false, error: 'Access denied' };
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) return { success: false, error: 'Access denied' };
     if (typeof streamerName !== 'string' || !streamerName) {
         return { success: false, error: 'Invalid streamer name' };
     }
@@ -7653,6 +7754,7 @@ ipcMain.handle('start-live-recording', async (event, streamerName: string) => {
     if (!login) return { success: false, error: 'Invalid streamer name' };
 
     const liveInfo = await getLiveStreamInfo(login);
+    if (appShutdownStarted) return { success: false, error: 'Access denied' };
     if (liveInfo === null) {
         return { success: false, error: 'Could not check live status. Try again.' };
     }
@@ -7663,6 +7765,7 @@ ipcMain.handle('start-live-recording', async (event, streamerName: string) => {
     const channelUrl = `https://www.twitch.tv/${login}`;
     const liveItem: QueueItem = {
         id: generateQueueItemId(),
+        createdAt: new Date().toISOString(),
         title: liveInfo.title || `${login} (LIVE)`,
         url: channelUrl,
         date: new Date().toISOString(),
@@ -7681,40 +7784,83 @@ ipcMain.handle('start-live-recording', async (event, streamerName: string) => {
         return { success: false, error: 'ALREADY_RECORDING', streamer: login };
     }
 
-    downloadQueue = persistStateChange(downloadQueue, (current) => [...current, liveItem], saveQueue);
-    emitQueueUpdated();
+    const addition = commitQueueItemWithResult(liveItem, false);
+    if (!addition.accepted) {
+        return { success: false, error: addition.reason === 'duplicate' ? 'ALREADY_RECORDING' : addition.reason, streamer: login };
+    }
     if (!isDownloading) scheduleQueueProcessing();
     appendDebugLog('live-recording-queued', { streamer: login, title: liveItem.title });
     return { success: true, streamer: login, title: liveInfo.title || login };
 });
 
-registerTrustedIpcHandler(ipcMain, 'add-to-queue', isTrustedRendererEvent, () => downloadQueue, (_, input: unknown) => {
-    const item = createRendererQueueItem(input, generateQueueItemId());
-    if (!item) return downloadQueue;
-    if (config.prevent_duplicate_downloads && hasActiveDuplicate(item)) {
+function commitQueueItemWithResult(item: QueueItem | null, notifyDuplicate: boolean): QueueAdditionResult<QueueItem> {
+    if (appShutdownStarted) {
+        return { queue: downloadQueue, accepted: false, reason: 'shutting-down' };
+    }
+    let duplicate = false;
+    const result = commitQueueAddition(
+        downloadQueue,
+        item,
+        (candidate) => {
+            duplicate = config.prevent_duplicate_downloads && hasActiveDuplicate(candidate);
+            return duplicate;
+        },
+        saveQueue,
+    );
+    if (duplicate && item) {
         runtimeMetrics.duplicateSkips += 1;
-        mainWindow?.webContents.send('queue-duplicate-skipped', {
-            title: item.title,
-            streamer: item.streamer,
-            url: item.url
-        });
+        if (notifyDuplicate) {
+            mainWindow?.webContents.send('queue-duplicate-skipped', {
+                title: item.title,
+                streamer: item.streamer,
+                url: item.url
+            });
+        }
         appendDebugLog('queue-item-duplicate-skipped', {
             title: item.title,
             url: item.url,
             streamer: item.streamer
         });
-        return downloadQueue;
     }
+    if (result.accepted) {
+        downloadQueue = result.queue;
+        emitQueueUpdated();
+    } else if (result.reason === 'persistence-failed') {
+        appendDebugLog('queue-item-persist-failed', { title: item?.title || '', url: item?.url || '' });
+    }
+    return result;
+}
 
-    downloadQueue = persistStateChange(downloadQueue, (current) => [...current, item], saveQueue);
-    emitQueueUpdated();
-    return downloadQueue;
+function addRendererQueueItemWithResult(input: unknown, notifyDuplicate: boolean): QueueAdditionResult<QueueItem> {
+    const item = createRendererQueueItem(input, generateQueueItemId());
+    if (item) item.createdAt = new Date().toISOString();
+    return commitQueueItemWithResult(item, notifyDuplicate);
+}
+
+registerTrustedIpcHandler(ipcMain, 'add-to-queue', isTrustedRendererEvent, () => [], (_, input: unknown) => {
+    return addRendererQueueItemWithResult(input, true).queue;
+});
+
+registerTrustedIpcHandler(ipcMain, 'add-to-queue-with-result', isTrustedRendererEvent, () => ({ queue: [], accepted: false, reason: 'access-denied' as const }), (_, input: unknown) => {
+    return addRendererQueueItemWithResult(input, false);
 });
 
 registerTrustedIpcHandler(ipcMain, 'remove-from-queue', isTrustedRendererEvent, () => Promise.resolve(downloadQueue), async (_, id: string) => {
     if (typeof id !== 'string' || !id) return downloadQueue;
     const wasActiveItem = activeQueueItemId === id || activeDownloads.has(id) || queueProcessRegistry.activeItemIds().includes(id);
     const removedItem = downloadQueue.find((item) => item.id === id);
+
+    if (removedItem?.mergeRecoveryBlocked) {
+        const recovery = recoverInterruptedMergeArtifacts([removedItem], config.download_path, new Set([removedItem.id]));
+        const recoveredItem = recovery.queue[0];
+        if (recovery.failedFiles.length > 0) {
+            recoveredItem.last_error = tBackend('mergeRecoveryBlocked');
+            downloadQueue = persistStateChange(downloadQueue, (current) => current.map((item) => item.id === id ? recoveredItem : item), saveQueue);
+            emitQueueUpdated();
+            return downloadQueue;
+        }
+        downloadQueue = persistStateChange(downloadQueue, (current) => current.map((item) => item.id === id ? recoveredItem : item), saveQueue);
+    }
 
     await commitQueueMutation(
         downloadQueue,
@@ -7764,18 +7910,13 @@ ipcMain.handle('reorder-queue', (event, orderIds: string[]) => {
 
 ipcMain.handle('retry-failed-downloads', async (event) => {
     if (!isTrustedRendererEvent(event)) return downloadQueue;
-    const failedIds = downloadQueue.filter((item) => item.status === 'error').map((item) => item.id);
+    const failedIds = downloadQueue.filter((item) => item.status === 'error' && !item.mergeRecoveryBlocked).map((item) => item.id);
     await Promise.all(failedIds.map((id) => queueProcessRegistry.cancelItem(id)));
     for (const id of failedIds) queueProcessRegistry.resetItem(id);
     const nextQueue: QueueItem[] = downloadQueue.map((item) => {
-        if (item.status !== 'error') return item;
+        if (item.status !== 'error' || item.mergeRecoveryBlocked) return item;
 
-        return {
-            ...item,
-            status: 'pending' as const,
-            progress: 0,
-            last_error: ''
-        };
+        return { ...clearQueueTransferState(item, 'pending', 0), last_error: '' };
     });
 
     downloadQueue = persistStateChange(downloadQueue, () => nextQueue, saveQueue);
@@ -7794,17 +7935,14 @@ ipcMain.handle('retry-queue-item', async (event, id: string) => {
     const idx = downloadQueue.findIndex((it) => it.id === id);
     if (idx < 0) return downloadQueue;
     const item = downloadQueue[idx];
-    if (item.status !== 'error') return downloadQueue;
+    if (item.status !== 'error' || item.mergeRecoveryBlocked) return downloadQueue;
 
     await queueProcessRegistry.cancelItem(id);
     queueProcessRegistry.resetItem(id);
 
-    downloadQueue = persistStateChange(downloadQueue, (current) => current.map((candidate) => candidate.id === id ? {
-        ...candidate,
-        status: 'pending',
-        progress: 0,
-        last_error: ''
-    } : candidate), saveQueue);
+    downloadQueue = persistStateChange(downloadQueue, (current) => current.map((candidate) => candidate.id === id
+        ? { ...clearQueueTransferState(candidate, 'pending', 0), last_error: '' }
+        : candidate), saveQueue);
     emitQueueUpdated();
     appendDebugLog('queue-item-retry-single', { id, title: item.title });
 
@@ -7816,7 +7954,7 @@ ipcMain.handle('retry-queue-item', async (event, id: string) => {
 });
 
 ipcMain.handle('create-merge-group', (event, itemIds: string[]) => {
-    if (!isTrustedRendererEvent(event) || !Array.isArray(itemIds)) return downloadQueue;
+    if (!isTrustedRendererEvent(event) || appShutdownStarted || !Array.isArray(itemIds)) return downloadQueue;
     const selectedItems = downloadQueue.filter(item => itemIds.includes(item.id));
 
     if (selectedItems.length < 2) {
@@ -7871,6 +8009,7 @@ ipcMain.handle('create-merge-group', (event, itemIds: string[]) => {
     // Create merged queue item
     const mergedItem: QueueItem = {
         id: generateQueueItemId(),
+        createdAt: new Date().toISOString(),
         title,
         url: first.url,
         date: first.date,
@@ -7895,8 +8034,11 @@ ipcMain.handle('create-merge-group', (event, itemIds: string[]) => {
 ipcMain.handle('start-download', async (event, manualOverride: unknown = false) => {
     if (!isTrustedRendererEvent(event)) return false;
     if (isDownloading && queuePaused) {
-        const nextQueue = downloadQueue.map((item) => item.status === 'paused' ? { ...item, status: 'downloading' as const } : item);
-        downloadQueue = persistStateChange(downloadQueue, () => nextQueue, saveQueue);
+        const nextQueue = downloadQueue.map((item) => item.status === 'paused'
+            ? clearQueueTransferState(item, 'downloading', item.progress)
+            : item);
+        saveQueue(nextQueue);
+        downloadQueue = applyQueueSnapshotPreservingActiveItems(downloadQueue, nextQueue, new Set(queueProcessRegistry.activeItemIds()));
         queuePaused = false;
         await Promise.all(queueProcessRegistry.activeItemIds().map((id) => queueProcessRegistry.resumeItem(id)));
         emitQueueUpdated(true);
@@ -7904,7 +8046,9 @@ ipcMain.handle('start-download', async (event, manualOverride: unknown = false) 
         return true;
     }
 
-    const nextQueue = downloadQueue.map((item) => item.status === 'paused' ? { ...item, status: 'pending' as const } : item);
+    const nextQueue = downloadQueue.map((item) => item.status === 'paused'
+        ? clearQueueTransferState(item, 'pending', 0)
+        : item);
 
     const hasPendingItems = nextQueue.some(item => item.status === 'pending');
     if (!hasPendingItems) {
@@ -7925,19 +8069,24 @@ ipcMain.handle('pause-download', async (event) => {
     if (!isTrustedRendererEvent(event)) return false;
     if (!isDownloading || queuePaused) return false;
 
-    const nextQueue = downloadQueue.map((item) => item.status === 'downloading' ? {
-        ...item,
-        status: 'paused' as const,
-        speed: '',
-        eta: '',
-        progressStatus: tBackend('downloadPaused')
-    } : item);
+    const nextQueue = downloadQueue.map((item) => {
+        if (item.status !== 'downloading') return item;
+        const waitsForBoundary = Boolean(item.mergeGroup && (item.mergeGroup.mergePhase === 'merging' || item.mergeGroup.mergePhase === 'splitting'));
+        return {
+            ...item,
+            status: waitsForBoundary ? 'downloading' as const : 'paused' as const,
+            speed: '',
+            eta: '',
+            progressStatus: waitsForBoundary ? tBackend('downloadPausePending') : tBackend('downloadPaused'),
+            recordingHealth: undefined,
+        };
+    });
     await commitQueueMutation(
         downloadQueue,
         () => nextQueue,
         saveQueue,
         (candidate) => {
-            downloadQueue = candidate;
+            downloadQueue = applyQueueSnapshotPreservingActiveItems(downloadQueue, candidate, new Set(queueProcessRegistry.activeItemIds()));
             queuePaused = true;
         },
         async () => {
@@ -8060,21 +8209,18 @@ ipcMain.handle('open-folder', async (event, capability: string) => {
     if (folderPath) await shell.openPath(folderPath);
 });
 
-// Extensions that shell.openPath would happily execute via the system
-// default. Calc.exe via XSS smuggling is the canonical example; this
-// list blocks the obvious vectors. Media/text/image extensions are
-// still fine — shell.openPath opens them in the OS's default viewer.
-const OPEN_FILE_BLOCKED_EXTENSIONS = new Set([
-    '.exe', '.bat', '.cmd', '.com', '.ps1', '.vbs', '.vbe',
-    '.js', '.jse', '.wsf', '.wsh', '.scr', '.msi', '.msp',
-    '.lnk', '.cpl', '.reg', '.hta', '.jar', '.application'
+const SAFE_ARCHIVE_OPEN_EXTENSIONS = new Set([
+    '.mp4', '.m4v', '.mov', '.webm', '.mkv', '.ts', '.avi',
+    '.aac', '.m4a', '.mp3', '.wav', '.ogg',
+    '.json', '.jsonl', '.txt', '.srt', '.vtt',
+    '.jpg', '.jpeg', '.png', '.webp'
 ]);
 
 ipcMain.handle('open-file', async (event, capability: string): Promise<boolean> => {
     const filePath = resolveFileCapability(event, capability, 'open-file', true);
     if (!filePath) return false;
     const ext = path.extname(filePath).toLowerCase();
-    if (OPEN_FILE_BLOCKED_EXTENSIONS.has(ext)) {
+    if (!SAFE_ARCHIVE_OPEN_EXTENSIONS.has(ext)) {
         appendDebugLog('open-file-rejected-extension', { ext, path: filePath.slice(0, 200) });
         return false;
     }
@@ -8159,9 +8305,18 @@ interface ActiveClipDownloadTracking {
     output: PausableOutput;
     partialFilename: string;
 }
-const activeClipProcesses = new Map<string, ActiveClipDownloadTracking>();
+const activeClipProcesses = new Set<ActiveClipDownloadTracking>();
 
 registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () => Promise.resolve({ success: false, error: 'File access denied' }), async (_, clipUrl: string) => {
+    if (appShutdownStarted) return { success: false, error: 'shutting-down' };
+    const policyDecision = decideStandaloneDownloadStart(config.download_policy, new Date());
+    if (!policyDecision.allowed) {
+        const nextStart = policyDecision.nextStart
+            ? `${policyDecision.nextStart.getHours().toString().padStart(2, '0')}:${policyDecision.nextStart.getMinutes().toString().padStart(2, '0')}`
+            : '--:--';
+        return { success: false, error: tBackend('downloadOutsideWindow', { nextStart }) };
+    }
+
     let clipId = '';
     const match1 = clipUrl.match(/clips\.twitch\.tv\/([A-Za-z0-9_-]+)/);
     const match2 = clipUrl.match(/twitch\.tv\/[^/]+\/clip\/([A-Za-z0-9_-]+)/);
@@ -8171,6 +8326,7 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
     else return { success: false, error: tBackend('invalidClipUrl') };
 
     const clipInfo = await getClipInfo(clipId);
+    if (appShutdownStarted) return { success: false, error: 'shutting-down' };
     if (!clipInfo) return { success: false, error: tBackend('clipNotFound') };
 
     // Sanitize broadcaster_name for path safety — Twitch returns the display
@@ -8198,6 +8354,13 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
     return new Promise<{ success: boolean; error?: string; filename?: string }>((resolve) => {
         const streamlinkCmd = getStreamlinkCommand();
         const partialFilename = partialDownloadRegistry.begin(filename);
+        if (appShutdownStarted) {
+            partialDownloadRegistry.discard(partialFilename);
+            releaseClaimedFilenamesForItem(clipId);
+            resolve({ success: false, error: 'shutting-down' });
+            return;
+        }
+        recordManagedToolExecution('streamlink', streamlinkCmd.command);
         const proc = spawn(streamlinkCmd.command, [
             ...streamlinkCmd.prefixArgs,
             `https://clips.twitch.tv/${clipId}`,
@@ -8216,19 +8379,33 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
             createDownloadThrottleTransform(),
         );
         const outputFinished = output.finished.then(() => null, (error) => error);
+        const tracking = { process: proc, output, partialFilename };
+        let settled = false;
+        const finish = (result: { success: boolean; error?: string; filename?: string }): void => {
+            if (settled) return;
+            settled = true;
+            activeClipProcesses.delete(tracking);
+            releaseClaimedFilenamesForItem(clipId);
+            resolve(result);
+        };
 
-        activeClipProcesses.set(clipId, { process: proc, output, partialFilename });
+        activeClipProcesses.add(tracking);
         appendDebugLog('clip-download-start', { clipId, broadcaster: safeBroadcaster, filename });
 
         proc.on('close', async (code) => {
-            activeClipProcesses.delete(clipId);
-            releaseClaimedFilenamesForItem(clipId);
             const outputError = await outputFinished;
+            if (settled) return;
+
+            if (appShutdownStarted) {
+                partialDownloadRegistry.discard(partialFilename);
+                finish({ success: false, error: 'shutting-down' });
+                return;
+            }
 
             if (outputError || code !== 0 || !fs.existsSync(partialFilename)) {
                 partialDownloadRegistry.discard(partialFilename);
                 appendDebugLog('clip-download-failed', { clipId, code });
-                resolve({ success: false, error: outputError ? String(outputError) : tBackend('downloadFailedExitCode', { code: String(code ?? -1) }) });
+                finish({ success: false, error: outputError ? String(outputError) : tBackend('downloadFailedExitCode', { code: String(code ?? -1) }) });
                 return;
             }
 
@@ -8239,7 +8416,7 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
             if (stats.size < 16 * 1024) {
                 partialDownloadRegistry.discard(partialFilename);
                 appendDebugLog('clip-download-too-small', { clipId, bytes: stats.size });
-                resolve({ success: false, error: tBackend('clipFileTooSmall', { bytes: String(stats.size) }) });
+                finish({ success: false, error: tBackend('clipFileTooSmall', { bytes: String(stats.size) }) });
                 return;
             }
 
@@ -8247,7 +8424,7 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
             if (!integrity.success) {
                 partialDownloadRegistry.discard(partialFilename);
                 appendDebugLog('clip-download-integrity-failed', { clipId, error: integrity.error });
-                resolve({ success: false, error: integrity.error || tBackend('integrityFailedGeneric') });
+                finish({ success: false, error: integrity.error || tBackend('integrityFailedGeneric') });
                 return;
             }
 
@@ -8255,19 +8432,18 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
                 partialDownloadRegistry.commit(partialFilename, filename);
             } catch (error) {
                 partialDownloadRegistry.discard(partialFilename);
-                resolve({ success: false, error: String(error) });
+                finish({ success: false, error: String(error) });
                 return;
             }
             appendDebugLog('clip-download-success', { clipId, bytes: stats.size, filename });
-            resolve({ success: true, filename });
+            finish({ success: true, filename });
         });
 
         proc.on('error', async () => {
             await output.cancel();
+            if (settled) return;
             partialDownloadRegistry.discard(partialFilename);
-            activeClipProcesses.delete(clipId);
-            releaseClaimedFilenamesForItem(clipId);
-            resolve({ success: false, error: tBackend('streamlinkNotFound') });
+            finish({ success: false, error: tBackend('streamlinkNotFound') });
         });
     });
 });
@@ -8279,6 +8455,11 @@ registerTrustedIpcHandler(ipcMain, 'run-preflight', isTrustedRendererEvent, () =
 ipcMain.handle('get-managed-tool-status', async (event) => {
     if (!isTrustedRendererEvent(event)) return null;
     return await getManagedToolStatuses();
+});
+
+ipcMain.handle('get-managed-tool-execution-diagnostics', (event) => {
+    if (!isTrustedRendererEvent(event)) return null;
+    return managedToolExecutionTracker.snapshot();
 });
 
 ipcMain.handle('repair-managed-tools', async (event) => {
@@ -8512,23 +8693,20 @@ ipcMain.handle('import-config', async (event) => {
         const importCapability = issueFileCapability(event, 'config-import', dialogResult.filePaths[0], 'input-file', ['json']);
         const importPath = resolveFileCapability(event, importCapability.token, 'config-import', true);
         if (!importPath) return { success: false, error: 'File access denied' };
+        const importStats = fs.statSync(importPath);
+        if (!importStats.isFile() || importStats.size > MAX_CONFIG_IMPORT_BYTES) {
+            return { success: false, error: 'Imported file is too large or invalid.' };
+        }
         const raw = fs.readFileSync(importPath, 'utf-8');
         const parsed = JSON.parse(raw);
         if (!isPlainObject(parsed)) {
             return { success: false, error: 'Imported file is not a JSON object.' };
         }
 
-        // Merge over current config so unknown / missing keys keep their
-        // existing values. Then run normalizeConfigTemplates so any
-        // out-of-range field falls back to defaults.
-        const imported = { ...parsed } as Record<string, unknown>;
-        delete imported.client_secret;
-        delete imported.discord_webhook_url;
-        delete imported.__exportVersion;
-        delete imported.__exportedAt;
-        const merged = normalizeConfigTemplates({ ...config, ...imported } as Config);
-
-        config = persistStateChange(config, () => merged, saveConfig);
+        const previousConfig = config;
+        const imported = secureImportedConfigTransition(previousConfig, sanitizeImportedConfig(parsed));
+        const merged = normalizeConfigTemplates({ ...previousConfig, ...imported } as Config);
+        applyConfigTransition(previousConfig, merged);
         appendDebugLog('config-import-applied', { source: importPath });
         return { success: true, filePath: importPath };
     } catch (e) {
@@ -8695,11 +8873,10 @@ ipcMain.handle('cut-video', async (event, inputCapability: string, startTime: nu
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(11, 19);
     const outputFile = path.join(dir, `${baseName}_cut_${timestamp}.mp4`);
 
-    let lastProgress = 0;
-    const success = await cutVideo(inputFile, outputFile, startTime, endTime, (percent) => {
-        lastProgress = percent;
+    const completed = await cutVideo(inputFile, outputFile, startTime, endTime, (percent) => {
         mainWindow?.webContents.send('cut-progress', percent);
     });
+    const success = completed && !appShutdownStarted;
 
     return { success, outputName: success ? path.basename(outputFile) : null };
 });
@@ -8714,9 +8891,12 @@ ipcMain.handle('merge-videos', async (event, inputCapabilities: string[], output
         if (!resolveFileCapability(event, capability, 'merge-input', true)) return { success: false, outputName: null };
     }
     if (!resolveFileCapability(event, outputCapability, 'merge-output', true, inputFiles as string[])) return { success: false, outputName: null };
-    const success = await publishCapabilityOutput(outputFile, async (partialFile) => await mergeVideos(inputFiles as string[], partialFile, (percent) => {
-        mainWindow?.webContents.send('merge-progress', percent);
-    }));
+    const success = await publishCapabilityOutput(outputFile, async (partialFile) => {
+        const produced = await mergeVideos(inputFiles as string[], partialFile, (percent) => {
+            mainWindow?.webContents.send('merge-progress', percent);
+        });
+        return produced && !appShutdownStarted;
+    });
     return { success, outputName: success ? path.basename(outputFile) : null };
 });
 
@@ -8802,15 +8982,40 @@ app.whenReady().then(() => {
             requireEncryption: true,
         });
         appendDebugLog('sqlite-migrator', result);
-        if (result.errors.length > 0) throw new Error(result.errors.map((entry: { source: string; message: string }) => `${entry.source}: ${entry.message}`).join('; '));
+        const fatalMigrationErrors = result.errors.filter((entry: { source: string }) => entry.source !== 'legacy-config-scrub');
+        if (fatalMigrationErrors.length > 0) {
+            throw new Error(fatalMigrationErrors.map((entry: { source: string; message: string }) => `${entry.source}: ${entry.message}`).join('; '));
+        }
         appStateStore = createAppStateStore(database);
         config = loadConfig();
         lastPersistedConfig = cloneConfig(config);
-        downloadQueue = config.persist_queue_on_restart === false ? [] : loadQueue();
+        const queueLoad = config.persist_queue_on_restart === false
+            ? { queue: [] as QueueItem[], interruptedMergeItemIds: new Set<string>() }
+            : loadQueue();
+        downloadQueue = queueLoad.queue;
+        for (const item of downloadQueue) {
+            if (item.mergeRecoveryBlocked) queueLoad.interruptedMergeItemIds.add(item.id);
+        }
+        const mergeRecovery = recoverInterruptedMergeArtifacts(downloadQueue, config.download_path, queueLoad.interruptedMergeItemIds);
+        if (mergeRecovery.changed) {
+            downloadQueue = mergeRecovery.queue;
+            for (const item of downloadQueue) {
+                if (item.mergeRecoveryBlocked) item.last_error = tBackend('mergeRecoveryBlocked');
+            }
+            appStateStore.saveQueue(downloadQueue);
+            appendDebugLog('merge-recovery-reset', {
+                removedFiles: mergeRecovery.removedFiles.length,
+                failedFiles: mergeRecovery.failedFiles.length,
+            });
+        }
         if (config.persist_queue_on_restart === false) appStateStore.saveQueue([]);
         lastPersistedQueueSnapshot = cloneQueue(downloadQueue);
-        twitchClientSecret = appSecretStore.get('twitch_client_secret') ?? '';
-        discordWebhookUrl = appSecretStore.get('discord_webhook_url') ?? '';
+        twitchClientSecret = readSecretSafely(appSecretStore, 'twitch_client_secret', (error) => {
+            appendDebugLog('secret-load-failed', { key: 'twitch_client_secret', error: String(error) });
+        });
+        discordWebhookUrl = readSecretSafely(appSecretStore, 'discord_webhook_url', (error) => {
+            appendDebugLog('secret-load-failed', { key: 'discord_webhook_url', error: String(error) });
+        });
     } catch (e) {
         appendDebugLog('sqlite-open-failed', {
             error: e instanceof Error ? e.message : String(e),
@@ -8851,6 +9056,12 @@ let shutdownCleanupDone = false;
 let quitAfterCleanup = false;
 let shutdownPromise: Promise<void> | null = null;
 
+async function waitForAllChildProcessesExit(processes: ChildProcess[]): Promise<void> {
+    const results = await Promise.allSettled(processes.map((process) => waitForChildProcessExit(process)));
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failed) throw failed.reason;
+}
+
 async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Promise<void> {
     if (shutdownCleanupDone) return;
     shutdownCleanupDone = true;
@@ -8864,77 +9075,126 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
 
     appendDebugLog('shutdown-cleanup', { reason });
 
-    stopMetadataCacheCleanup();
-    cleanupMetadataCaches('shutdown');
-    stopAutoUpdatePolling();
-    stopAutoRecordPoller();
-    stopAutoVodPoller();
-    stopLiveStatusPoller();
-    stopAutoCleanupTimer();
-
-    // Kill all active children: queue downloads, standalone clip downloads,
-    // and any in-flight cutter/merger/splitter ffmpeg. before-quit used to
-    // skip this entirely; window-all-closed did it but only via direct
-    // kill() (no try/catch around the queue process kill).
-    await queueRunLifecycle.shutdown(
-        () => {
-            isDownloading = false;
-            queuePaused = false;
-            for (const id of queueProcessRegistry.activeItemIds()) cancelledItemIds.add(id);
-        },
-        () => {
-            saveConfig(config);
-            flushQueueSave();
-        },
-    );
-    activeDownloads.clear();
-
-    await Promise.all([...activeClipProcesses.values()].map(async (tracking) => {
-        try { tracking.process.kill(); } catch { }
-        try { await tracking.output.cancel(); } catch { }
-        try { partialDownloadRegistry.discard(tracking.partialFilename); } catch { }
-    }));
-    activeClipProcesses.clear();
-
-    if (currentEditorProcess) {
-        const editorProcess = currentEditorProcess;
-        try { editorProcess.kill(); } catch { /* already exited */ }
-        await waitForChildProcessExit(editorProcess);
-        currentEditorProcess = null;
-    }
-
-    if (cutterExportActive) cutterExportCancelled = true;
+    const cleanupError = (step: string, error: unknown): void => {
+        appendDebugLog('shutdown-step-failed', { step, error: String(error) });
+    };
+    const clipProcesses = [...activeClipProcesses];
+    const editorProcesses = [...currentEditorProcesses];
     const exportProcesses = [...currentCutterExportProcesses];
-    for (const process of exportProcesses) {
-        try { process.kill(); } catch { }
-    }
-    await Promise.all(exportProcesses.map((process) => waitForChildProcessExit(process)));
-    if (currentCutterProcess && exportProcesses.includes(currentCutterProcess)) currentCutterProcess = null;
     const mediaProcesses = [...currentCutterMediaProcesses, ...currentCutterWaveformProcesses, ...currentCutterProbeProcesses, ...currentCutterInfoProcesses, ...currentCutterPreviewProcesses];
-    cancelCutterMediaPreparation();
-    cancelCutterWaveformPreparation();
-    cancelCutterMetadataPreparation();
-    cancelCutterPreviewPreparation();
-    for (const process of currentCutterInfoProcesses) {
-        try { process.kill(); } catch { }
-    }
-    await Promise.all(mediaProcesses.map((process) => waitForChildProcessExit(process)));
-    removeCutterPreviewDirectory(cutterMediaJob?.previewDirectory || null);
-    if (currentCutterPartialFile) {
-        try { fs.rmSync(currentCutterPartialFile, { force: true }); } catch { }
-        currentCutterPartialFile = null;
-    }
+    const frameProcesses = [...currentCutterFrameProcesses];
+    const frameFiles = [...currentCutterFrameFiles];
+    let exportProcessesExited = exportProcesses.length === 0;
+    let mediaProcessesExited = mediaProcesses.length === 0;
+    let frameProcessesExited = frameProcesses.length === 0;
 
-    // SQLite-Handle schliessen, falls geoeffnet — WAL-Checkpoint passiert beim
-    // close, sodass beim naechsten Start keine .wal/.shm orphans bleiben.
-    if (appDb) {
-        try { appDb.close(); } catch { /* already closed */ }
-        appDb = null;
-    }
-
-    // Flush debug log AFTER persisting state so any errors saving config /
-    // queue land in the log before the timer is gone.
-    stopDebugLogFlushTimer(true);
+    await runResilientSteps([
+        ['metadata-cache-timer', () => stopMetadataCacheCleanup()],
+        ['metadata-cache-files', () => cleanupMetadataCaches('shutdown')],
+        ['auto-update-poller', () => stopAutoUpdatePolling()],
+        ['auto-record-poller', () => stopAutoRecordPoller()],
+        ['auto-vod-poller', () => stopAutoVodPoller()],
+        ['live-status-poller', () => stopLiveStatusPoller()],
+        ['auto-cleanup-timer', () => stopAutoCleanupTimer()],
+        ['queue-lifecycle', async () => {
+            await queueRunLifecycle.shutdown(
+                () => {
+                    isDownloading = false;
+                    queuePaused = false;
+                    for (const id of queueProcessRegistry.activeItemIds()) cancelledItemIds.add(id);
+                },
+                () => runResilientSteps([
+                    ['persist-config', () => saveConfig(config)],
+                    ['persist-queue', () => flushQueueSave()],
+                ], cleanupError),
+                (error) => cleanupError('queue-persist', error),
+                (error) => cleanupError('queue-run-exit', error),
+            );
+        }],
+        ['queue-tracking', () => activeDownloads.clear()],
+        ['clip-processes', async () => {
+            const results = await Promise.allSettled(clipProcesses.map(async (tracking) => {
+                try { tracking.process.kill(); } catch { }
+                await waitForChildProcessExit(tracking.process);
+                await runResilientSteps([
+                    ['clip-output', () => tracking.output.cancel()],
+                    ['clip-partial', () => partialDownloadRegistry.discard(tracking.partialFilename)],
+                ], cleanupError);
+                activeClipProcesses.delete(tracking);
+            }));
+            for (const result of results) {
+                if (result.status === 'rejected') cleanupError('clip-process-exit', result.reason);
+            }
+        }],
+        ['editor-processes', async () => {
+            for (const process of editorProcesses) {
+                try { process.kill(); } catch { }
+            }
+            await waitForAllChildProcessesExit(editorProcesses);
+            for (const process of editorProcesses) currentEditorProcesses.delete(process);
+        }],
+        ['cutter-export-cancel', () => {
+            if (cutterExportActive) cutterExportCancelled = true;
+            for (const process of exportProcesses) {
+                try { process.kill(); } catch { }
+            }
+        }],
+        ['cutter-export-wait', async () => {
+            await waitForAllChildProcessesExit(exportProcesses);
+            exportProcessesExited = true;
+        }],
+        ['cutter-export-release', () => {
+            if (!exportProcessesExited) return;
+            if (currentCutterProcess && exportProcesses.includes(currentCutterProcess)) currentCutterProcess = null;
+        }],
+        ['cutter-media-cancel', () => cancelCutterMediaPreparation()],
+        ['cutter-waveform-cancel', () => cancelCutterWaveformPreparation()],
+        ['cutter-metadata-cancel', () => cancelCutterMetadataPreparation()],
+        ['cutter-preview-cancel', () => cancelCutterPreviewPreparation()],
+        ['cutter-media-kill', () => {
+            for (const process of mediaProcesses) {
+                try { process.kill(); } catch { }
+            }
+        }],
+        ['cutter-media-wait', async () => {
+            await waitForAllChildProcessesExit(mediaProcesses);
+            mediaProcessesExited = true;
+        }],
+        ['cutter-frame-kill', () => {
+            for (const process of frameProcesses) {
+                try { process.kill(); } catch { }
+            }
+        }],
+        ['cutter-frame-wait', async () => {
+            await waitForAllChildProcessesExit(frameProcesses);
+            frameProcessesExited = true;
+        }],
+        ['cutter-frame-release', () => {
+            if (frameProcessesExited) currentCutterFrameProcesses.clear();
+        }],
+        ['cutter-frame-files', async () => {
+            if (!frameProcessesExited) return;
+            await runResilientSteps(frameFiles.map((filePath, index) => [
+                `cutter-frame-file-${index}`,
+                () => fs.rmSync(filePath, { force: true }),
+            ] as const), cleanupError);
+            currentCutterFrameFiles.clear();
+        }],
+        ['cutter-preview-directory', () => {
+            if (mediaProcessesExited) removeCutterPreviewDirectory(cutterMediaJob?.previewDirectory || null);
+        }],
+        ['cutter-partial', () => {
+            if (!exportProcessesExited || !currentCutterPartialFile) return;
+            fs.rmSync(currentCutterPartialFile, { force: true });
+            currentCutterPartialFile = null;
+        }],
+        ['database-close', () => {
+            const database = appDb;
+            appDb = null;
+            database?.close();
+        }],
+        ['debug-log-flush', () => stopDebugLogFlushTimer(true)],
+    ], cleanupError);
 }
 
 app.on('window-all-closed', () => {

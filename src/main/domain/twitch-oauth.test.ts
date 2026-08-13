@@ -17,6 +17,15 @@ function httpGet(url: string): Promise<{ status: number }> {
     });
 }
 
+async function captureError(run: () => Promise<unknown>): Promise<Error> {
+    try {
+        await run();
+    } catch (error) {
+        if (error instanceof Error) return error;
+    }
+    throw new Error('Expected the operation to reject with an Error');
+}
+
 describe('startLoginFlow', () => {
     test('builds Twitch authorize URL with required params + PKCE + state', async () => {
         const flow = await startLoginFlow({
@@ -121,11 +130,16 @@ describe('exchangeCodeForToken', () => {
     });
 
     test('throws on non-2xx response', async () => {
-        const fakeFetch = async (): Promise<Response> => new Response('bad request', { status: 400 });
-        await expect(exchangeCodeForToken({
+        const fakeFetch = async (): Promise<Response> => new Response('{"refreshToken":"body-refresh","cookie":"body-cookie"}', { status: 400 });
+        const error = await captureError(() => exchangeCodeForToken({
             clientId: 'cid', code: 'X', codeVerifier: 'V', redirectUri: 'http://x',
             fetchImpl: fakeFetch as unknown as typeof fetch,
-        })).rejects.toThrow(/400/);
+        }));
+
+        expect(error.message).toBe('twitch-oauth: token endpoint returned HTTP 400');
+        expect(error.cause).toBeUndefined();
+        expect(JSON.stringify(error)).not.toContain('body-refresh');
+        expect(JSON.stringify(error)).not.toContain('body-cookie');
     });
 });
 
@@ -149,5 +163,15 @@ describe('fetchTwitchUserInfo', () => {
         const fakeFetch = async (): Promise<Response> => new Response(JSON.stringify({ data: [] }), { status: 200 });
         await expect(fetchTwitchUserInfo('T', 'C', fakeFetch as unknown as typeof fetch))
             .rejects.toThrow(/no user/);
+    });
+
+    test('never exposes a helix response body or request credential in errors', async () => {
+        const fakeFetch = async (): Promise<Response> => new Response('{"accessToken":"body-access","clientSecret":"body-secret"}', { status: 401 });
+        const error = await captureError(() => fetchTwitchUserInfo('request-token', 'request-client', fakeFetch as unknown as typeof fetch));
+
+        expect(error.message).toBe('twitch-oauth: helix /users returned HTTP 401');
+        expect(error.cause).toBeUndefined();
+        const serialized = `${error.message}${JSON.stringify(error)}`;
+        for (const forbidden of ['body-access', 'body-secret', 'request-token', 'request-client']) expect(serialized).not.toContain(forbidden);
     });
 });

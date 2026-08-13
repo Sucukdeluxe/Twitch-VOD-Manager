@@ -79,11 +79,13 @@ interface MergeGroup {
     downloadedFiles: Record<number, string>;
     mergedFile?: string;
     splitFiles?: string[];
+    splitTempFiles?: string[];
     totalDurationSec?: number;
 }
 
 interface QueueItem {
     id: string;
+    createdAt?: string;
     title: string;
     url: string;
     date: string;
@@ -101,6 +103,8 @@ interface QueueItem {
     last_error?: string;
     customClip?: CustomClip;
     mergeGroup?: MergeGroup;
+    mergeRecoveryBlocked?: boolean;
+    artifactRoot?: string;
     outputFiles?: string[];
     isLive?: boolean;
     recordingHealth?: 'ok' | 'stale' | 'unknown';
@@ -172,6 +176,8 @@ interface VideoInfo {
     rotation: 0 | 90 | 180 | 270;
     audioStreams: Array<{ index: number; codec: string; channels: number; language: string | null }>;
 }
+
+type QueueAdditionResult = import('./main/domain/queue-addition').QueueAdditionResult<QueueItem>;
 
 interface DownloadPolicy {
     throttle: { maxBytesPerSecond: number } | null;
@@ -433,6 +439,7 @@ interface ApiBridge {
     getVODs(userId: string, forceRefresh?: boolean): Promise<VOD[]>;
     getQueue(): Promise<QueueItem[]>;
     addToQueue(item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip'>): Promise<QueueItem[]>;
+    addToQueueWithResult(item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip'>): Promise<QueueAdditionResult>;
     startLiveRecording(streamerName: string): Promise<{ success: boolean; error?: string; streamer?: string; title?: string }>;
     removeFromQueue(id: string): Promise<QueueItem[]>;
     reorderQueue(orderIds: string[]): Promise<QueueItem[]>;
@@ -502,6 +509,7 @@ interface ApiBridge {
     openExternal(url: string): Promise<void>;
     runPreflight(autoFix: boolean): Promise<PreflightResult>;
     getManagedToolStatus(): Promise<ManagedToolStatuses | null>;
+    getManagedToolExecutionDiagnostics(): Promise<{ ffmpeg: { path: string | null; count: number }; ffprobe: { path: string | null; count: number }; streamlink: { path: string | null; count: number } } | null>;
     repairManagedTools(): Promise<{ success: boolean; statuses: ManagedToolStatuses } | null>;
     resetManagedTools(): Promise<{ success: boolean; statuses: ManagedToolStatuses } | null>;
     getDebugLog(lines: number): Promise<string>;
@@ -525,7 +533,7 @@ interface ApiBridge {
     onUpdateNotAvailable(callback: () => void): void;
     onUpdateDownloadProgress(callback: (progress: UpdateDownloadProgress) => void): void;
     onUpdateDownloaded(callback: (info: UpdateInfo) => void): void;
-    onUpdateError(callback: (payload: { message: string }) => void): void;
+    onUpdateError(callback: (payload: { message: string; kind: 'check' | 'download'; version?: string }) => void): void;
 }
 
 interface Window {

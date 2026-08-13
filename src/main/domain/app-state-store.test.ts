@@ -65,4 +65,42 @@ describe('createAppStateStore', () => {
             { id: 'q1', queue_position: 1 },
         ]);
     });
+
+    it('persists only known valid config fields and normalizes streamer logins', () => {
+        const store = createAppStateStore(db);
+        store.saveConfig({
+            language: 'de',
+            theme: 'twitch',
+            streamers: [' Alice ', '@ALICE', 'bad/name', 42],
+            auto_record_streamers: [' Bob ', 'bad login'],
+            accessToken: 'camel-access-token',
+            refresh_token: 'snake-refresh-token',
+            clientSecret: 'camel-client-secret',
+            unknown_setting: 'must-not-persist',
+            parallel_downloads: 99,
+        });
+
+        const recovered = store.loadConfig();
+        const persisted = JSON.stringify(db.all('SELECT key, value FROM config_kv'));
+
+        expect(recovered).toEqual({
+            language: 'de',
+            theme: 'twitch',
+            streamers: ['alice'],
+            auto_record_streamers: ['bob'],
+        });
+        for (const forbidden of ['camel-access-token', 'snake-refresh-token', 'camel-client-secret', 'must-not-persist', 'unknown_setting', 'parallel_downloads']) {
+            expect(persisted).not.toContain(forbidden);
+        }
+    });
+
+    it('sanitizes and scrubs pre-existing config rows when loading', () => {
+        db.run("INSERT INTO config_kv(key, value, updated_at) VALUES (?, ?, strftime('%s','now'))", ['language', JSON.stringify('de')]);
+        db.run("INSERT INTO config_kv(key, value, updated_at) VALUES (?, ?, strftime('%s','now'))", ['accessToken', JSON.stringify('legacy-token')]);
+        db.run("INSERT INTO config_kv(key, value, updated_at) VALUES (?, ?, strftime('%s','now'))", ['parallel_downloads', JSON.stringify(99)]);
+        db.run("INSERT INTO config_kv(key, value, updated_at) VALUES (?, ?, strftime('%s','now'))", ['unknown_setting', JSON.stringify(true)]);
+
+        expect(createAppStateStore(db).loadConfig()).toEqual({ language: 'de' });
+        expect(db.all<{ key: string }>('SELECT key FROM config_kv ORDER BY key')).toEqual([{ key: 'language' }]);
+    });
 });

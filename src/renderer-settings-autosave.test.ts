@@ -25,6 +25,121 @@ function createInput(value = '', checked = false): Input {
     return { value, checked };
 }
 
+class InteractiveInput {
+    value = '';
+    checked = false;
+    disabled = false;
+    textContent = '';
+    className = '';
+    readonly classList = {
+        add: (..._tokens: string[]) => undefined,
+        remove: (..._tokens: string[]) => undefined,
+        contains: (_token: string) => false,
+        toggle: (_token: string, force?: boolean) => force ?? false
+    };
+    private readonly listeners = new Map<string, Array<() => void>>();
+
+    addEventListener(type: string, listener: () => void): void {
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+    }
+
+    dispatch(type: string): void {
+        for (const listener of this.listeners.get(type) ?? []) listener();
+    }
+
+    setAttribute(_name: string, _value: string): void { }
+
+    select(): void { }
+}
+
+type AutosaveRuntime = {
+    inputs: Map<string, InteractiveInput>;
+    saveConfigCalls: Array<Record<string, unknown>>;
+    scheduled: Array<() => void>;
+};
+
+function createAutosaveRuntime(): AutosaveRuntime {
+    const inputs = new Map(inputIds.map((id) => [id, new InteractiveInput()]));
+    for (const id of ['partMinutesLabel', 'downloadPolicyStatus', 'templateLint']) {
+        inputs.set(id, new InteractiveInput());
+    }
+    const saveConfigCalls: Array<Record<string, unknown>> = [];
+    const scheduled: Array<() => void> = [];
+    const config = {
+        download_policy: { throttle: null, windows: [] },
+        auto_resume_live_recording: true,
+        auto_merge_resumed_parts: false,
+        delete_parts_after_merge: false,
+        discord_notify_vod_auto_queued: false,
+        auto_vod_download_poll_minutes: 15,
+        auto_vod_max_age_hours: 24
+    };
+    const window = {
+        api: {
+            setClientSecret: () => Promise.resolve({ encryptionAvailable: true, clientSecretConfigured: false, discordWebhookConfigured: false }),
+            clearClientSecret: () => Promise.resolve({ encryptionAvailable: true, clientSecretConfigured: false, discordWebhookConfigured: false }),
+            setDiscordWebhook: () => Promise.resolve({ encryptionAvailable: true, clientSecretConfigured: false, discordWebhookConfigured: false }),
+            clearDiscordWebhook: () => Promise.resolve({ encryptionAvailable: true, clientSecretConfigured: false, discordWebhookConfigured: false }),
+            getDownloadPolicyStatus: () => Promise.resolve({ waiting: false, nextStart: null }),
+            onDownloadPolicyStatus: () => undefined,
+            saveConfig(payload: Record<string, unknown>) {
+                saveConfigCalls.push(payload);
+                return Promise.resolve(payload);
+            }
+        },
+        setTimeout(callback: () => void) {
+            scheduled.push(callback);
+            return scheduled.length;
+        },
+        clearTimeout: () => undefined,
+        addEventListener: () => undefined
+    };
+    const sandbox = {
+        window,
+        config,
+        UI_TEXT: {
+            status: {},
+            static: {
+                downloadThrottleInvalid: 'Invalid rate',
+                downloadWindowsInvalid: 'Invalid window',
+                downloadPolicyReady: 'Ready',
+                downloadPolicyWaiting: 'Waiting until {time}',
+                templateLintOk: 'Valid',
+                templateLintWarn: 'Invalid'
+            },
+            streamers: {}
+        },
+        byId: (id: string) => {
+            if (!inputs.has(id)) inputs.set(id, new InteractiveInput());
+            return inputs.get(id);
+        },
+        collectUnknownTemplatePlaceholders: () => [],
+        applySidebarLayoutPreference: () => undefined,
+        formatUiDateTime: (value: string) => value,
+        document: {
+            hidden: false,
+            querySelector: () => null,
+            getElementById: () => null,
+            addEventListener: () => undefined
+        },
+        setTimeout,
+        clearTimeout,
+        console
+    };
+    const context = vm.createContext(sandbox);
+    const source = fs.readFileSync(path.join(process.cwd(), 'src', 'renderer-settings.ts'), 'utf8');
+    const compiled = ts.transpileModule(source, {
+        compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+    }).outputText;
+    vm.runInContext(compiled, context);
+    vm.runInContext('initSettingsAutoSave()', context);
+    return { inputs, saveConfigCalls, scheduled };
+}
+
+async function settleAutosave(): Promise<void> {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 function loadRuntimeErrorFormatter(language: 'de' | 'en'): (errorClass: string | null) => string {
     const localeName = language === 'de' ? 'UI_TEXT_DE' : 'UI_TEXT_EN';
     const localeSource = fs.readFileSync(path.join(process.cwd(), 'src', `renderer-locale-${language}.ts`), 'utf8');
@@ -39,6 +154,40 @@ function loadRuntimeErrorFormatter(language: 'de' | 'en'): (errorClass: string |
 }
 
 describe('renderer settings autosave orchestration', () => {
+    it.each([
+        ['autoResumeLiveRecordingToggle', 'auto_resume_live_recording', false],
+        ['autoMergeResumedPartsToggle', 'auto_merge_resumed_parts', true],
+        ['deletePartsAfterMergeToggle', 'delete_parts_after_merge', true],
+        ['discordNotifyVodAutoQueuedToggle', 'discord_notify_vod_auto_queued', true]
+    ] as const)('persists %s through its change listener', async (controlId, configKey, nextValue) => {
+        const runtime = createAutosaveRuntime();
+        const control = runtime.inputs.get(controlId)!;
+        control.checked = nextValue;
+
+        control.dispatch('change');
+        await settleAutosave();
+
+        expect(runtime.saveConfigCalls).toHaveLength(1);
+        expect(runtime.saveConfigCalls[0][configKey]).toBe(nextValue);
+    });
+
+    it.each([
+        ['autoVodPollMinutes', 'auto_vod_download_poll_minutes', '30', 30],
+        ['autoVodMaxAgeHours', 'auto_vod_max_age_hours', '48', 48]
+    ] as const)('persists %s through its debounced input listener', async (controlId, configKey, nextValue, expectedValue) => {
+        const runtime = createAutosaveRuntime();
+        const control = runtime.inputs.get(controlId)!;
+        control.value = nextValue;
+
+        control.dispatch('input');
+        expect(runtime.scheduled).toHaveLength(1);
+        runtime.scheduled[0]();
+        await settleAutosave();
+
+        expect(runtime.saveConfigCalls).toHaveLength(1);
+        expect(runtime.saveConfigCalls[0][configKey]).toBe(expectedValue);
+    });
+
     it('persists a pure download policy change through the real autosave fingerprint', async () => {
         const inputs = new Map(inputIds.map((id) => [id, createInput()]));
         inputs.get('downloadThrottleMiBps')!.value = '1';

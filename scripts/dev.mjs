@@ -1,11 +1,15 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
-import { watch } from 'node:fs';
+import { readFileSync, watch } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const rootDirectory = resolve(dirname(scriptPath), '..');
+const developmentAppVersion = JSON.parse(readFileSync(resolve(rootDirectory, 'package.json'), 'utf8')).version;
+if (typeof developmentAppVersion !== 'string' || developmentAppVersion.trim().length === 0) {
+    throw new Error('package.json version must be a non-empty string');
+}
 const typescriptCli = resolve(rootDirectory, 'node_modules', 'typescript', 'bin', 'tsc');
 const electronSourceExecutable = process.platform === 'win32'
     ? resolve(rootDirectory, 'node_modules', 'electron', 'dist', 'electron.exe')
@@ -93,7 +97,7 @@ if (process.platform === 'win32') {
         sourcePath: electronSourceExecutable,
         destinationPath: resolve(rootDirectory, 'node_modules', 'electron', 'dist', 'Twitch VOD Manager.exe'),
         iconPath: resolve(rootDirectory, 'build', 'icon.ico'),
-        version: '1.0.17',
+        version: developmentAppVersion,
     });
 }
 

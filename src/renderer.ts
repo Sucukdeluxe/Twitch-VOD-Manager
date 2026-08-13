@@ -1069,13 +1069,14 @@ function mergeQueueState(nextQueue: QueueItem[]): QueueItem[] {
         return {
             ...item,
             progress: bestProgress,
-            speed: item.speed || prev.speed,
-            eta: item.eta || prev.eta,
-            currentPart: item.currentPart || prev.currentPart,
-            totalParts: item.totalParts || prev.totalParts,
-            downloadedBytes: item.downloadedBytes || prev.downloadedBytes,
-            totalBytes: item.totalBytes || prev.totalBytes,
-            progressStatus: item.progressStatus || prev.progressStatus
+            speed: item.speed === undefined ? prev.speed : item.speed,
+            eta: item.eta === undefined ? prev.eta : item.eta,
+            currentPart: item.currentPart === undefined ? prev.currentPart : item.currentPart,
+            totalParts: item.totalParts === undefined ? prev.totalParts : item.totalParts,
+            downloadedBytes: item.downloadedBytes === undefined ? prev.downloadedBytes : item.downloadedBytes,
+            totalBytes: item.totalBytes === undefined ? prev.totalBytes : item.totalBytes,
+            progressStatus: item.progressStatus === undefined ? prev.progressStatus : item.progressStatus,
+            recordingHealth: item.recordingHealth === undefined ? prev.recordingHealth : item.recordingHealth
         };
     });
 }
@@ -1291,7 +1292,7 @@ function showTab(tab: string): void {
     // Only show the streamer name on the VODs tab — otherwise the title would
     // mismatch the tab content (e.g. "streamer X" while on Settings)
     const pageTitleText = (tab === 'vods' && currentStreamer)
-        ? currentStreamer
+        ? getStreamerDisplayName(currentStreamer)
         : (titles[tab] || UI_TEXT.appName);
     setPageTitle(pageTitleText);
 
@@ -1547,7 +1548,7 @@ function getTemplateVariableDocs(): TemplateVariableDoc[] {
         { placeholder: '{part_padded}', description: text('Teilnummer mit 2 Stellen', 'Part number padded to 2 digits'), exampleTemplate: '{part_padded}' },
         { placeholder: '{trim_start}', description: text('Startzeit des Ausschnitts', 'Trim start time'), exampleTemplate: '{trim_start}' },
         { placeholder: '{trim_end}', description: text('Endzeit des Ausschnitts', 'Trim end time'), exampleTemplate: '{trim_end}' },
-        { placeholder: '{trim_length}', description: text('Lange des Ausschnitts', 'Trimmed duration'), exampleTemplate: '{trim_length}' },
+        { placeholder: '{trim_length}', description: text('Länge des Ausschnitts', 'Trimmed duration'), exampleTemplate: '{trim_length}' },
         { placeholder: '{length}', description: text('Gesamtdauer', 'Total duration'), exampleTemplate: '{length}' },
         { placeholder: '{ext}', description: text('Dateiendung', 'File extension'), exampleTemplate: '{ext}' },
         { placeholder: '{random_string}', description: text('Zufallsstring (8 Zeichen)', 'Random string (8 chars)'), exampleTemplate: '{random_string}' },

@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueueProcessRegistry, QueueRunLifecycle, waitForChildProcessExit } from './process-registry';
 
 function waitForExit(process: ReturnType<typeof spawn>): Promise<void> {
@@ -15,6 +15,10 @@ function waitForExit(process: ReturnType<typeof spawn>): Promise<void> {
 }
 
 describe('queue process lifecycle integration', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     it('keeps quick resume behind a real child pause without deleting retry output', async () => {
         const directory = mkdtempSync(join(tmpdir(), 'tvm-queue-pause-'));
         const retryFile = join(directory, 'merge-retry.mp4');
@@ -25,14 +29,18 @@ describe('queue process lifecycle integration', () => {
         try {
             writeFileSync(retryFile, 'retry');
             await once(child, 'spawn');
+            const pauseSettled = vi.fn();
+            const resumeStarted = vi.fn();
             registry.register('item-a', 'merge', {
                 kill: () => child.kill(),
                 wait: () => waitForChildProcessExit(child, 30),
                 pause: async () => {
                     child.kill();
-                    await waitForChildProcessExit(child, 30);
+                    await waitForChildProcessExit(child, 30, 250);
+                    pauseSettled();
                 },
                 resume: () => {
+                    resumeStarted();
                     resumedAfterExit = child.exitCode !== null || child.signalCode !== null;
                 },
                 cleanup: () => rmSync(retryFile, { force: true }),
@@ -45,6 +53,7 @@ describe('queue process lifecycle integration', () => {
             await Promise.all([pausing, resuming]);
 
             expect(resumedAfterExit).toBe(true);
+            expect(pauseSettled).toHaveBeenCalledBefore(resumeStarted);
             expect(registry.isPaused('item-a')).toBe(false);
             expect(existsSync(retryFile)).toBe(true);
         } finally {
@@ -69,7 +78,7 @@ describe('queue process lifecycle integration', () => {
             lifecycle.schedule(async () => childExited);
             registry.register('item-a', 'merge', {
                 kill: () => undefined,
-                wait: () => waitForChildProcessExit(child, 30),
+                wait: () => waitForChildProcessExit(child, 30, 250),
                 cleanup: () => {
                     expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
                     rmSync(partialFile, { force: true });

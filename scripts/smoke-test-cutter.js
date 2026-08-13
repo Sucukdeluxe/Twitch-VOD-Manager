@@ -75,6 +75,44 @@ async function loadCutterCapability(win, filePath) {
   return capability;
 }
 
+async function verifyMultiAudioExport(win, environment, inputFile, outputFile) {
+  await loadCutterCapability(win, inputFile);
+  await win.waitForFunction(() => {
+    const video = document.getElementById('cutterVideo');
+    const select = document.getElementById('cutterAudioStream');
+    return video.readyState >= HTMLMediaElement.HAVE_METADATA && select.options.length === 2 && !select.disabled;
+  }, null, { timeout: 90000 });
+  const selection = await win.evaluate(() => {
+    const select = document.getElementById('cutterAudioStream');
+    const selectedValue = select.options[1].value;
+    window.setCutterAudioStream(selectedValue);
+    select.value = selectedValue;
+    return {
+      choices: [...select.options].map((option) => ({ value: option.value, text: option.textContent })),
+      selectedIndex: cutterAudioStreamIndex,
+      duration: cutterEditorState.duration
+    };
+  });
+  const exportResult = await win.evaluate(({ outputName, duration }) => window.api.exportVideoEdit({
+    inputCapability: cutterFile.token,
+    outputName,
+    trimStart: 0,
+    trimEnd: duration,
+    cuts: [],
+    audioStreamIndex: cutterAudioStreamIndex
+  }), { outputName: path.basename(outputFile), duration: selection.duration });
+  let probe = null;
+  if (fs.existsSync(outputFile)) {
+    const media = JSON.parse(runBinary(resolveBinary(environment, 'ffprobe'), ['-v', 'quiet', '-print_format', 'json', '-show_streams', outputFile]));
+    const audioStreams = media.streams.filter((stream) => stream.codec_type === 'audio');
+    probe = {
+      audioStreams: audioStreams.length,
+      channels: audioStreams[0]?.channels || 0
+    };
+  }
+  return { selection, exportResult, probe };
+}
+
 async function dropCutterFile(win, filePath) {
   const inputId = `cutter-drop-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   await win.evaluate((id) => {
@@ -106,6 +144,22 @@ function createTestVideo(environment) {
     '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
     '-t', '10', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-shortest', '-y', filePath
+  ]);
+  return filePath;
+}
+
+function createMultiAudioTestVideo(environment) {
+  const filePath = path.join(environment.mediaDir, 'Cutter Multi Audio.mp4');
+  runBinary(resolveBinary(environment, 'ffmpeg'), [
+    '-hide_banner', '-loglevel', 'error',
+    '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
+    '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=48000',
+    '-map', '0:v:0', '-map', '1:a:0', '-map', '2:a:0', '-t', '4',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
+    '-ac:a:0', '1', '-ac:a:1', '2',
+    '-metadata:s:a:0', 'language=eng', '-metadata:s:a:1', 'language=deu',
+    '-shortest', '-y', filePath
   ]);
   return filePath;
 }
@@ -187,19 +241,23 @@ function createLongVideo(environment) {
 async function run() {
   const environment = createE2eEnvironment('cutter', { language: 'en', theme: 'twitch' });
   const remaindersOnly = process.env.TWITCH_VOD_MANAGER_CUTTER_REMAINDERS_ONLY === '1';
-  const inputFile = createTestVideo(environment);
-  const scrubStressInputFile = remaindersOnly ? null : process.env.TWITCH_VOD_MANAGER_SCRUB_MEDIA && fs.existsSync(process.env.TWITCH_VOD_MANAGER_SCRUB_MEDIA)
+  const audioOnly = process.env.TWITCH_VOD_MANAGER_CUTTER_AUDIO_ONLY === '1';
+  const reducedFixtureMode = remaindersOnly || audioOnly;
+  const inputFile = audioOnly ? null : createTestVideo(environment);
+  const multiAudioInputFile = remaindersOnly ? null : createMultiAudioTestVideo(environment);
+  const scrubStressInputFile = reducedFixtureMode ? null : process.env.TWITCH_VOD_MANAGER_SCRUB_MEDIA && fs.existsSync(process.env.TWITCH_VOD_MANAGER_SCRUB_MEDIA)
     ? process.env.TWITCH_VOD_MANAGER_SCRUB_MEDIA
     : createScrubStressVideo(environment);
-  const mediumInputFile = remaindersOnly ? null : process.env.TWITCH_VOD_MANAGER_MEDIUM_MEDIA && fs.existsSync(process.env.TWITCH_VOD_MANAGER_MEDIUM_MEDIA)
+  const mediumInputFile = reducedFixtureMode ? null : process.env.TWITCH_VOD_MANAGER_MEDIUM_MEDIA && fs.existsSync(process.env.TWITCH_VOD_MANAGER_MEDIUM_MEDIA)
     ? process.env.TWITCH_VOD_MANAGER_MEDIUM_MEDIA
     : createMediumVideo(environment);
-  const additionalContainerFiles = remaindersOnly ? {} : createAdditionalContainerVideos(environment, inputFile);
-  const unsupportedInputFile = remaindersOnly ? null : createUnsupportedVideo(environment, inputFile);
-  const unsupportedImageFile = createUnsupportedImage(environment);
-  const silentInputFile = remaindersOnly ? null : createSilentPortraitVideo(environment);
-  const longInputFile = remaindersOnly ? null : createLongVideo(environment);
+  const additionalContainerFiles = reducedFixtureMode ? {} : createAdditionalContainerVideos(environment, inputFile);
+  const unsupportedInputFile = reducedFixtureMode ? null : createUnsupportedVideo(environment, inputFile);
+  const unsupportedImageFile = audioOnly ? null : createUnsupportedImage(environment);
+  const silentInputFile = reducedFixtureMode ? null : createSilentPortraitVideo(environment);
+  const longInputFile = reducedFixtureMode ? null : createLongVideo(environment);
   const outputFile = path.join(environment.mediaDir, 'Cutter Test #ä 01 edited.mp4');
+  const multiAudioOutputFile = path.join(environment.mediaDir, 'Cutter Multi Audio selected.mp4');
   const silentOutputFile = path.join(environment.mediaDir, 'Silent Portrait edited.mp4');
   const failures = [];
   const runtimeIssues = [];
@@ -231,6 +289,21 @@ async function run() {
     await win.setViewportSize({ width: 1440, height: 900 });
     await win.emulateMedia({ reducedMotion: 'reduce' });
     await win.evaluate(() => window.showTab('cutter'));
+    if (audioOnly) {
+      const multiAudio = await verifyMultiAudioExport(win, environment, multiAudioInputFile, multiAudioOutputFile);
+      check(
+        multiAudio.selection.choices.length === 2
+          && multiAudio.selection.selectedIndex === 1
+          && multiAudio.exportResult.success
+          && multiAudio.probe?.audioStreams === 1
+          && multiAudio.probe.channels === 2,
+        `The selected second audio track was not preserved in the real export: ${JSON.stringify(multiAudio)}`
+      );
+      check(runtimeIssues.length === 0, `Cutter runtime errors occurred: ${runtimeIssues.join(' | ')}`);
+      console.log(JSON.stringify({ failures, runtimeIssues, multiAudio }, null, 2));
+      if (failures.length > 0) process.exitCode = 1;
+      return;
+    }
     const cutterSourceVisibility = [];
     for (const viewport of [{ width: 1060, height: 700 }, { width: 1180, height: 900 }, { width: 1184, height: 661 }, { width: 1440, height: 679 }, { width: 1440, height: 900 }, { width: 2048, height: 1152 }]) {
       await win.setViewportSize(viewport);
@@ -511,7 +584,8 @@ async function run() {
         && video.readyState >= HTMLMediaElement.HAVE_METADATA
         && document.querySelectorAll('#cutterThumbnailStrip img').length > 0
         && window.__cutterAssetAudit.waveformLoads.length > 0
-        && document.getElementById('cutterAudioStream').selectedOptions[0]?.textContent !== 'Keine Audiospur';
+        && !document.getElementById('cutterAudioStream').disabled
+        && document.getElementById('cutterAudioStream').options.length > 0;
     }, null, { timeout: 90000 });
     await win.waitForTimeout(480);
     const firstAssetQuality = await win.evaluate(async () => {
@@ -629,6 +703,108 @@ async function run() {
         && loadedMinimumSource.previewWidth > loadedMinimumSource.sidebarWidth,
       `The source selector remains visible after a real load at the native minimum viewport: ${JSON.stringify(loadedMinimumSource)}`
     );
+    const cutterProjectActions = await win.evaluate(() => {
+      const toolbar = document.querySelector('[data-toolbar-for="cutter"]');
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const state = (id) => {
+        const button = document.getElementById(id);
+        const rect = button.getBoundingClientRect();
+        return { disabled: button.disabled, visible: getComputedStyle(button).display !== 'none' && rect.width > 0 && rect.height > 0 };
+      };
+      return {
+        newVideo: state('cutterNewVideoBtn'),
+        open: state('cutterOpenProjectBtn'),
+        save: state('cutterSaveProjectBtn'),
+        toolbarOverflow: toolbar.scrollWidth - toolbar.clientWidth,
+        contained: toolbarRect.right <= window.innerWidth + 1
+      };
+    });
+    check(
+      cutterProjectActions.newVideo.visible
+        && cutterProjectActions.open.visible
+        && !cutterProjectActions.open.disabled
+        && cutterProjectActions.save.visible
+        && !cutterProjectActions.save.disabled
+        && cutterProjectActions.toolbarOverflow <= 1
+        && cutterProjectActions.contained,
+      `Loaded cutter project actions are hidden, disabled, or overflowing: ${JSON.stringify(cutterProjectActions)}`
+    );
+    await win.evaluate(() => window.setLanguage('en'));
+    await win.locator('#cutterSaveProjectBtn').click();
+    await win.waitForFunction(() => document.getElementById('appToast')?.textContent === UI_TEXT.cutter.projectSaved);
+    const savedProjectFeedback = await win.locator('#appToast').textContent();
+    await win.locator('#cutterOpenProjectBtn').click();
+    await win.waitForFunction(() => document.getElementById('appToast')?.textContent === UI_TEXT.cutter.projectOpened);
+    const openedProjectFeedback = await win.locator('#appToast').textContent();
+    const cutterProjectFeedback = { savedProjectFeedback, openedProjectFeedback };
+    check(
+      cutterProjectFeedback.savedProjectFeedback === 'Project saved'
+        && cutterProjectFeedback.openedProjectFeedback === 'Project opened',
+      `English cutter project feedback is not localized: ${JSON.stringify(cutterProjectFeedback)}`
+    );
+    await app.evaluate(({ dialog }) => {
+      const originalShowOpenDialog = dialog.showOpenDialog;
+      globalThis.__cutterContextPickerCalls = 0;
+      dialog.showOpenDialog = async () => {
+        globalThis.__cutterContextPickerCalls += 1;
+        dialog.showOpenDialog = originalShowOpenDialog;
+        return { canceled: true, filePaths: [] };
+      };
+    });
+    await win.locator('[data-context-for="cutter"] .context-link').first().click();
+    await win.waitForTimeout(50);
+    const cutterContextPickerCalls = await app.evaluate(() => globalThis.__cutterContextPickerCalls || 0);
+    check(cutterContextPickerCalls === 1, `The loaded cutter context action did not open the video picker: ${cutterContextPickerCalls}`);
+    const englishCutterStrings = await win.evaluate(() => ({
+      newVideo: document.getElementById('cutterNewVideoText').textContent,
+      openProject: document.getElementById('cutterOpenProjectBtn').getAttribute('aria-label'),
+      saveProject: document.getElementById('cutterSaveProjectBtn').getAttribute('aria-label'),
+      recovery: document.getElementById('cutterRecoveryText').textContent,
+      recover: document.getElementById('cutterRecoveryRestoreBtn').textContent,
+      discard: document.getElementById('cutterRecoveryDiscardBtn').textContent,
+      exportProfile: document.getElementById('cutterExportProfileLabel').textContent,
+      exportEncoder: document.getElementById('cutterExportEncoderLabel').textContent,
+      audioStream: document.getElementById('cutterAudioStreamLabel').textContent,
+      profiles: [...document.getElementById('cutterExportProfile').options].map((option) => option.textContent),
+      encoders: [...document.getElementById('cutterExportEncoder').options].map((option) => option.textContent),
+      audioChoices: [...document.getElementById('cutterAudioStream').options].map((option) => option.textContent)
+    }));
+    check(
+      englishCutterStrings.newVideo === 'New video'
+        && englishCutterStrings.openProject === 'Open project'
+        && englishCutterStrings.saveProject === 'Save project'
+        && englishCutterStrings.recovery === 'Saved edit found'
+        && englishCutterStrings.recover === 'Restore'
+        && englishCutterStrings.discard === 'Discard'
+        && englishCutterStrings.exportProfile === 'Export profile'
+        && englishCutterStrings.exportEncoder === 'Encoder'
+        && englishCutterStrings.audioStream === 'Audio track'
+        && JSON.stringify(englishCutterStrings.profiles) === JSON.stringify(['Quality', 'Balanced', 'Fast', 'Archive'])
+        && englishCutterStrings.encoders[0] === 'Software'
+        && englishCutterStrings.audioChoices.every((choice) => choice.startsWith('Audio track ')),
+      `English cutter strings still contain fallback or backend copy: ${JSON.stringify(englishCutterStrings)}`
+    );
+    await win.evaluate(() => window.setLanguage('de'));
+    const germanCutterStrings = await win.evaluate(() => ({
+      newVideo: document.getElementById('cutterNewVideoText').textContent,
+      openProject: document.getElementById('cutterOpenProjectBtn').getAttribute('aria-label'),
+      saveProject: document.getElementById('cutterSaveProjectBtn').getAttribute('aria-label'),
+      recovery: document.getElementById('cutterRecoveryText').textContent,
+      exportProfile: document.getElementById('cutterExportProfileLabel').textContent,
+      profiles: [...document.getElementById('cutterExportProfile').options].map((option) => option.textContent),
+      audioChoices: [...document.getElementById('cutterAudioStream').options].map((option) => option.textContent)
+    }));
+    check(
+      germanCutterStrings.newVideo === 'Neues Video'
+        && germanCutterStrings.openProject === 'Projekt öffnen'
+        && germanCutterStrings.saveProject === 'Projekt speichern'
+        && germanCutterStrings.recovery === 'Gespeicherte Bearbeitung gefunden'
+        && germanCutterStrings.exportProfile === 'Exportprofil'
+        && JSON.stringify(germanCutterStrings.profiles) === JSON.stringify(['Qualität', 'Ausgewogen', 'Schnell', 'Archiv'])
+        && germanCutterStrings.audioChoices.every((choice) => choice.startsWith('Audiospur ')),
+      `German cutter strings regressed while localizing English: ${JSON.stringify(germanCutterStrings)}`
+    );
+    await win.evaluate(() => window.setLanguage('en'));
     const loadedCutterExportSelectPresentation = [];
     for (const viewport of [{ width: 1184, height: 661 }, { width: 1280, height: 800 }]) {
       await win.setViewportSize(viewport);
@@ -840,7 +1016,7 @@ async function run() {
     );
     if (remaindersOnly) {
       check(runtimeIssues.length === 0, runtimeIssues.join('\n'));
-      console.log(JSON.stringify({ failures, runtimeIssues, cutterSourceVisibility, cutterExportSelectPresentation, loadedCompactLayout, loadedMinimumSource, loadedCutterExportSelectPresentation, revealAnimation, recoveryGeometry, pngDropState, pngDialogState }, null, 2));
+      console.log(JSON.stringify({ failures, runtimeIssues, cutterSourceVisibility, cutterExportSelectPresentation, loadedCompactLayout, loadedMinimumSource, cutterProjectActions, cutterProjectFeedback, cutterContextPickerCalls, englishCutterStrings, germanCutterStrings, loadedCutterExportSelectPresentation, revealAnimation, recoveryGeometry, pngDropState, pngDialogState }, null, 2));
       if (failures.length > 0) process.exitCode = 1;
       return;
     }
@@ -1187,7 +1363,8 @@ async function run() {
       window.__cutterScrubSyncRecording = true;
       const parseTimecode = (value, fps) => {
         const fields = value.split(':').map(Number);
-        return fields[0] * 60 + fields[1] + fields[2] / fps;
+        const [hours, minutes, seconds, frames] = fields.length === 4 ? fields : [0, ...fields];
+        return hours * 3600 + minutes * 60 + seconds + frames / fps;
       };
       const recordFrame = (_now, metadata) => {
         if (!window.__cutterScrubSyncRecording) return;
@@ -1260,7 +1437,8 @@ async function run() {
       window.__cutterTrimSyncRecording = true;
       const parseTimecode = (value, fps) => {
         const fields = value.split(':').map(Number);
-        return fields[0] * 60 + fields[1] + fields[2] / fps;
+        const [hours, minutes, seconds, frames] = fields.length === 4 ? fields : [0, ...fields];
+        return hours * 3600 + minutes * 60 + seconds + frames / fps;
       };
       const recordFrame = (_now, metadata) => {
         if (!window.__cutterTrimSyncRecording) return;
@@ -1508,8 +1686,8 @@ async function run() {
       window.addCutterCut();
     });
     const firstInputs = win.locator('.cutter-cut-row').first().locator('input');
-    await firstInputs.nth(0).fill('00:02:00');
-    await firstInputs.nth(1).fill('00:04:00');
+    await firstInputs.nth(0).fill('00:00:02:00');
+    await firstInputs.nth(1).fill('00:00:04:00');
     await firstInputs.nth(1).press('Enter');
     await win.evaluate(() => {
       const video = document.getElementById('cutterVideo');
@@ -1517,8 +1695,8 @@ async function run() {
       window.addCutterCut();
     });
     const secondInputs = win.locator('.cutter-cut-row').nth(1).locator('input');
-    await secondInputs.nth(0).fill('00:06:00');
-    await secondInputs.nth(1).fill('00:07:00');
+    await secondInputs.nth(0).fill('00:00:06:00');
+    await secondInputs.nth(1).fill('00:00:07:00');
     await secondInputs.nth(1).press('Enter');
     const edited = await win.evaluate(() => ({
       cuts: cutterEditorState.cuts.map((cut) => ({ start: cut.start, end: cut.end })),
@@ -1732,7 +1910,7 @@ async function run() {
     const cutInput = win.locator('.cutter-cut-row').first().locator('input').first();
     const stateBeforeTextUndo = await win.evaluate(() => JSON.stringify(cutterEditorState));
     await cutInput.focus();
-    await cutInput.fill('00:02:01');
+    await cutInput.fill('00:00:02:01');
     await cutInput.press('Control+z');
     const textUndoState = await win.evaluate((before) => ({ stateUnchanged: JSON.stringify(cutterEditorState) === before, activeTag: document.activeElement?.tagName }), stateBeforeTextUndo);
     check(textUndoState.stateUnchanged && textUndoState.activeTag === 'INPUT', `Text-field undo changed the whole editor: ${JSON.stringify(textUndoState)}`);
@@ -2281,6 +2459,18 @@ async function run() {
     });
     await win.waitForTimeout(250);
     await win.screenshot({ path: path.join(cutterArtifactDir, 'editor.png'), fullPage: true });
+    const multiAudio = await verifyMultiAudioExport(win, environment, multiAudioInputFile, multiAudioOutputFile);
+    const multiAudioSelection = multiAudio.selection;
+    const multiAudioExportResult = multiAudio.exportResult;
+    const multiAudioProbe = multiAudio.probe;
+    check(
+      multiAudioSelection.choices.length === 2
+        && multiAudioSelection.selectedIndex === 1
+        && multiAudioExportResult.success
+        && multiAudioProbe?.audioStreams === 1
+        && multiAudioProbe.channels === 2,
+      `The selected second audio track was not preserved in the real export: ${JSON.stringify({ multiAudioSelection, multiAudioExportResult, multiAudioProbe })}`
+    );
     await loadCutterCapability(win, silentInputFile);
     await win.waitForFunction(() => {
       const video = document.getElementById('cutterVideo');
@@ -2327,7 +2517,7 @@ async function run() {
     const shutdownArtifacts = fs.readdirSync(environment.mediaDir)
       .filter((name) => name.includes('.tvm-edit.mp4') || name.includes('.tvm-backup') || name === path.basename(shutdownOutputFile));
     check(cutterTempDirectoriesAfterShutdown.length === 0 && shutdownArtifacts.length === 0, `Shutdown left cutter artifacts: ${JSON.stringify({ cutterTempDirectoriesAfterShutdown, shutdownArtifacts })}`);
-    console.log(JSON.stringify({ failures, runtimeIssues, additionalContainerSupport, emptyLayout, emptyFullscreenLayout, emptyVolumeBefore, emptyVolumeAfter, revealAnimation, firstAssetQuality, firstAssetsReadyMs, initialAssetStability, verticalProfileQuality, loaded, edgeGeometry, timestampTypography, playerControlGeometry, cutterInfoAlignment, replacementPromptState, replacementPlaybackState, scrubMediaInfo, scrubFirstAssetsReadyMs, scrubFirstAssetQuality, realMaximumZoomState, scrubSyncProbe, trimScrubProbe, mediumWaveformReadyMs, mediumFirstAssetsReadyMs, mediumZoomReuseBefore, mediumZoomReuseAfter, longPlayerReadyMs, longAssetsReadyMs, longAssetTopology, longPreservedAfterAssetInterruptions, longScrubPresentation, rapidSwitch, memoryBeforeStressMb, memoryAfterStressMb, stressMemoryDeltaMb, preservedAfterUnsupported, edited, cutHandleVisualGeometry, cutterAria, germanCutLabels, draggedCutStart, collisionBoundedCut, reversibleTrimStart, reversibleTrimEnd, crossedCutTime, skippedTime, smoothTimecodeFrames, playbackPerformance, playbackAfterDrag, stoppedTime, settingsMenuLayout, escapedSettings, playbackRateState, tabLeaveState, layoutAudit, responsiveLayouts, expandedVolumeLayout, wheelZoom, zoomGeometryDelta, maximumZoomGeometryDelta, assetDensity, zoomWaveformReuse, zoom, sourceProtection, invalidRequest, cancelledExport, exportResult, manyCutsExport, changedSourceExport, silentState, silentExportResult, cutterTempDirectoriesAfterShutdown, shutdownArtifacts }, null, 2));
+    console.log(JSON.stringify({ failures, runtimeIssues, additionalContainerSupport, emptyLayout, emptyFullscreenLayout, emptyVolumeBefore, emptyVolumeAfter, revealAnimation, firstAssetQuality, firstAssetsReadyMs, initialAssetStability, verticalProfileQuality, loaded, edgeGeometry, timestampTypography, playerControlGeometry, cutterInfoAlignment, replacementPromptState, replacementPlaybackState, scrubMediaInfo, scrubFirstAssetsReadyMs, scrubFirstAssetQuality, realMaximumZoomState, scrubSyncProbe, trimScrubProbe, mediumWaveformReadyMs, mediumFirstAssetsReadyMs, mediumZoomReuseBefore, mediumZoomReuseAfter, longPlayerReadyMs, longAssetsReadyMs, longAssetTopology, longPreservedAfterAssetInterruptions, longScrubPresentation, rapidSwitch, memoryBeforeStressMb, memoryAfterStressMb, stressMemoryDeltaMb, preservedAfterUnsupported, edited, cutHandleVisualGeometry, cutterAria, germanCutLabels, draggedCutStart, collisionBoundedCut, reversibleTrimStart, reversibleTrimEnd, crossedCutTime, skippedTime, smoothTimecodeFrames, playbackPerformance, playbackAfterDrag, stoppedTime, settingsMenuLayout, escapedSettings, playbackRateState, tabLeaveState, layoutAudit, responsiveLayouts, expandedVolumeLayout, wheelZoom, zoomGeometryDelta, maximumZoomGeometryDelta, assetDensity, zoomWaveformReuse, zoom, sourceProtection, invalidRequest, cancelledExport, exportResult, manyCutsExport, changedSourceExport, multiAudioSelection, multiAudioExportResult, multiAudioProbe, silentState, silentExportResult, cutterTempDirectoriesAfterShutdown, shutdownArtifacts }, null, 2));
     if (failures.length > 0) process.exitCode = 1;
   } finally {
     if (app) await app.close();

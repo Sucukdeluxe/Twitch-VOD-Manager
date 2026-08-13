@@ -118,11 +118,7 @@ function formatCutterTimecode(time: number): string {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const remainingSeconds = seconds % 60;
-    const useHours = (cutterEditorState?.duration || cutterVideoInfo?.duration || time) >= 3600;
-    const fields = useHours
-        ? [hours, minutes, remainingSeconds, frames]
-        : [minutes, remainingSeconds, frames];
-    return fields.map((field) => String(field).padStart(2, '0')).join(':');
+    return [hours, minutes, remainingSeconds, frames].map((field) => String(field).padStart(2, '0')).join(':');
 }
 
 function parseCutterTimecode(value: string): number | null {
@@ -131,7 +127,7 @@ function parseCutterTimecode(value: string): number | null {
     if ((fields.length !== 3 && fields.length !== 4) || fields.some((field) => !Number.isInteger(field) || field < 0)) return null;
     const [hours, minutes, seconds, frames] = fields.length === 4
         ? fields
-        : [0, fields[0], fields[1], fields[2]];
+        : [fields[0], fields[1], fields[2], 0];
     if (minutes >= 60 || seconds >= 60 || frames >= Math.max(1, Math.round(cutterEditorState.fps))) return null;
     return snapCutterTime(hours * 3600 + minutes * 60 + seconds + frames / cutterEditorState.fps);
 }
@@ -166,7 +162,7 @@ async function persistCutterProject(showResult: boolean): Promise<boolean> {
     try {
         saved = await window.api.saveCutterProject(file.token, project);
     } catch { }
-    if (showResult) showAppToast(saved ? 'Projekt gespeichert' : 'Projekt konnte nicht gespeichert werden', saved ? 'info' : 'warn');
+    if (showResult) showAppToast(saved ? UI_TEXT.cutter.projectSaved : UI_TEXT.cutter.projectSaveFailed, saved ? 'info' : 'warn');
     return saved;
 }
 
@@ -184,7 +180,7 @@ function renderCutterProjectRecovery(project: CutterProject | null): void {
     cutterPendingProject = project;
     const panel = byId<HTMLElement>('cutterRecoveryPanel');
     panel.hidden = !project;
-    if (project) byId('cutterRecoveryText').textContent = 'Gespeicherte Bearbeitung gefunden';
+    if (project) byId('cutterRecoveryText').textContent = UI_TEXT.cutter.recoveryFound;
 }
 
 function updateCutterAudioStreams(): void {
@@ -194,7 +190,7 @@ function updateCutterAudioStreams(): void {
     if (streams.length === 0) {
         const option = document.createElement('option');
         option.value = '0';
-        option.textContent = 'Keine Audiospur';
+        option.textContent = UI_TEXT.cutter.noAudio;
         select.append(option);
         select.disabled = true;
         cutterAudioStreamIndex = 0;
@@ -203,8 +199,10 @@ function updateCutterAudioStreams(): void {
     streams.forEach((stream) => {
         const option = document.createElement('option');
         option.value = String(stream.index);
-        const details = [stream.language, stream.codec, stream.channels > 0 ? `${stream.channels} Kanäle` : ''].filter(Boolean).join(' · ');
-        option.textContent = `Audiospur ${stream.index + 1}${details ? ` (${details})` : ''}`;
+        const channelLabel = stream.channels === 1 ? UI_TEXT.cutter.channelSingular : UI_TEXT.cutter.channelPlural;
+        const details = [stream.language, stream.codec, stream.channels > 0 ? `${stream.channels} ${channelLabel}` : ''].filter(Boolean).join(' · ');
+        const label = UI_TEXT.cutter.audioStream.replace('{index}', String(stream.index + 1));
+        option.textContent = `${label}${details ? ` (${details})` : ''}`;
         select.append(option);
     });
     if (!streams.some((stream) => stream.index === cutterAudioStreamIndex)) cutterAudioStreamIndex = streams[0].index;
@@ -219,7 +217,12 @@ function updateCutterExportControls(options: CutterExportOptions | null | undefi
         profile.replaceChildren(...options.profiles.map((entry) => {
             const option = document.createElement('option');
             option.value = entry.id;
-            option.textContent = entry.label;
+            option.textContent = {
+                quality: UI_TEXT.cutter.profileQuality,
+                balanced: UI_TEXT.cutter.profileBalanced,
+                fast: UI_TEXT.cutter.profileFast,
+                archive: UI_TEXT.cutter.profileArchive,
+            }[entry.id];
             return option;
         }));
     }
@@ -227,7 +230,7 @@ function updateCutterExportControls(options: CutterExportOptions | null | undefi
     encoder.replaceChildren();
     const software = document.createElement('option');
     software.value = 'software';
-    software.textContent = 'Software';
+    software.textContent = UI_TEXT.cutter.encoderSoftware;
     encoder.append(software);
     if (cutterExportProfile !== 'archive') {
         const hardwareEncoders = options?.hardwareEncoders
@@ -235,13 +238,23 @@ function updateCutterExportControls(options: CutterExportOptions | null | undefi
         hardwareEncoders.forEach((value) => {
             const option = document.createElement('option');
             option.value = value;
-            option.textContent = value === 'h264_nvenc' ? 'NVIDIA NVENC' : value === 'h264_qsv' ? 'Intel Quick Sync' : 'AMD AMF';
+            option.textContent = value === 'h264_nvenc'
+                ? UI_TEXT.cutter.encoderNvenc
+                : value === 'h264_qsv'
+                    ? UI_TEXT.cutter.encoderQsv
+                    : UI_TEXT.cutter.encoderAmf;
             encoder.append(option);
         });
     }
     if (cutterExportProfile === 'archive' || (options !== undefined && !Array.from(encoder.options).some((option) => option.value === cutterExportEncoder))) cutterExportEncoder = 'software';
     encoder.value = cutterExportEncoder;
     encoder.disabled = !options || cutterExportProfile === 'archive';
+}
+
+function refreshCutterLocalizedUi(): void {
+    renderCutterProjectRecovery(cutterPendingProject);
+    updateCutterAudioStreams();
+    updateCutterExportControls(cutterExportOptions);
 }
 
 async function loadCutterExportOptions(file: FileCapabilityReference, generation: number): Promise<void> {
@@ -279,12 +292,12 @@ function applyCutterProject(project: CutterProject): boolean {
 
 async function recoverCutterProject(): Promise<void> {
     if (!cutterPendingProject || !applyCutterProject(cutterPendingProject)) {
-        showAppToast('Projekt konnte nicht wiederhergestellt werden', 'warn');
+        showAppToast(UI_TEXT.cutter.projectRecoveryFailed, 'warn');
         return;
     }
     cutterRecoveryDecisionPending = false;
     renderCutterProjectRecovery(null);
-    showAppToast('Projekt wiederhergestellt', 'info');
+    showAppToast(UI_TEXT.cutter.projectRecovered, 'info');
 }
 
 async function discardCutterProject(): Promise<void> {
@@ -304,12 +317,12 @@ async function openCutterProject(): Promise<void> {
     let project: CutterProject | null = null;
     try { project = await window.api.openCutterProject(cutterFile.token); } catch { }
     if (!project || !applyCutterProject(project)) {
-        showAppToast('Kein passendes Projekt gefunden', 'warn');
+        showAppToast(UI_TEXT.cutter.projectNotFound, 'warn');
         return;
     }
     cutterRecoveryDecisionPending = false;
     renderCutterProjectRecovery(null);
-    showAppToast('Projekt geöffnet', 'info');
+    showAppToast(UI_TEXT.cutter.projectOpened, 'info');
 }
 
 function setCutterExportProfile(value: string): void {
@@ -1156,7 +1169,7 @@ async function requestCutterVideoReplacement(file: FileCapabilityReference): Pro
     if (!file || isCutting) return;
     if (!await confirmCutterReplacement(file)) return;
     if (cutterEditorState && !cutterRecoveryDecisionPending && !await persistCutterProject(false)) {
-        showAppToast('Projekt konnte nicht gespeichert werden', 'warn');
+        showAppToast(UI_TEXT.cutter.projectSaveFailed, 'warn');
         return;
     }
     await loadCutterFromPath(file);

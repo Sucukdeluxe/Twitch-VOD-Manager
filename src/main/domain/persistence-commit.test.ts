@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { openDatabase, type DbHandle } from '../infra/db';
 import { createAppStateStore } from './app-state-store';
-import { commitQueueMutation, persistStateChange } from './persistence-commit';
+import { applyQueueSnapshotPreservingActiveItems, commitQueueMutation, persistStateChange } from './persistence-commit';
 
 let directory: string;
 let db: DbHandle;
@@ -20,6 +20,23 @@ afterEach(() => {
 });
 
 describe('persistStateChange', () => {
+    it('preserves active item identity while applying a persisted pause snapshot', () => {
+        const active = { id: 'q1', status: 'downloading', progress: 72, mergePhase: 'merging' };
+        const idle = { id: 'q2', status: 'pending', progress: 0 };
+        const applied = applyQueueSnapshotPreservingActiveItems(
+            [active, idle],
+            [
+                { id: 'q1', status: 'paused', progress: 72, mergePhase: 'merging' },
+                { id: 'q2', status: 'paused', progress: 0 },
+            ],
+            new Set(['q1']),
+        );
+
+        expect(applied[0]).toBe(active);
+        expect(active).toMatchObject({ status: 'paused', progress: 72, mergePhase: 'merging' });
+        expect(applied[1]).not.toBe(idle);
+    });
+
     it('keeps runtime configuration at the persisted value when a SQLite write fails', () => {
         const previous = { language: 'de' };
         const next = { language: 'en' };

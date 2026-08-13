@@ -29,6 +29,12 @@ function scheduleStreamerActiveIndicatorSync(): void {
 const liveStatusByLogin = new Map<string, boolean>();
 const streamerDisplayNames = new Map<string, string>();
 
+function getStreamerDisplayName(login: string): string {
+    return streamerDisplayNames.get(login.trim().toLowerCase()) || login;
+}
+
+(window as unknown as { getStreamerDisplayName: typeof getStreamerDisplayName }).getStreamerDisplayName = getStreamerDisplayName;
+
 function rememberStreamerDisplayName(login: string, displayName: string): void {
     const normalizedLogin = login.trim().toLowerCase();
     const normalizedDisplayName = displayName.trim();
@@ -44,6 +50,14 @@ function rememberStreamerDisplayName(login: string, displayName: string): void {
 
 (window as unknown as { rememberStreamerDisplayName: typeof rememberStreamerDisplayName }).rememberStreamerDisplayName = rememberStreamerDisplayName;
 
+function renderHydratedStreamerDisplayNames(): void {
+    if (currentStreamer) {
+        const setTitle = (window as unknown as { setPageTitle?: (text: string) => void }).setPageTitle;
+        if (typeof setTitle === 'function') setTitle(getStreamerDisplayName(currentStreamer));
+    }
+    renderStreamers();
+}
+
 async function hydrateStreamerDisplayNames(): Promise<void> {
     const configuredNames = config.streamer_display_names || {};
     let changed = false;
@@ -55,12 +69,13 @@ async function hydrateStreamerDisplayNames(): Promise<void> {
             changed = true;
         }
     }
+    if (changed) {
+        renderHydratedStreamerDisplayNames();
+        changed = false;
+    }
 
     const streamers = (config.streamers ?? []) as string[];
-    if (streamers.length === 0) {
-        if (changed) renderStreamers();
-        return;
-    }
+    if (streamers.length === 0) return;
 
     try {
         const resolvedNames = await window.api.getStreamerDisplayNames(streamers);
@@ -74,14 +89,7 @@ async function hydrateStreamerDisplayNames(): Promise<void> {
         }
     } catch { }
 
-    if (changed) {
-        if (currentStreamer) {
-            const displayName = streamerDisplayNames.get(currentStreamer.toLowerCase());
-            const setTitle = (window as unknown as { setPageTitle?: (text: string) => void }).setPageTitle;
-            if (displayName && typeof setTitle === 'function') setTitle(displayName);
-        }
-        renderStreamers();
-    }
+    if (changed) renderHydratedStreamerDisplayNames();
 }
 
 (window as unknown as { hydrateStreamerDisplayNames: typeof hydrateStreamerDisplayNames }).hydrateStreamerDisplayNames = hydrateStreamerDisplayNames;
@@ -131,6 +139,9 @@ const VOD_FILTER_STORAGE_KEY = 'twitch-vod-manager:vod-filter';
 // on streamer switch (selection is per-streamer mental model). NOT persisted
 // because a stale selection across reloads is more confusing than helpful.
 const selectedVodUrls = new Set<string>();
+const selectedVodUrlRevisions = new Map<string, number>();
+let vodSelectionRevision = 0;
+let vodBulkOperationInFlight = false;
 let vodGridDelegationInitialized = false;
 
 // Hide-downloaded toggle: when enabled, the VOD grid skips entries whose
@@ -397,6 +408,7 @@ let streamerListFilterQuery = '';
 const VOD_SCROLL_POSITIONS_KEY = 'twitch-vod-manager:vod-scroll-positions';
 let vodScrollPositions: Record<string, number> = {};
 let pendingScrollRestore: { streamer: string; y: number } | null = null;
+let vodScrollRestoreTimer: number | null = null;
 
 function loadVodScrollPositions(): void {
     try {
@@ -523,7 +535,7 @@ function showStreamerContextMenu(event: MouseEvent, streamer: string): void {
     const menu = document.createElement('div');
     menu.className = 'streamer-context-menu';
     menu.setAttribute('role', 'menu');
-    menu.setAttribute('aria-label', streamerDisplayNames.get(streamer.toLowerCase()) || streamer);
+    menu.setAttribute('aria-label', getStreamerDisplayName(streamer));
 
     const appendAction = (action: 'auto' | 'vod' | 'record', label: string, active: boolean, handler: () => void): void => {
         const button = document.createElement('button');
@@ -643,7 +655,7 @@ function renderStreamers(): void {
 
         const nameSpan = document.createElement('span');
         nameSpan.className = 'streamer-name' + (isLive ? ' is-live' : '');
-        nameSpan.textContent = streamerDisplayNames.get(streamer.toLowerCase()) || streamer;
+        nameSpan.textContent = getStreamerDisplayName(streamer);
         const removeSpan = document.createElement('span');
         removeSpan.className = 'remove';
         removeSpan.textContent = 'x';
@@ -710,6 +722,38 @@ function onStreamerListFilterChange(): void {
     renderStreamers();
 }
 
+function clearActiveVodHoverPreview(): void {
+    const clear = (window as unknown as { clearVodHoverPreview?: () => void }).clearVodHoverPreview;
+    if (typeof clear === 'function') clear();
+}
+
+function cancelVodScrollRestore(): void {
+    pendingScrollRestore = null;
+    if (vodScrollRestoreTimer === null) return;
+    window.clearTimeout(vodScrollRestoreTimer);
+    vodScrollRestoreTimer = null;
+}
+
+function clearActiveStreamerSelection(): void {
+    selectStreamerRequestId += 1;
+    vodRenderTaskId += 1;
+    currentStreamer = null;
+    lastLoadedVods = [];
+    lastLoadedStreamer = null;
+    cancelVodScrollRestore();
+    selectedVodUrls.clear();
+    selectedVodUrlRevisions.clear();
+    clearActiveVodHoverPreview();
+    closeVodContextMenu();
+    const hide = (window as unknown as { hideStreamerProfileHeader?: () => void }).hideStreamerProfileHeader;
+    if (typeof hide === 'function') hide();
+    updateVodBulkBar();
+    updateVodFilterCount(0, 0);
+    setVodGridEmptyState(byId('vodGrid'), UI_TEXT.vods.noneTitle, UI_TEXT.vods.noneText);
+    const setTitle = (window as unknown as { setPageTitle?: (text: string) => void }).setPageTitle;
+    if (typeof setTitle === 'function') setTitle(UI_TEXT.tabs.vods);
+}
+
 async function bulkRemoveStreamers(): Promise<void> {
     const all = (config.streamers ?? []) as string[];
     if (all.length === 0) return;
@@ -726,9 +770,7 @@ async function bulkRemoveStreamers(): Promise<void> {
     config.streamers = remaining;
     config = await window.api.saveConfig({ streamers: remaining });
     if (currentStreamer && targets.includes(currentStreamer)) {
-        currentStreamer = null;
-        const hide = (window as unknown as { hideStreamerProfileHeader?: () => void }).hideStreamerProfileHeader;
-        if (typeof hide === 'function') hide();
+        clearActiveStreamerSelection();
     }
     streamerListFilterQuery = '';
     const input = document.getElementById('streamerListFilter') as HTMLInputElement | null;
@@ -821,16 +863,8 @@ async function addStreamer(): Promise<void> {
 async function removeStreamer(name: string): Promise<void> {
     config.streamers = (config.streamers ?? []).filter((s: string) => s !== name);
     config = await window.api.saveConfig({ streamers: config.streamers });
+    if (currentStreamer === name) clearActiveStreamerSelection();
     renderStreamers();
-
-    if (currentStreamer !== name) {
-        return;
-    }
-
-    currentStreamer = null;
-    const hide = (window as unknown as { hideStreamerProfileHeader?: () => void }).hideStreamerProfileHeader;
-    if (typeof hide === 'function') hide();
-    setVodGridEmptyState(byId('vodGrid'), UI_TEXT.vods.noneTitle, UI_TEXT.vods.noneText);
 }
 
 function normalizeStreamerCacheKey(name: string): string {
@@ -904,13 +938,40 @@ function startStreamerBackgroundRefresh(): void {
     }, STREAMER_BACKGROUND_REFRESH_MS);
 }
 
+function renderVodGridLoadingState(): void {
+    byId('vodGrid').innerHTML = Array.from({ length: 6 }, () => `
+        <div class="vod-card vod-card-skeleton">
+            <div class="vod-skel-thumb"></div>
+            <div class="vod-info">
+                <div class="vod-skel-line title"></div>
+                <div class="vod-skel-line meta-1"></div>
+                <div class="vod-skel-line meta-2"></div>
+            </div>
+        </div>
+    `).join('');
+}
+
 async function selectStreamer(name: string, forceRefresh = false): Promise<void> {
+    clearActiveVodHoverPreview();
     // Save where we were on the OLD streamer before navigating away.
     rememberCurrentVodScroll();
+    cancelVodScrollRestore();
 
     const requestId = ++selectStreamerRequestId;
     const isStaleRequest = () => requestId !== selectStreamerRequestId || currentStreamer !== name;
 
+    if (currentStreamer !== name) {
+        vodRenderTaskId += 1;
+        lastLoadedStreamer = null;
+        lastLoadedVods = [];
+        closeVodContextMenu();
+        renderVodGridLoadingState();
+        if (selectedVodUrls.size > 0) {
+            selectedVodUrls.clear();
+            selectedVodUrlRevisions.clear();
+            updateVodBulkBar();
+        }
+    }
     currentStreamer = name;
     // Schedule a scroll-restore once the VOD grid renders. The actual
     // restore runs after renderVODs replaces the grid.
@@ -918,7 +979,7 @@ async function selectStreamer(name: string, forceRefresh = false): Promise<void>
     pendingScrollRestore = (typeof savedY === 'number' && savedY > 0) ? { streamer: name, y: savedY } : null;
     renderStreamers();
     const setTitle = (window as unknown as { setPageTitle?: (text: string) => void }).setPageTitle;
-    const displayName = streamerDisplayNames.get(name.toLowerCase()) || name;
+    const displayName = getStreamerDisplayName(name);
     if (typeof setTitle === 'function') setTitle(displayName);
     else byId('pageTitle').textContent = displayName;
 
@@ -946,16 +1007,7 @@ async function selectStreamer(name: string, forceRefresh = false): Promise<void>
     if (cached) {
         renderVODs(cached.vods, name);
     } else {
-        byId('vodGrid').innerHTML = Array.from({ length: 6 }, () => `
-            <div class="vod-card vod-card-skeleton">
-                <div class="vod-skel-thumb"></div>
-                <div class="vod-info">
-                    <div class="vod-skel-line title"></div>
-                    <div class="vod-skel-line meta-1"></div>
-                    <div class="vod-skel-line meta-2"></div>
-                </div>
-            </div>
-        `).join('');
+        renderVodGridLoadingState();
     }
 
     const loaded = await loadStreamerVods(name, forceRefresh);
@@ -1003,6 +1055,7 @@ function renderVODs(vods: VOD[] | null | undefined, streamer: string, animateCha
     // Clear bulk-selection on streamer switch — selection is per-streamer
     if (lastLoadedStreamer && lastLoadedStreamer !== streamer && selectedVodUrls.size > 0) {
         selectedVodUrls.clear();
+        selectedVodUrlRevisions.clear();
         updateVodBulkBar();
     }
     const motion = animateChanges ? captureVodGridMotion() : undefined;
@@ -1016,7 +1069,9 @@ function renderVODs(vods: VOD[] | null | undefined, streamer: string, animateCha
     if (pendingScrollRestore && pendingScrollRestore.streamer === streamer) {
         const target = pendingScrollRestore;
         pendingScrollRestore = null;
-        window.setTimeout(() => {
+        vodScrollRestoreTimer = window.setTimeout(() => {
+            vodScrollRestoreTimer = null;
+            if (lastLoadedStreamer !== target.streamer) return;
             const grid = document.getElementById('vodGrid');
             if (!grid) return;
             const scrollable = (grid.closest('.content') as HTMLElement | null) || grid;
@@ -1095,8 +1150,16 @@ function setVodCardSelection(card: HTMLElement, selected: boolean): void {
     if (!checkbox || !url) return;
     checkbox.checked = selected;
     card.classList.toggle('selected', selected);
-    if (selected) selectedVodUrls.add(url);
-    else selectedVodUrls.delete(url);
+    if (selected !== selectedVodUrls.has(url)) {
+        vodSelectionRevision += 1;
+        if (selected) {
+            selectedVodUrls.add(url);
+            selectedVodUrlRevisions.set(url, vodSelectionRevision);
+        } else {
+            selectedVodUrls.delete(url);
+            selectedVodUrlRevisions.delete(url);
+        }
+    }
     updateVodBulkBar();
 }
 
@@ -1108,14 +1171,28 @@ function toggleVodCardSelection(card: HTMLElement): void {
 
 let activeVodContextMenu: HTMLElement | null = null;
 let activeVodContextMenuInvoker: HTMLElement | null = null;
+let activeVodContextMenuCleanup: (() => void) | null = null;
 
 function closeVodContextMenu(restoreFocus = false): void {
+    const cleanup = activeVodContextMenuCleanup;
+    activeVodContextMenuCleanup = null;
+    cleanup?.();
     if (!activeVodContextMenu) return;
     activeVodContextMenu.remove();
     activeVodContextMenu = null;
     const invoker = activeVodContextMenuInvoker;
     activeVodContextMenuInvoker = null;
     if (restoreFocus && invoker?.isConnected) invoker.focus();
+}
+
+async function copyVodUrl(url: string): Promise<void> {
+    const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
+    try {
+        await navigator.clipboard.writeText(url);
+        if (toast) toast(UI_TEXT.vods.ctxCopiedUrl, 'info');
+    } catch {
+        if (toast) toast(UI_TEXT.vods.ctxCopyFailed, 'warn');
+    }
 }
 
 function showVodContextMenu(x: number, y: number, ctx: VodCardContext, invoker: HTMLElement | null): void {
@@ -1132,7 +1209,7 @@ function showVodContextMenu(x: number, y: number, ctx: VodCardContext, invoker: 
     );
     const isMarkedDownloaded = downloadedIds.has(ctx.id);
 
-    let cleanup = (restoreFocus = false): void => closeVodContextMenu(restoreFocus);
+    const cleanup = (restoreFocus = false): void => closeVodContextMenu(restoreFocus);
     const makeItem = (label: string, onClick: () => void): HTMLElement => {
         const el = document.createElement('button');
         el.type = 'button';
@@ -1149,11 +1226,7 @@ function showVodContextMenu(x: number, y: number, ctx: VodCardContext, invoker: 
         void window.api.openExternal(ctx.url);
     }));
     menu.appendChild(makeItem(UI_TEXT.vods.ctxCopyUrl, () => {
-        try {
-            void navigator.clipboard.writeText(ctx.url);
-            const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
-            if (toast) toast(UI_TEXT.vods.ctxCopiedUrl, 'info');
-        } catch { /* ignore */ }
+        void copyVodUrl(ctx.url);
     }));
     menu.appendChild(makeItem(UI_TEXT.vods.trimButton, () => {
         openClipDialog(ctx.url, ctx.title, ctx.date, ctx.streamer, ctx.duration);
@@ -1185,8 +1258,7 @@ function showVodContextMenu(x: number, y: number, ctx: VodCardContext, invoker: 
         cleanup();
     };
     const dismissOnScroll = () => cleanup();
-    cleanup = (restoreFocus = false): void => {
-        closeVodContextMenu(restoreFocus);
+    activeVodContextMenuCleanup = () => {
         document.removeEventListener('mousedown', dismissOnClick, true);
         document.removeEventListener('scroll', dismissOnScroll, true);
     };
@@ -1219,8 +1291,34 @@ function updateVodBulkBar(): void {
 function clearVodSelection(): void {
     if (selectedVodUrls.size === 0) return;
     selectedVodUrls.clear();
+    selectedVodUrlRevisions.clear();
     updateVodBulkBar();
     if (lastLoadedStreamer) renderVodGridFromCurrentState();
+}
+
+function removeVodSelectionIfUnchanged(url: string, revision: number | undefined): void {
+    if (!selectedVodUrls.has(url) || selectedVodUrlRevisions.get(url) !== revision) return;
+    selectedVodUrls.delete(url);
+    selectedVodUrlRevisions.delete(url);
+}
+
+function setVodBulkActionsDisabled(disabled: boolean): void {
+    for (const id of ['vodBulkAddBtn', 'vodBulkMarkBtn', 'vodBulkUnmarkBtn']) {
+        const button = document.getElementById(id) as HTMLButtonElement | null;
+        if (button) button.disabled = disabled;
+    }
+}
+
+function beginVodBulkOperation(): boolean {
+    if (vodBulkOperationInFlight) return false;
+    vodBulkOperationInFlight = true;
+    setVodBulkActionsDisabled(true);
+    return true;
+}
+
+function endVodBulkOperation(): void {
+    vodBulkOperationInFlight = false;
+    setVodBulkActionsDisabled(false);
 }
 
 async function toggleAutoRecord(streamer: string): Promise<void> {
@@ -1283,76 +1381,137 @@ async function triggerLiveRecording(streamer: string): Promise<void> {
 async function bulkMarkSelectedDownloaded(mark: boolean): Promise<void> {
     const urls = Array.from(selectedVodUrls);
     if (urls.length === 0) return;
+    if (!beginVodBulkOperation()) return;
+    const vods = new Map(lastLoadedVods.map((vod) => [vod.url, { id: vod.id }]));
+    const selectionRevisions = new Map(urls.map((url) => [url, selectedVodUrlRevisions.get(url)]));
 
-    let updated = 0;
-    for (const url of urls) {
-        const vod = lastLoadedVods.find((v) => v.url === url);
-        if (!vod || !vod.id) continue;
-        try {
-            const result = await window.api.markVodDownloaded(vod.id, mark);
-            if (result?.success) updated++;
-        } catch { /* keep going */ }
-    }
+    try {
+        let updated = 0;
+        let failed = 0;
+        for (const url of urls) {
+            const vod = vods.get(url);
+            if (!vod || !vod.id) {
+                failed++;
+                continue;
+            }
+            try {
+                const result = await window.api.markVodDownloaded(vod.id, mark);
+                if (result?.success) {
+                    updated++;
+                    removeVodSelectionIfUnchanged(url, selectionRevisions.get(url));
+                } else {
+                    failed++;
+                }
+            } catch {
+                failed++;
+            }
+        }
 
-    if (updated === 0) return;
+        updateVodBulkBar();
+        if (updated > 0) {
+            try { config = await window.api.getConfig(); } catch { /* ignore */ }
+            if (lastLoadedStreamer) renderVodGridFromCurrentState();
+        }
 
-    try { config = await window.api.getConfig(); } catch { /* ignore */ }
-    selectedVodUrls.clear();
-    updateVodBulkBar();
-    if (lastLoadedStreamer) renderVodGridFromCurrentState();
-
-    const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
-    if (toast) {
-        const template = mark ? UI_TEXT.vods.bulkMarkedDownloaded : UI_TEXT.vods.bulkUnmarkedDownloaded;
-        toast(template.replace('{count}', String(updated)), 'info');
+        const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
+        if (toast && updated > 0 && failed === 0) {
+            const template = updated === 1
+                ? (mark ? UI_TEXT.vods.bulkMarkedDownloadedOne : UI_TEXT.vods.bulkUnmarkedDownloadedOne)
+                : (mark ? UI_TEXT.vods.bulkMarkedDownloaded : UI_TEXT.vods.bulkUnmarkedDownloaded);
+            toast(template.replace('{count}', String(updated)), 'info');
+        } else if (toast && updated === 0 && failed > 0) {
+            const template = failed === 1 ? UI_TEXT.vods.bulkMarkFailedOne : UI_TEXT.vods.bulkMarkFailed;
+            toast(template.replace('{count}', String(failed)), 'warn');
+        } else if (toast && updated > 0 && failed > 0) {
+            toast(UI_TEXT.vods.bulkMarkResult
+                .replace('{updated}', String(updated))
+                .replace('{failed}', String(failed)), 'warn');
+        }
+    } finally {
+        endVodBulkOperation();
     }
 }
 
 async function bulkAddSelectedVodsToQueue(): Promise<void> {
     const urls = Array.from(selectedVodUrls);
     if (urls.length === 0 || !lastLoadedStreamer) return;
+    if (!beginVodBulkOperation()) return;
     const streamer = lastLoadedStreamer;
+    const vods = new Map(lastLoadedVods.map((vod) => [vod.url, {
+        url: vod.url,
+        title: vod.title,
+        date: vod.created_at,
+        streamer,
+        duration_str: vod.duration
+    }]));
+    const selectionRevisions = new Map(urls.map((url) => [url, selectedVodUrlRevisions.get(url)]));
 
     const btn = document.getElementById('vodBulkAddBtn') as HTMLButtonElement | null;
     const originalText = btn?.textContent || '';
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = UI_TEXT.vods.bulkAdding;
-    }
+    if (btn) btn.textContent = UI_TEXT.vods.bulkAdding;
 
-    let added = 0;
-    let skipped = 0;
-    for (const url of urls) {
-        const vod = lastLoadedVods.find((v) => v.url === url);
-        if (!vod) { skipped++; continue; }
-        try {
-            queue = await window.api.addToQueue({
-                url: vod.url,
-                title: vod.title,
-                date: vod.created_at,
-                streamer,
-                duration_str: vod.duration
-            });
-            added++;
-        } catch {
-            skipped++;
+    try {
+        let added = 0;
+        let duplicates = 0;
+        let invalid = 0;
+        let failed = 0;
+        for (const [index, url] of urls.entries()) {
+            const vod = vods.get(url);
+            if (!vod) {
+                invalid++;
+                removeVodSelectionIfUnchanged(url, selectionRevisions.get(url));
+                continue;
+            }
+            try {
+                const result = await window.api.addToQueueWithResult(vod);
+                if (result.accepted) {
+                    added++;
+                } else if (result.reason === 'duplicate') {
+                    duplicates++;
+                } else if (result.reason === 'invalid') {
+                    invalid++;
+                } else {
+                    failed++;
+                    if (result.reason === 'shutting-down' || result.reason === 'access-denied') {
+                        failed += urls.length - index - 1;
+                        break;
+                    }
+                    continue;
+                }
+                removeVodSelectionIfUnchanged(url, selectionRevisions.get(url));
+            } catch {
+                failed++;
+            }
         }
-    }
 
-    selectedVodUrls.clear();
-    if (btn) {
-        btn.disabled = false;
-        btn.textContent = originalText;
-    }
-    updateVodBulkBar();
-    renderQueue();
-    renderVodGridFromCurrentState();
+        updateVodBulkBar();
+        renderQueue();
+        if (lastLoadedStreamer === streamer) renderVodGridFromCurrentState();
 
-    const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
-    if (toast && added > 0) {
-        toast(UI_TEXT.vods.bulkAddedToQueue.replace('{count}', String(added)), 'info');
-    } else if (toast && skipped > 0) {
-        toast(UI_TEXT.vods.bulkAddSkipped, 'warn');
+        const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
+        const categoryCount = Number(added > 0) + Number(duplicates > 0) + Number(invalid > 0) + Number(failed > 0);
+        if (toast && categoryCount === 1 && added > 0) {
+            const template = added === 1 ? UI_TEXT.vods.bulkAddedToQueueOne : UI_TEXT.vods.bulkAddedToQueue;
+            toast(template.replace('{count}', String(added)), 'info');
+        } else if (toast && categoryCount === 1 && duplicates > 0) {
+            const template = duplicates === 1 ? UI_TEXT.vods.bulkAddDuplicateOne : UI_TEXT.vods.bulkAddDuplicate;
+            toast(template.replace('{count}', String(duplicates)), 'warn');
+        } else if (toast && categoryCount === 1 && invalid > 0) {
+            const template = invalid === 1 ? UI_TEXT.vods.bulkAddInvalidOne : UI_TEXT.vods.bulkAddInvalid;
+            toast(template.replace('{count}', String(invalid)), 'warn');
+        } else if (toast && categoryCount === 1 && failed > 0) {
+            const template = failed === 1 ? UI_TEXT.vods.bulkAddFailedOne : UI_TEXT.vods.bulkAddFailed;
+            toast(template.replace('{count}', String(failed)), 'warn');
+        } else if (toast && categoryCount > 1) {
+            toast(UI_TEXT.vods.bulkAddResult
+                .replace('{added}', String(added))
+                .replace('{duplicates}', String(duplicates))
+                .replace('{invalid}', String(invalid))
+                .replace('{failed}', String(failed)), 'warn');
+        }
+    } finally {
+        if (btn) btn.textContent = originalText;
+        endVodBulkOperation();
     }
 }
 
@@ -1398,6 +1557,7 @@ function animateVodGridMotion(motion: VodGridMotion): void {
 }
 
 function renderVodGridFromCurrentState(motion?: VodGridMotion): void {
+    clearActiveVodHoverPreview();
     if (!lastLoadedStreamer) return;
 
     const grid = byId('vodGrid');
@@ -1420,6 +1580,12 @@ function renderVodGridFromCurrentState(motion?: VodGridMotion): void {
         ? sorted.filter((vod) => !downloadedIdsForFilter.has(vod.id))
         : sorted;
     const filtered = filterVodsByQuery(sortedAndHidden, vodFilterQuery);
+
+    if (filtered.length === 0 && vodHideDownloaded && sortedAndHidden.length === 0 && !vodFilterQuery.trim()) {
+        setVodGridEmptyState(grid, UI_TEXT.vods.hideDownloadedEmptyTitle, UI_TEXT.vods.hideDownloadedEmptyText);
+        updateVodFilterCount(0, total);
+        return;
+    }
 
     if (filtered.length === 0 && vodFilterQuery.trim()) {
         setVodGridEmptyState(grid, UI_TEXT.vods.filterNoMatchTitle, UI_TEXT.vods.filterNoMatchText);

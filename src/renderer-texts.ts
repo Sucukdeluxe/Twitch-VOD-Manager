@@ -168,6 +168,11 @@ function applyLanguageToStaticUI(): void {
     setText('cutterSelectTitle', UI_TEXT.static.cutterSelectTitle);
     setText('cutterPreviewPlaceholder', UI_TEXT.static.cutterPreviewPlaceholder);
     setText('cutterBrowseBtn', UI_TEXT.static.cutterBrowse);
+    setText('cutterNewVideoText', UI_TEXT.cutter.newVideo);
+    setAriaLabel('cutterOpenProjectBtn', UI_TEXT.cutter.openProject);
+    setTitle('cutterOpenProjectBtn', UI_TEXT.cutter.openProject);
+    setAriaLabel('cutterSaveProjectBtn', UI_TEXT.cutter.saveProject);
+    setTitle('cutterSaveProjectBtn', UI_TEXT.cutter.saveProject);
     setText('commandPaletteTitle', UI_TEXT.static.commandPaletteTitle);
     setAriaLabel('commandPaletteInput', UI_TEXT.static.commandPaletteAria);
     setAriaLabel('commandPaletteList', UI_TEXT.static.commandPaletteResultsAria);
@@ -193,6 +198,19 @@ function applyLanguageToStaticUI(): void {
     setText('cutterVideoTrackLabel', UI_TEXT.cutter.videoTrack);
     setText('cutterAudioTrackLabel', UI_TEXT.cutter.audioTrack);
     setText('cutterAudioEmpty', UI_TEXT.cutter.noAudio);
+    setText('cutterRecoveryText', UI_TEXT.cutter.recoveryFound);
+    setText('cutterRecoveryRestoreBtn', UI_TEXT.cutter.recoverProject);
+    setText('cutterRecoveryDiscardBtn', UI_TEXT.cutter.discardProject);
+    setText('cutterExportProfileLabel', UI_TEXT.cutter.exportProfileLabel);
+    setText('cutterExportEncoderLabel', UI_TEXT.cutter.exportEncoderLabel);
+    setText('cutterAudioStreamLabel', UI_TEXT.cutter.audioStreamLabel);
+    setText('cutterProfileQualityOption', UI_TEXT.cutter.profileQuality);
+    setText('cutterProfileBalancedOption', UI_TEXT.cutter.profileBalanced);
+    setText('cutterProfileFastOption', UI_TEXT.cutter.profileFast);
+    setText('cutterProfileArchiveOption', UI_TEXT.cutter.profileArchive);
+    setText('cutterEncoderSoftwareOption', UI_TEXT.cutter.encoderSoftware);
+    setText('cutterAudioStreamEmptyOption', UI_TEXT.cutter.noAudio);
+    setText('cutterSpeedNormalBtn', UI_TEXT.cutter.speedNormal);
     setText('cutterLoadingLabel', UI_TEXT.cutter.loadingMedia);
     setText('cutterSpeedLabel', UI_TEXT.cutter.speedLabel);
     setAriaLabel('cutterPlayBtn', UI_TEXT.cutter.play);
@@ -325,6 +343,7 @@ function applyLanguageToStaticUI(): void {
     setText('btnPreflightRun', UI_TEXT.static.preflightRun);
     setText('btnPreflightFix', UI_TEXT.static.preflightFix);
     setText('preflightResult', UI_TEXT.static.preflightEmpty);
+    if (typeof refreshLocalizedPreflightUi === 'function') refreshLocalizedPreflightUi();
     setText('managedToolsTitle', UI_TEXT.static.managedToolsTitle);
     setText('btnRefreshManagedTools', UI_TEXT.static.managedToolsRefresh);
     setText('btnRepairManagedTools', UI_TEXT.static.managedToolsRepair);
@@ -460,6 +479,7 @@ function applyLanguageToStaticUI(): void {
     }
     if (typeof updateCutterPlayUi === 'function') updateCutterPlayUi();
     if (typeof updateCutterMuteUi === 'function') updateCutterMuteUi();
+    if (typeof refreshCutterLocalizedUi === 'function') refreshCutterLocalizedUi();
     if (typeof renderCutterEditor === 'function') renderCutterEditor();
 }
 

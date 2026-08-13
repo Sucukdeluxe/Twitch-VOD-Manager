@@ -83,6 +83,12 @@ function getCommandCacheKey(command: string, args: string[]): string {
     return [command, ...args].join('\u0000');
 }
 
+let managedToolExecutionObserver: ((command: string) => void) | null = null;
+
+export function setManagedToolExecutionObserver(observer: ((command: string) => void) | null): void {
+    managedToolExecutionObserver = observer;
+}
+
 export function canExecute(cmd: string): boolean {
     try {
         execSync(cmd, { stdio: 'ignore', windowsHide: true });
@@ -94,6 +100,7 @@ export function canExecute(cmd: string): boolean {
 
 export function canExecuteCommand(command: string, args: string[]): boolean {
     try {
+        managedToolExecutionObserver?.(command);
         const result = spawnSync(command, args, { stdio: 'ignore', windowsHide: true });
         return result.status === 0;
     } catch {

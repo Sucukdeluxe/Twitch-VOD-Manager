@@ -61,7 +61,7 @@ The application works in public mode without a Twitch login. Connecting a Twitch
 ## Installation
 
 1. Open the [latest GitHub release](https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/latest).
-2. Download `Twitch-VOD-Manager-Setup-1.0.17.exe`.
+2. Download `Twitch-VOD-Manager-Setup-1.0.18.exe`.
 3. Run the installer and choose the installation directory.
 4. Start Twitch VOD Manager and add a streamer.
 
@@ -117,12 +117,17 @@ The Windows installer and updater metadata are written to `release/`.
 
 | Path | Purpose |
 | --- | --- |
-| `src/main.ts` | Electron main process and desktop integrations |
-| `src/main/` | Domain logic, persistence and infrastructure |
+| `src/main.ts` | Electron main-process orchestration and desktop integrations |
+| `src/main/queue/` | Queue process lifecycle and runtime coordination |
+| `src/main/cutter/` | Video cutter integration surface |
+| `src/main/twitch/` | Twitch authentication and provider integration |
+| `src/main/updates/` | Update lifecycle coordination |
+| `src/main/storage/` | Persistence integration surface |
+| `src/main/domain/` | Shared domain logic and validation |
 | `src/renderer-*.ts` | Workspace features and renderer behavior |
 | `src/index.html` | Application shell and settings pages |
-| `src/styles.css` | Shared component styles |
-| `src/workspace.css` | Desktop workspace layout and motion |
+| `src/styles*.css` | Shared components, workflows and overlays |
+| `src/workspace*.css` | Desktop workspace layout, motion and responsive refinements |
 | `scripts/` | Development, test and release checks |
 | `build/` | Installer resources and application icons |
 

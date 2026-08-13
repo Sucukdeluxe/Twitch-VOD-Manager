@@ -92,22 +92,23 @@ export async function fetchTopClips(opts: FetchTopClipsOptions): Promise<TopClip
     if (opts.startedAt) params.set('started_at', opts.startedAt);
     if (opts.endedAt) params.set('ended_at', opts.endedAt);
 
-    const res = await fetchFn(`${HELIX_CLIPS_URL}?${params.toString()}`, {
-        headers: {
-            'Authorization': `Bearer ${opts.accessToken}`,
-            'Client-Id': opts.clientId,
-        },
-    });
-
-    const text = await res.text();
-    if (!res.ok) {
-        throw new Error(`top-clips-crawler: helix ${res.status}: ${text}`);
+    let res: Response;
+    try {
+        res = await fetchFn(`${HELIX_CLIPS_URL}?${params.toString()}`, {
+            headers: {
+                'Authorization': `Bearer ${opts.accessToken}`,
+                'Client-Id': opts.clientId,
+            },
+        });
+    } catch {
+        throw new Error('top-clips-crawler: helix request failed');
     }
+    if (!res.ok) throw new Error(`top-clips-crawler: helix returned HTTP ${res.status}`);
     let parsed: HelixClipsResponse;
     try {
-        parsed = JSON.parse(text) as HelixClipsResponse;
-    } catch (e) {
-        throw new Error(`top-clips-crawler: parse failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+        parsed = JSON.parse(await res.text()) as HelixClipsResponse;
+    } catch {
+        throw new Error('top-clips-crawler: invalid helix response');
     }
 
     const rows = parsed.data ?? [];

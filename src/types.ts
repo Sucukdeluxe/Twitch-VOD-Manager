@@ -21,11 +21,13 @@ export interface MergeGroup {
     downloadedFiles: Record<number, string>;
     mergedFile?: string;
     splitFiles?: string[];
+    splitTempFiles?: string[];
     totalDurationSec?: number;
 }
 
 export interface QueueItem {
     id: string;
+    createdAt?: string;
     title: string;
     url: string;
     date: string;
@@ -43,6 +45,8 @@ export interface QueueItem {
     last_error?: string;
     customClip?: CustomClip;
     mergeGroup?: MergeGroup;
+    mergeRecoveryBlocked?: boolean;
+    artifactRoot?: string;
     // File paths produced by the download (single file for VOD/clip, multiple
     // for parts/merge-group splits). Persisted with the queue so completed
     // items keep their "Open file" / "Show in folder" actions across restarts.
@@ -80,3 +84,6 @@ export interface DownloadResult {
     error?: string;
     outputFiles?: string[];
 }
+
+export type QueueAdditionRejectionReason = import('./main/domain/queue-addition').QueueAdditionRejectionReason;
+export type QueueAdditionResult = import('./main/domain/queue-addition').QueueAdditionResult<QueueItem>;

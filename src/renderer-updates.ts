@@ -1,5 +1,6 @@
 let updateCheckInProgress = false;
 let updateDownloadInProgress = false;
+let updateDownloadOperation: { failureHandled: boolean } | null = null;
 let manualUpdateCheckPending = false;
 let manualUpdateOutcomeHandled = false;
 let latestUpdateVersion = '';
@@ -137,6 +138,10 @@ function showUpdateBanner(): void {
     syncWorkspaceUpdateState(updateBannerState);
 }
 
+function focusWorkspaceAfterUpdateHidden(): void {
+    document.querySelector<HTMLElement>('.top-nav-item[aria-current="page"]')?.focus();
+}
+
 function hideUpdateBanner(): void {
     updateBannerState = 'idle';
     workspaceUpdatePopoverPostponed = false;
@@ -163,12 +168,17 @@ function postponeWorkspaceUpdatePopover(): void {
     banner.classList.remove('show');
     banner.classList.add('popover-dismissed');
     byId<HTMLButtonElement>('workspaceUpdateButton').setAttribute('aria-expanded', 'false');
-    byId<HTMLButtonElement>('workspaceUpdateButton').focus();
+    focusWorkspaceAfterUpdateHidden();
 }
 
 function dismissWorkspaceUpdatePopover(): void {
+    if (updateBannerState === 'downloading') {
+        postponeWorkspaceUpdatePopover();
+        return;
+    }
+
     hideUpdateBanner();
-    byId<HTMLButtonElement>('workspaceUpdateButton').focus();
+    focusWorkspaceAfterUpdateHidden();
 }
 
 for (const eventName of ['mouseenter', 'mouseleave', 'focusin', 'focusout']) {
@@ -217,11 +227,13 @@ function setUpdateBannerAvailableUi(info: UpdateInfo, reveal = true): void {
     syncWorkspaceUpdateState('available');
 }
 
-function setDownloadPendingUi(): void {
+function setDownloadPendingUi(reveal = true): void {
     updateReady = false;
     updateBannerState = 'downloading';
-    workspaceUpdatePopoverPostponed = false;
-    byId('updateBanner').classList.remove('popover-dismissed');
+    if (reveal) {
+        workspaceUpdatePopoverPostponed = false;
+        byId('updateBanner').classList.remove('popover-dismissed');
+    }
 
     showUpdateBanner();
     const button = byId<HTMLButtonElement>('updateButton');
@@ -236,7 +248,9 @@ function setDownloadPendingUi(): void {
     byId('updateProgressGauge').setAttribute('aria-valuenow', String(Math.round(pendingPct)));
 
     if (!latestDownloadProgress) {
-        byId('updateText').textContent = `Version ${latestUpdateVersion || '?'} ${UI_TEXT.updates.downloading}`;
+        byId('updateText').textContent = latestUpdateVersion
+            ? `Version ${latestUpdateVersion} ${UI_TEXT.updates.downloading}`
+            : UI_TEXT.updates.downloading;
     }
     syncWorkspaceUpdateState('downloading');
 }
@@ -246,6 +260,7 @@ function setDownloadReadyUi(info?: UpdateInfo): void {
     if (!activeInfo) return;
     updateReady = true;
     updateDownloadInProgress = false;
+    updateDownloadOperation = null;
     updateBannerState = 'ready';
     workspaceUpdatePopoverPostponed = false;
     byId('updateBanner').classList.remove('popover-dismissed');
@@ -497,7 +512,7 @@ function refreshUpdateUiTexts(): void {
             const totalMb = (latestDownloadProgress.total / 1024 / 1024).toFixed(1);
             byId('updateText').textContent = `${UI_TEXT.updates.downloadLabel}: ${mb} / ${totalMb} MB (${latestDownloadProgress.percent.toFixed(0)}%)`;
         } else {
-            setDownloadPendingUi();
+            setDownloadPendingUi(false);
         }
     } else if (updateBannerState === 'ready' && latestUpdateInfo) {
         setDownloadReadyUi(latestUpdateInfo);
@@ -534,12 +549,13 @@ async function checkUpdate(): Promise<void> {
         const result = await window.api.checkUpdate();
 
         if (result?.error) {
+            const alreadyHandled = manualUpdateOutcomeHandled;
             shouldOpenUpdateModalOnAvailable = false;
             manualUpdateOutcomeHandled = true;
             manualUpdateCheckPending = false;
             updateCheckInProgress = false;
             setCheckButtonCheckingState(false);
-            notifyUpdate(UI_TEXT.updates.checkFailed, 'warn');
+            if (!alreadyHandled) notifyUpdate(UI_TEXT.updates.checkFailed, 'warn');
             return;
         }
 
@@ -556,6 +572,16 @@ async function checkUpdate(): Promise<void> {
             } else {
                 notifyUpdate(UI_TEXT.updates.readyToInstall, 'info');
             }
+            return;
+        }
+
+        if (skippedReason === 'downloading') {
+            shouldOpenUpdateModalOnAvailable = false;
+            manualUpdateOutcomeHandled = true;
+            manualUpdateCheckPending = false;
+            updateCheckInProgress = false;
+            setCheckButtonCheckingState(false);
+            notifyUpdate(UI_TEXT.updates.downloadInProgress, 'info');
             return;
         }
 
@@ -589,6 +615,27 @@ async function checkUpdate(): Promise<void> {
     }
 }
 
+function handleUpdateDownloadFailure(operation: { failureHandled: boolean }): void {
+    if (operation.failureHandled) {
+        return;
+    }
+
+    operation.failureHandled = true;
+    if (operation !== updateDownloadOperation) {
+        return;
+    }
+
+    updateDownloadOperation = null;
+    updateDownloadInProgress = false;
+    latestDownloadProgress = null;
+    if (latestUpdateInfo) {
+        setUpdateBannerAvailableUi(latestUpdateInfo, false);
+    } else {
+        hideUpdateBanner();
+    }
+    notifyUpdate(UI_TEXT.updates.downloadFailed, 'warn');
+}
+
 function downloadUpdate(): void {
     if (updateReady) {
         dismissUpdateModal();
@@ -602,17 +649,15 @@ function downloadUpdate(): void {
     }
 
     updateDownloadInProgress = true;
+    const operation = { failureHandled: false };
+    updateDownloadOperation = operation;
     latestDownloadProgress = null;
     dismissUpdateModal();
     setDownloadPendingUi();
 
     void window.api.downloadUpdate().then((result) => {
         if (result?.error) {
-            updateDownloadInProgress = false;
-            if (latestUpdateInfo) {
-                setUpdateBannerAvailableUi(latestUpdateInfo);
-            }
-            notifyUpdate(UI_TEXT.updates.downloadFailed, 'warn');
+            handleUpdateDownloadFailure(operation);
             return;
         }
 
@@ -629,15 +674,12 @@ function downloadUpdate(): void {
             notifyUpdate(UI_TEXT.updates.downloadInProgress, 'info');
         }
     }).catch(() => {
-        updateDownloadInProgress = false;
-        if (latestUpdateInfo) {
-            setUpdateBannerAvailableUi(latestUpdateInfo);
-        }
-        notifyUpdate(UI_TEXT.updates.downloadFailed, 'warn');
+        handleUpdateDownloadFailure(operation);
     });
 }
 
 window.api.onUpdateChecking(() => {
+    if (updateDownloadInProgress || updateBannerState === 'downloading' || updateReady || updateBannerState === 'ready') return;
     updateCheckInProgress = true;
     if (manualUpdateCheckPending) {
         setCheckButtonCheckingState(true);
@@ -645,6 +687,7 @@ window.api.onUpdateChecking(() => {
 });
 
 window.api.onUpdateAvailable((info: UpdateInfo) => {
+    if (updateDownloadInProgress || updateBannerState === 'downloading' || updateReady || updateBannerState === 'ready') return;
     const activeInfo = rememberUpdateInfo(info);
     updateCheckInProgress = false;
     updateReady = false;
@@ -681,6 +724,7 @@ window.api.onUpdateAvailable((info: UpdateInfo) => {
 
 
 window.api.onUpdateNotAvailable(() => {
+    if (updateDownloadInProgress || updateBannerState === 'downloading' || updateReady || updateBannerState === 'ready') return;
     updateCheckInProgress = false;
     setCheckButtonCheckingState(false);
     manualUpdateOutcomeHandled = true;
@@ -726,20 +770,29 @@ window.api.onUpdateDownloaded((info: UpdateInfo) => {
     openUpdateModal(activeInfo);
 });
 
-window.api.onUpdateError(() => {
+window.api.onUpdateError((payload) => {
+    if (payload.kind === 'check') {
+        if (updateDownloadInProgress || updateBannerState === 'downloading' || updateReady || updateBannerState === 'ready') return;
+        updateCheckInProgress = false;
+        manualUpdateCheckPending = false;
+        manualUpdateOutcomeHandled = true;
+        shouldOpenUpdateModalOnAvailable = false;
+        setCheckButtonCheckingState(false);
+        notifyUpdate(UI_TEXT.updates.checkFailed, 'warn');
+        return;
+    }
+
+    const operation = updateDownloadOperation;
+    if (!updateDownloadInProgress || operation === null) return;
+    const activeVersion = (latestUpdateInfo?.version || latestUpdateVersion || '').trim();
+    if (payload.version && activeVersion && payload.version !== activeVersion) return;
     updateCheckInProgress = false;
-    const wasDownloading = updateDownloadInProgress;
-    updateDownloadInProgress = false;
     manualUpdateCheckPending = false;
     manualUpdateOutcomeHandled = true;
     shouldOpenUpdateModalOnAvailable = false;
     setCheckButtonCheckingState(false);
 
-    if (!updateReady && latestUpdateInfo) {
-        setUpdateBannerAvailableUi(latestUpdateInfo);
-    }
-
-    notifyUpdate(wasDownloading ? UI_TEXT.updates.downloadFailed : UI_TEXT.updates.checkFailed, 'warn');
+    handleUpdateDownloadFailure(operation);
 });
 
 document.addEventListener('keydown', (event) => {

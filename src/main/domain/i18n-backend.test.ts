@@ -41,6 +41,15 @@ describe('tBackend', () => {
         }
     });
 
+    test('describes a blocked standalone download and a phase-boundary pause honestly', () => {
+        expect(tBackend('downloadOutsideWindow', { nextStart: '22:00' }, 'de')).toBe('Download außerhalb des Zeitfensters blockiert. Nächster Start: 22:00.');
+        expect(tBackend('downloadOutsideWindow', { nextStart: '22:00' }, 'en')).toBe('Download blocked outside the configured window. Next start: 22:00.');
+        expect(tBackend('downloadPausePending', undefined, 'de')).toBe('Pause nach dem aktuellen Schritt.');
+        expect(tBackend('downloadPausePending', undefined, 'en')).toBe('Pausing after the current step.');
+        expect(tBackend('mergeRecoveryBlocked', undefined, 'de')).toBe('Unterbrochene Merge-Dateien konnten nicht entfernt werden. Entferne den Queue-Eintrag manuell.');
+        expect(tBackend('mergeRecoveryBlocked', undefined, 'en')).toBe('Interrupted merge files could not be removed. Remove the queue item manually.');
+    });
+
     test('German backend messages use native umlauts', () => {
         const text = Object.values(BACKEND_MESSAGES.de).join('\n').toLocaleLowerCase('de-DE');
         const forbidden = ['ungueltig', 'integritaetspruefung', 'fur ', 'benoetigt', 'prufe '];

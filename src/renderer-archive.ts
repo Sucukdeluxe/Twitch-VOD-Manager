@@ -112,7 +112,7 @@ function renderArchiveSearchResults(result: ArchiveSearchResult): void {
                     <div class="archive-result-size">${escapeHtml(formatBytes(hit.size))}</div>
                 </div>
                 <div class="archive-result-actions">
-                    <button type="button" class="queue-detail-btn" onclick="openFilePath('${safeFullAttr}')">${escapeHtml(UI_TEXT.static.archiveOpen || 'Oeffnen')}</button>
+                    <button type="button" class="queue-detail-btn" onclick="openFilePath('${safeFullAttr}')">${escapeHtml(UI_TEXT.static.archiveOpen || 'Öffnen')}</button>
                     <button type="button" class="queue-detail-btn" onclick="showFileInFolder('${safeFullAttr}')">${escapeHtml(UI_TEXT.static.archiveShowInFolder || 'Ordner')}</button>
                     ${chatBtn}
                     ${eventsBtn}

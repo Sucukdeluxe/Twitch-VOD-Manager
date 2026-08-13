@@ -2,8 +2,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-const styles = readFileSync(join(__dirname, 'styles.css'), 'utf8');
-const workspaceStyles = readFileSync(join(__dirname, 'workspace.css'), 'utf8');
+const styles = ['styles.css', 'styles-workflows.css', 'styles-overlays.css']
+    .map((fileName) => readFileSync(join(__dirname, fileName), 'utf8'))
+    .join('');
+const workspaceStyles = ['workspace.css', 'workspace-refinements.css']
+    .map((fileName) => readFileSync(join(__dirname, fileName), 'utf8'))
+    .join('');
 
 describe('cutter workspace style production paths', () => {
     test('keeps loaded-source visibility independent from the large-window media query', () => {

@@ -62,7 +62,178 @@ function createCutterSelects(): Map<string, FakeSelect> {
     ]);
 }
 
+const englishCutterChoiceTexts = {
+    noAudio: 'No audio track',
+    audioStream: 'Audio track {index}',
+    channelSingular: 'channel',
+    channelPlural: 'channels',
+    profileQuality: 'Quality',
+    profileBalanced: 'Balanced',
+    profileFast: 'Fast',
+    profileArchive: 'Archive',
+    encoderSoftware: 'Software',
+    encoderNvenc: 'NVIDIA NVENC',
+    encoderQsv: 'Intel Quick Sync',
+    encoderAmf: 'AMD AMF',
+};
+
 describe('cutter production paths', () => {
+    test('uses unambiguous frame timecodes and accepts pasted HH:MM:SS values', () => {
+        const context = {
+            cutterEditorState: { fps: 30, duration: 90 },
+            cutterVideoInfo: null,
+            snapCutterTime: (value: number) => value,
+        };
+        const api = evaluate(
+            sourceFragment('function formatCutterTimecode', 'function getCutterVideo'),
+            context,
+            'formatCutterTimecode, parseCutterTimecode',
+        );
+
+        expect(api.formatCutterTimecode(1.5)).toBe('00:00:01:15');
+        expect(api.parseCutterTimecode('00:01:15')).toBe(75);
+        expect(api.parseCutterTimecode('00:00:01:15')).toBe(1.5);
+    });
+
+    test.each([
+        {
+            language: 'de',
+            texts: {
+                recoveryFound: 'Gespeicherte Bearbeitung gefunden',
+                noAudio: 'Keine Audiospur',
+                audioStream: 'Audiospur {index}',
+                channelSingular: 'Kanal',
+                channelPlural: 'Kanäle',
+                profileQuality: 'Qualität',
+                profileBalanced: 'Ausgewogen',
+                profileFast: 'Schnell',
+                profileArchive: 'Archiv',
+                encoderSoftware: 'Software',
+                encoderNvenc: 'NVIDIA NVENC',
+                encoderQsv: 'Intel Quick Sync',
+                encoderAmf: 'AMD AMF',
+            },
+            expectedAudio: ['Audiospur 1 (deu · aac · 1 Kanal)', 'Audiospur 3 (eng · opus · 2 Kanäle)'],
+            expectedProfiles: ['Qualität', 'Ausgewogen', 'Schnell', 'Archiv'],
+        },
+        {
+            language: 'en',
+            texts: {
+                recoveryFound: 'Saved edit found',
+                noAudio: 'No audio track',
+                audioStream: 'Audio track {index}',
+                channelSingular: 'channel',
+                channelPlural: 'channels',
+                profileQuality: 'Quality',
+                profileBalanced: 'Balanced',
+                profileFast: 'Fast',
+                profileArchive: 'Archive',
+                encoderSoftware: 'Software',
+                encoderNvenc: 'NVIDIA NVENC',
+                encoderQsv: 'Intel Quick Sync',
+                encoderAmf: 'AMD AMF',
+            },
+            expectedAudio: ['Audio track 1 (deu · aac · 1 channel)', 'Audio track 3 (eng · opus · 2 channels)'],
+            expectedProfiles: ['Quality', 'Balanced', 'Fast', 'Archive'],
+        },
+    ])('renders $language recovery, audio and export choices from the active cutter locale', ({ texts, expectedAudio, expectedProfiles }) => {
+        const selects = createCutterSelects();
+        const recoveryPanel = { hidden: true };
+        const recoveryText = { textContent: '' };
+        const context: Record<string, unknown> = {
+            cutterPendingProject: null,
+            cutterVideoInfo: {
+                audioStreams: [
+                    { index: 0, language: 'deu', codec: 'aac', channels: 1 },
+                    { index: 2, language: 'eng', codec: 'opus', channels: 2 },
+                ],
+            },
+            cutterAudioStreamIndex: 0,
+            cutterExportProfile: 'balanced',
+            cutterExportEncoder: 'software',
+            UI_TEXT: { cutter: texts },
+            byId: (id: string) => id === 'cutterRecoveryPanel'
+                ? recoveryPanel
+                : id === 'cutterRecoveryText'
+                    ? recoveryText
+                    : selects.get(id),
+            document: { createElement: () => ({ value: '', textContent: '' }) },
+        };
+        const api = evaluate(sourceFragment('function renderCutterProjectRecovery', 'async function loadCutterExportOptions'), context, 'renderCutterProjectRecovery, updateCutterAudioStreams, updateCutterExportControls');
+
+        api.renderCutterProjectRecovery({ trimStart: 12 });
+        api.updateCutterAudioStreams();
+        api.updateCutterExportControls({
+            profiles: [
+                { id: 'quality', label: 'Quality', container: 'mp4' },
+                { id: 'balanced', label: 'Balanced', container: 'mp4' },
+                { id: 'fast', label: 'Fast', container: 'mp4' },
+                { id: 'archive', label: 'Archive', container: 'mkv' },
+            ],
+            hardwareEncoders: ['h264_nvenc', 'h264_qsv', 'h264_amf'],
+        });
+
+        expect(recoveryPanel.hidden).toBe(false);
+        expect(recoveryText.textContent).toBe(texts.recoveryFound);
+        expect(selects.get('cutterAudioStream')?.options.map((option) => option.textContent)).toEqual(expectedAudio);
+        expect(selects.get('cutterExportProfile')?.options.map((option) => option.textContent)).toEqual(expectedProfiles);
+        expect(selects.get('cutterExportEncoder')?.options.map((option) => option.textContent)).toEqual([
+            texts.encoderSoftware,
+            texts.encoderNvenc,
+            texts.encoderQsv,
+            texts.encoderAmf,
+        ]);
+    });
+
+    test('uses active English project feedback for save, recovery and manual open actions', async () => {
+        const toasts: Array<[string, string]> = [];
+        const project = { duration: 90, fps: 30, trimStart: 5, trimEnd: 80, cuts: [], profile: 'balanced', encoder: 'software', audioStreamIndex: 0 };
+        let openResult: unknown = project;
+        const context: Record<string, unknown> = {
+            cutterEditorState: { duration: 90, fps: 30, trimStart: 0, trimEnd: 90, cuts: [] },
+            cutterFile: { token: 'source-capability' },
+            cutterExportProfile: 'balanced',
+            cutterExportEncoder: 'software',
+            cutterAudioStreamIndex: 0,
+            cutterPendingProject: project,
+            cutterRecoveryDecisionPending: true,
+            UI_TEXT: {
+                cutter: {
+                    projectSaved: 'Project saved',
+                    projectSaveFailed: 'Project could not be saved',
+                    projectRecoveryFailed: 'Project could not be restored',
+                    projectRecovered: 'Project restored',
+                    projectNotFound: 'No matching project found',
+                    projectOpened: 'Project opened',
+                },
+            },
+            applyCutterProject: () => true,
+            renderCutterProjectRecovery: () => undefined,
+            showAppToast: (message: string, type: string) => toasts.push([message, type]),
+            api: {
+                saveCutterProject: async () => true,
+                openCutterProject: async () => openResult,
+            },
+        };
+        context.getCutterProjectPayload = () => ({ trimStart: 0, trimEnd: 90, cuts: [], profile: 'balanced', encoder: 'software', audioStreamIndex: 0 });
+        const persistence = evaluate(sourceFragment('async function persistCutterProject', 'function scheduleCutterAutosave'), context, 'persistCutterProject');
+        context.persistCutterProject = persistence.persistCutterProject;
+        const actions = evaluate(sourceFragment('async function recoverCutterProject', 'function setCutterExportProfile'), context, 'recoverCutterProject, openCutterProject');
+
+        await persistence.persistCutterProject(true);
+        await actions.recoverCutterProject();
+        await actions.openCutterProject();
+        openResult = null;
+        await actions.openCutterProject();
+
+        expect(toasts).toEqual([
+            ['Project saved', 'info'],
+            ['Project restored', 'info'],
+            ['Project opened', 'info'],
+            ['No matching project found', 'warn'],
+        ]);
+    });
+
     test('rejects a PNG drop before requesting a capability or loader', async () => {
         const listeners = new Map<string, (event: Record<string, unknown>) => Promise<void> | void>();
         let capabilityRequests = 0;
@@ -105,6 +276,7 @@ describe('cutter production paths', () => {
             applyCutterProject: () => true,
             renderCutterProjectRecovery: () => undefined,
             showAppToast: () => undefined,
+            UI_TEXT: { cutter: { projectNotFound: 'No matching project found', projectOpened: 'Project opened' } },
             api: {
                 openCutterProject: async () => {
                     opens += 1;
@@ -158,6 +330,7 @@ describe('cutter production paths', () => {
             cutterHistoryPast: [],
             cutterHistoryFuture: [],
             cutterActiveCutId: null,
+            UI_TEXT: { cutter: englishCutterChoiceTexts },
             byId: (id: string) => selects.get(id),
             document: { createElement: () => ({ value: '', textContent: '' }) },
             renderCutterEditor: () => undefined,
@@ -206,6 +379,7 @@ describe('cutter production paths', () => {
             cutterExportOptions: undefined,
             cutterLoadGeneration: 4,
             cutterFile: file,
+            UI_TEXT: { cutter: englishCutterChoiceTexts },
             byId: (id: string) => selects.get(id),
             document: { createElement: () => ({ value: '', textContent: '' }) },
             api: { getCutterExportOptions: async () => { throw new Error('probe failed'); } },

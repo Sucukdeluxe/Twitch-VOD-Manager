@@ -21,4 +21,25 @@ describe('createExportableConfig', () => {
             expect(serialized).not.toContain(forbidden);
         }
     });
+
+    it('removes camelCase and separator variants of secret fields', () => {
+        const exported = createExportableConfig({
+            accessToken: 'camel-access',
+            refreshToken: 'camel-refresh',
+            clientSecret: 'camel-secret',
+            'client-secret': 'dash-secret',
+            'AUTH TOKEN': 'spaced-token',
+            discordWebhookUrl: 'https://discord.com/api/webhooks/camel',
+            nested: {
+                AuthorizationHeader: 'Bearer nested-token',
+                safeValue: 'keep-me',
+            },
+        });
+        const serialized = JSON.stringify(exported);
+
+        expect(exported).toMatchObject({ nested: { safeValue: 'keep-me' } });
+        for (const forbidden of ['camel-access', 'camel-refresh', 'camel-secret', 'dash-secret', 'spaced-token', 'nested-token', '/webhooks/camel']) {
+            expect(serialized).not.toContain(forbidden);
+        }
+    });
 });

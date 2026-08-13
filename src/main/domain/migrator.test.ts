@@ -107,11 +107,48 @@ describe('migrateJsonToSqlite', () => {
         expect(count?.c).toBe(2);
     });
 
+    test('scrubs secret aliases reintroduced into legacy files after migration', () => {
+        const configPath = writeJson('config.json', { language: 'de' });
+        migrateJsonToSqlite({ db, appDataDir });
+        fs.writeFileSync(configPath, JSON.stringify({ language: 'en', clientSecret: 'late-client-secret' }), 'utf-8');
+        fs.writeFileSync(`${configPath}.v4-backup`, JSON.stringify({ language: 'de', accessToken: 'late-access-token' }), 'utf-8');
+
+        const second = migrateJsonToSqlite({ db, appDataDir });
+
+        expect(second).toMatchObject({ alreadyApplied: true, errors: [] });
+        const persistedFiles = `${fs.readFileSync(configPath, 'utf-8')}\n${fs.readFileSync(`${configPath}.v4-backup`, 'utf-8')}`;
+        for (const forbidden of ['late-client-secret', 'late-access-token', 'clientSecret', 'accessToken']) {
+            expect(persistedFiles).not.toContain(forbidden);
+        }
+        expect(JSON.parse(db.get<{ value: string }>('SELECT value FROM config_kv WHERE key = ?', ['language'])!.value)).toBe('de');
+    });
+
     test('writes .v4-backup of source JSONs', () => {
         const configPath = writeJson('config.json', { language: 'en' });
         migrateJsonToSqlite({ db, appDataDir });
         expect(fs.existsSync(configPath + '.v4-backup')).toBe(true);
         expect(fs.readFileSync(configPath + '.v4-backup', 'utf-8')).toContain('"language": "en"');
+    });
+
+    test('does not scrub recoverable plaintext secrets before the SQLite transaction commits', () => {
+        const configPath = writeJson('config.json', { language: 'de', client_secret: 'must-survive' });
+        const transactionDb: DbHandle = {
+            ...db,
+            transaction<R>(fn: () => R): R {
+                return db.transaction(() => {
+                    const result = fn();
+                    expect(fs.readFileSync(configPath, 'utf-8')).toContain('must-survive');
+                    return result;
+                });
+            },
+        };
+        const secrets = createSecretStore(transactionDb, new MemorySecureStorage());
+
+        const result = migrateJsonToSqlite({ db: transactionDb, appDataDir, secrets });
+
+        expect(result.errors).toEqual([]);
+        expect(secrets.get('twitch_client_secret')).toBe('must-survive');
+        expect(fs.readFileSync(configPath, 'utf-8')).not.toContain('must-survive');
     });
 
     test('malformed JSON is logged + skipped', () => {
@@ -248,6 +285,26 @@ describe('migrateJsonToSqlite', () => {
         expect(db.get('SELECT key FROM config_kv WHERE key = ?', ['discord_webhook_url'])).toBeUndefined();
     });
 
+    test('migrates camel and separator secret aliases and scrubs every secret-bearing key', () => {
+        const configPath = writeJson('config.json', {
+            clientSecret: 'camel-client-secret',
+            'discord-webhook-url': 'https://discord.com/api/webhooks/camel',
+            accessToken: 'obsolete-access-token',
+            language: 'de',
+        });
+        const secrets = createSecretStore(db, new MemorySecureStorage());
+
+        const result = migrateJsonToSqlite({ db, appDataDir, secrets });
+
+        expect(result.errors).toEqual([]);
+        expect(secrets.get('twitch_client_secret')).toBe('camel-client-secret');
+        expect(secrets.get('discord_webhook_url')).toBe('https://discord.com/api/webhooks/camel');
+        const persistedFiles = `${fs.readFileSync(configPath, 'utf-8')}\n${fs.readFileSync(configPath + '.v4-backup', 'utf-8')}`;
+        for (const forbidden of ['camel-client-secret', '/webhooks/camel', 'obsolete-access-token', 'clientSecret', 'discord-webhook-url', 'accessToken']) {
+            expect(persistedFiles).not.toContain(forbidden);
+        }
+    });
+
     test('keeps plaintext legacy secrets untouched when production encryption is unavailable', () => {
         const configPath = writeJson('config.json', { client_secret: 'must-survive', language: 'de' });
         const secrets = createSecretStore(db, new MemorySecureStorage());
@@ -260,7 +317,7 @@ describe('migrateJsonToSqlite', () => {
         expect(db.get('SELECT name FROM migrations_applied WHERE name = ?', ['authoritative-state-v1'])).toBeUndefined();
     });
 
-    test('keeps plaintext legacy secrets when the sanitized backup cannot be published', () => {
+    test('commits recovered secrets before reporting a legacy scrub failure', () => {
         const configPath = writeJson('config.json', { client_secret: 'must-survive', language: 'de' });
         fs.mkdirSync(`${configPath}.v4-backup`);
         const secrets = createSecretStore(db, new MemorySecureStorage());
@@ -269,8 +326,8 @@ describe('migrateJsonToSqlite', () => {
 
         expect(result.errors).toHaveLength(1);
         expect(fs.readFileSync(configPath, 'utf-8')).toContain('must-survive');
-        expect(db.all('SELECT * FROM config_kv')).toEqual([]);
-        expect(db.all('SELECT * FROM app_secrets')).toEqual([]);
-        expect(db.get('SELECT name FROM migrations_applied WHERE name = ?', ['authoritative-state-v1'])).toBeUndefined();
+        expect(JSON.parse(db.get<{ value: string }>('SELECT value FROM config_kv WHERE key = ?', ['language'])!.value)).toBe('de');
+        expect(secrets.get('twitch_client_secret')).toBe('must-survive');
+        expect(db.get<{ name: string }>('SELECT name FROM migrations_applied WHERE name = ?', ['authoritative-state-v1'])?.name).toBe('authoritative-state-v1');
     });
 });
