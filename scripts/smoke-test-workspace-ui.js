@@ -352,36 +352,51 @@ async function run() {
       check(updateModalButtons.skipLineHeight >= 14, `Update skip-version line height is too small: ${updateModalButtons.skipLineHeight}`);
 
       await win.emulateMedia({ reducedMotion: 'reduce' });
-      await win.evaluate(() => {
-        updateReady = false;
-        openUpdateModal({
-          version: '9.9.9',
-          releaseNotes: '- Stable Windows shell registration\n- Smoother update details'
-        });
-      });
-      const captureUpdateChangelog = () => win.evaluate(() => {
-        const panel = document.getElementById('updateChangelogPanel');
-        const toggle = document.getElementById('updateChangelogToggle');
-        const style = panel ? getComputedStyle(panel) : null;
-        return {
+       await win.evaluate(() => {
+         updateReady = false;
+         openUpdateModal({
+           version: '9.9.9',
+           releaseNotes: Array.from({ length: 24 }, (_, index) => `- Update detail ${index + 1}`).join('\n')
+         });
+       });
+       const captureUpdateChangelog = () => win.evaluate(() => {
+         const panel = document.getElementById('updateChangelogPanel');
+         const inner = panel?.querySelector('.update-changelog-panel-inner');
+         const toggle = document.getElementById('updateChangelogToggle');
+         const style = panel ? getComputedStyle(panel) : null;
+         const innerStyle = inner ? getComputedStyle(inner) : null;
+         return {
           hidden: panel?.hidden || false,
           expanded: panel?.classList.contains('is-expanded') || false,
           ariaHidden: panel?.getAttribute('aria-hidden') || '',
-          ariaExpanded: toggle?.getAttribute('aria-expanded') || '',
-          height: panel?.getBoundingClientRect().height || 0,
-          transitionDuration: style?.transitionDuration || ''
-        };
-      });
+           ariaExpanded: toggle?.getAttribute('aria-expanded') || '',
+           height: panel?.getBoundingClientRect().height || 0,
+           scrollHeight: panel?.scrollHeight || 0,
+           innerHeight: inner?.getBoundingClientRect().height || 0,
+           innerScrollHeight: inner?.scrollHeight || 0,
+           innerOverflowY: innerStyle?.overflowY || '',
+           transitionProperty: style?.transitionProperty || '',
+           transitionDuration: style?.transitionDuration || '',
+           transitionDelay: style?.transitionDelay || ''
+         };
+       });
       const changelogCollapsed = await captureUpdateChangelog();
       await win.locator('#updateChangelogToggle').click();
-      await win.waitForTimeout(100);
+      await win.waitForTimeout(140);
       const changelogOpening = await captureUpdateChangelog();
-      await win.waitForTimeout(260);
+      await win.waitForTimeout(400);
       const changelogExpanded = await captureUpdateChangelog();
+      const changelogScroll = await win.evaluate(() => {
+        const inner = document.querySelector('#updateChangelogPanel .update-changelog-panel-inner');
+        if (!(inner instanceof HTMLElement)) return { exists: false, before: 0, after: 0 };
+        const before = inner.scrollTop;
+        inner.scrollTop = 80;
+        return { exists: true, before, after: inner.scrollTop };
+      });
       await win.locator('#updateChangelogToggle').click();
-      await win.waitForTimeout(100);
+      await win.waitForTimeout(140);
       const changelogClosing = await captureUpdateChangelog();
-      await win.waitForTimeout(260);
+      await win.waitForTimeout(400);
       const changelogClosed = await captureUpdateChangelog();
       await win.evaluate(() => dismissUpdateModal());
       await win.emulateMedia({ reducedMotion: 'no-preference' });
@@ -393,11 +408,20 @@ async function run() {
         closed: changelogClosed
       };
       check(!changelogCollapsed.hidden && !changelogCollapsed.expanded && changelogCollapsed.ariaHidden === 'true' && changelogCollapsed.ariaExpanded === 'false', `Collapsed changelog does not remain animatable: ${JSON.stringify(changelogCollapsed)}`);
-      check(changelogOpening.expanded && changelogOpening.height > changelogCollapsed.height && changelogOpening.height < changelogExpanded.height, `Changelog does not visibly expand through an intermediate frame: ${JSON.stringify({ changelogCollapsed, changelogOpening, changelogExpanded })}`);
-      check(changelogExpanded.expanded && changelogExpanded.ariaHidden === 'false' && changelogExpanded.ariaExpanded === 'true' && changelogExpanded.height > 0, `Expanded changelog state is incorrect: ${JSON.stringify(changelogExpanded)}`);
+       check(changelogOpening.expanded && changelogOpening.innerHeight > changelogCollapsed.innerHeight && changelogOpening.innerHeight < changelogExpanded.innerHeight, `Changelog does not visibly expand through an intermediate frame: ${JSON.stringify({ changelogCollapsed, changelogOpening, changelogExpanded })}`);
+       check(changelogExpanded.expanded && changelogExpanded.ariaHidden === 'false' && changelogExpanded.ariaExpanded === 'true' && changelogExpanded.height > 0, `Expanded changelog state is incorrect: ${JSON.stringify(changelogExpanded)}`);
+       check(changelogExpanded.height <= 321 && changelogExpanded.innerScrollHeight > changelogExpanded.innerHeight + 1 && ['auto', 'scroll'].includes(changelogExpanded.innerOverflowY), `Long changelog does not remain bounded and scrollable: ${JSON.stringify(changelogExpanded)}`);
+       checks.updateChangelogScroll = changelogScroll;
+       check(changelogScroll.exists && changelogScroll.after > changelogScroll.before, `Expanded changelog cannot actually scroll: ${JSON.stringify(changelogScroll)}`);
       check(changelogClosing.height > changelogClosed.height && changelogClosing.height < changelogExpanded.height, `Changelog does not visibly collapse through an intermediate frame: ${JSON.stringify({ changelogExpanded, changelogClosing, changelogClosed })}`);
       check(!changelogClosed.expanded && changelogClosed.ariaHidden === 'true' && changelogClosed.ariaExpanded === 'false' && changelogClosed.height === 0, `Collapsed changelog state is incorrect: ${JSON.stringify(changelogClosed)}`);
       check(!/^0\.01ms(?:, 0\.01ms)*$/.test(changelogOpening.transitionDuration), `Changelog animation is disabled by reduced-motion fallback: ${changelogOpening.transitionDuration}`);
+       const changelogDurations = changelogOpening.transitionDuration.split(',').map((duration) => duration.trim().endsWith('ms') ? Number.parseFloat(duration) : Number.parseFloat(duration) * 1000);
+       const changelogProperties = changelogOpening.transitionProperty.split(',').map((property) => property.trim());
+       const changelogDelays = changelogOpening.transitionDelay.split(',').map((delay) => delay.trim().endsWith('ms') ? Number.parseFloat(delay) : Number.parseFloat(delay) * 1000);
+       const gridTransitionIndex = changelogProperties.indexOf('grid-template-rows');
+       check(gridTransitionIndex >= 0 && changelogDurations[gridTransitionIndex] >= 400 && changelogDelays[gridTransitionIndex] === 0, `Changelog grid expansion is not explicitly slowed: ${JSON.stringify(changelogOpening)}`);
+       check(changelogOpening.transitionDuration === changelogClosing.transitionDuration, `Changelog expansion and collapse use different timings: ${changelogOpening.transitionDuration} / ${changelogClosing.transitionDuration}`);
 
       await win.evaluate(() => window.setDownloadPendingUi());
       await win.locator('#workspaceUpdateButton').focus();
@@ -405,14 +429,26 @@ async function run() {
       const downloadingKeyboardState = await win.evaluate(() => {
         const button = document.getElementById('workspaceUpdateButton');
         const popover = document.querySelector('.workspace-update-popover');
+        const progress = document.getElementById('updateProgress');
+        const track = document.getElementById('updateProgressGauge');
         const style = popover ? getComputedStyle(popover) : null;
+        const popoverRect = popover?.getBoundingClientRect();
+        const progressRect = progress?.getBoundingClientRect();
+        const trackRect = track?.getBoundingClientRect();
         return {
           focused: document.activeElement === button,
           disabled: button?.disabled || false,
           ariaDisabled: button?.getAttribute('aria-disabled') || '',
           ariaExpanded: button?.getAttribute('aria-expanded') || '',
           visible: Boolean(style && style.visibility === 'visible' && Number(style.opacity) > 0),
-          state: document.getElementById('updateBanner')?.dataset.updateState || ''
+          state: document.getElementById('updateBanner')?.dataset.updateState || '',
+          progressWithinPopover: Boolean(popoverRect && progressRect && progressRect.width > 0 && progressRect.height > 0 && progressRect.left >= popoverRect.left + 7 && progressRect.right <= popoverRect.right - 7 && progressRect.top >= popoverRect.top && progressRect.bottom <= popoverRect.bottom),
+          trackWithinPopover: Boolean(popoverRect && trackRect && trackRect.width > 0 && trackRect.height > 0 && trackRect.left >= popoverRect.left + 7 && trackRect.right <= popoverRect.right - 7 && trackRect.top >= popoverRect.top && trackRect.bottom <= popoverRect.bottom),
+          geometry: popoverRect && progressRect && trackRect ? {
+            popover: { left: popoverRect.left, top: popoverRect.top, right: popoverRect.right, bottom: popoverRect.bottom },
+            progress: { left: progressRect.left, top: progressRect.top, right: progressRect.right, bottom: progressRect.bottom, width: progressRect.width, height: progressRect.height },
+            track: { left: trackRect.left, top: trackRect.top, right: trackRect.right, bottom: trackRect.bottom, width: trackRect.width, height: trackRect.height }
+          } : null
         };
       });
       await win.keyboard.press('Enter');
@@ -422,6 +458,12 @@ async function run() {
       check(downloadingKeyboardState.ariaDisabled === 'true', 'Downloading update trigger does not communicate its unavailable action');
       check(downloadingKeyboardState.visible && downloadingKeyboardState.ariaExpanded === 'true', 'Downloading progress is hidden from keyboard focus');
       check(downloadingKeyboardState.state === 'downloading' && downloadingStateAfterEnter === 'downloading', 'Keyboard activation changes the downloading state');
+      check(downloadingKeyboardState.progressWithinPopover && downloadingKeyboardState.trackWithinPopover, `Downloading progress exceeds the update popover: ${JSON.stringify(downloadingKeyboardState.geometry)}`);
+      const updateProgressViewport = await win.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+      await win.screenshot({
+        path: path.join(artifactDir, `workspace-update-downloading-${updateProgressViewport.width}x${updateProgressViewport.height}.png`),
+        fullPage: true
+      });
       await win.evaluate(() => window.hideUpdateBanner());
 
       await win.evaluate(() => window.setUpdateBannerAvailableUi({ version: '9.9.9' }));
@@ -657,12 +699,12 @@ async function run() {
       updateStatus(UI_TEXT.status.noLogin, false, 'public');
       document.getElementById('smartSchedulerToggle').checked = true;
     });
-    await win.waitForTimeout(80);
+    await win.waitForTimeout(240);
     const downloadSettingsWide = await win.evaluate(() => {
       const tab = document.getElementById('settingsTab');
       const card = tab?.querySelector('.settings-card[data-settings-pane="downloads"]');
       const layout = card?.querySelector('.download-settings-layout');
-      const checkbox = card?.querySelector('.toggle-row input[type="checkbox"]');
+      const checkbox = card?.querySelector('#smartSchedulerToggle');
       const label = checkbox?.closest('.toggle-row')?.querySelector('span');
       const dot = document.getElementById('statusDot');
       const text = document.getElementById('statusText');
@@ -673,6 +715,7 @@ async function run() {
         sections: card?.querySelectorAll('.download-settings-section').length || 0,
         checkboxWidth: checkbox ? checkbox.getBoundingClientRect().width : 0,
         checkboxBackground: checkbox ? getComputedStyle(checkbox).backgroundImage : '',
+        checkboxColor: checkbox ? getComputedStyle(checkbox).backgroundColor : '',
         labelFontSize: label ? Number.parseFloat(getComputedStyle(label).fontSize) : 0,
         statusText: text?.textContent?.trim() || '',
         statusTitle: text?.getAttribute('title') || '',
@@ -683,6 +726,8 @@ async function run() {
     check(downloadSettingsWide.cardWidth >= downloadSettingsWide.tabWidth * 0.8, `Download Settings wastes the wide workspace: ${downloadSettingsWide.cardWidth}/${downloadSettingsWide.tabWidth}`);
     check(downloadSettingsWide.columns === 2 && downloadSettingsWide.sections === 5, `Download Settings is not arranged as five semantic groups in two columns: ${downloadSettingsWide.columns}/${downloadSettingsWide.sections}`);
     check(downloadSettingsWide.checkboxWidth >= 18 && downloadSettingsWide.checkboxBackground !== 'none', `Checked Download Settings toggle has no clear checkmark: ${downloadSettingsWide.checkboxWidth}/${downloadSettingsWide.checkboxBackground}`);
+    check(downloadSettingsWide.checkboxColor === 'rgb(34, 197, 94)', `Checked Dark Settings toggle is not green: ${downloadSettingsWide.checkboxColor}`);
+    check(/23111111/i.test(downloadSettingsWide.checkboxBackground), `Checked Dark Settings toggle does not use a black checkmark: ${downloadSettingsWide.checkboxBackground}`);
     check(downloadSettingsWide.labelFontSize >= 13, `Download Settings toggle labels remain too small: ${downloadSettingsWide.labelFontSize}px`);
     check(downloadSettingsWide.statusText === 'Public-Modus · öffentliche VODs verfügbar', `Public status copy is unclear: ${downloadSettingsWide.statusText}`);
     check(downloadSettingsWide.statusPublic && downloadSettingsWide.statusTitle.includes('Twitch-API'), `Public status lacks orange state or explanatory API tooltip: ${downloadSettingsWide.statusPublic}/${downloadSettingsWide.statusTitle}`);
@@ -701,6 +746,116 @@ async function run() {
     checks.downloadSettingsNarrow = downloadSettingsNarrow;
     check(downloadSettingsNarrow.columns === 1, `Narrow Download Settings does not collapse to one column: ${downloadSettingsNarrow.columns}`);
     check(downloadSettingsNarrow.documentOverflow <= 1 && downloadSettingsNarrow.tabOverflow <= 1, `Narrow Download Settings causes horizontal overflow: ${JSON.stringify(downloadSettingsNarrow)}`);
+
+    const diagnosticLayouts = [];
+    for (const target of [TARGETS[2], TARGETS[1], TARGETS[0]]) {
+      await win.setViewportSize(target);
+      for (const pane of [
+        { id: 'debug', card: '[data-settings-pane="debug"]', output: 'debugLogOutput' },
+        { id: 'metrics', card: '[data-settings-pane="metrics"]', output: 'runtimeMetricsOutput' }
+      ]) {
+        await win.evaluate((paneId) => {
+          window.showTab('settings');
+          window.setSettingsPane(paneId);
+        }, pane.id);
+        await win.waitForTimeout(520);
+        const layout = await win.evaluate(({ cardSelector, outputId }) => {
+          const tab = document.getElementById('settingsTab');
+          const card = tab?.querySelector(`.settings-card${cardSelector}`);
+          const output = document.getElementById(outputId);
+          const tabRect = tab?.getBoundingClientRect();
+          const cardRect = card?.getBoundingClientRect();
+          const outputRect = output?.getBoundingClientRect();
+          const rect = (value) => value ? { left: value.left, top: value.top, right: value.right, bottom: value.bottom, width: value.width, height: value.height } : null;
+          return {
+            tabWidth: tabRect?.width || 0,
+            tabHeight: tabRect?.height || 0,
+            cardWidth: cardRect?.width || 0,
+            cardHeight: cardRect?.height || 0,
+            outputWidth: outputRect?.width || 0,
+            outputHeight: outputRect?.height || 0,
+            maxHeight: output ? getComputedStyle(output).maxHeight : '',
+            tabRect: rect(tabRect),
+            cardRect: rect(cardRect),
+            outputRect: rect(outputRect),
+            documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            tabOverflow: tab ? tab.scrollWidth - tab.clientWidth : 0
+          };
+        }, { cardSelector: pane.card, outputId: pane.output });
+        diagnosticLayouts.push({ target, pane: pane.id, ...layout });
+        await win.screenshot({
+          path: path.join(artifactDir, `workspace-settings-${pane.id}-${target.width}x${target.height}.png`),
+          fullPage: true
+        });
+      }
+    }
+    checks.diagnosticLayouts = diagnosticLayouts;
+    check(diagnosticLayouts.every((layout) => layout.cardWidth >= layout.tabWidth * 0.85 && layout.outputWidth >= layout.tabWidth * 0.85), `Settings diagnostics waste horizontal workspace: ${JSON.stringify(diagnosticLayouts)}`);
+    check(diagnosticLayouts.every((layout) => layout.outputHeight >= layout.tabHeight * 0.55 && layout.maxHeight === 'none'), `Settings diagnostics waste vertical workspace: ${JSON.stringify(diagnosticLayouts)}`);
+    check(diagnosticLayouts.every((layout) => layout.tabRect && layout.cardRect && layout.outputRect && layout.cardRect.left >= layout.tabRect.left - 1 && layout.cardRect.right <= layout.tabRect.right + 1 && layout.cardRect.top >= layout.tabRect.top - 1 && layout.cardRect.bottom <= layout.tabRect.bottom + 1 && layout.outputRect.left >= layout.cardRect.left - 1 && layout.outputRect.right <= layout.cardRect.right + 1 && layout.outputRect.top >= layout.cardRect.top - 1 && layout.outputRect.bottom <= layout.cardRect.bottom + 1), `Settings diagnostics exceed their pane bounds: ${JSON.stringify(diagnosticLayouts)}`);
+    check(diagnosticLayouts.every((layout) => layout.documentOverflow <= 1 && layout.tabOverflow <= 1), `Settings diagnostics cause horizontal overflow: ${JSON.stringify(diagnosticLayouts)}`);
+
+    await win.setViewportSize({ width: 1280, height: 800 });
+    await win.evaluate(() => {
+      window.showTab('settings');
+      window.setSettingsPane('storage');
+    });
+    await win.waitForTimeout(520);
+    const cleanupSelects = [];
+    for (const language of ['de', 'en']) {
+      await win.evaluate((nextLanguage) => window.changeLanguage(nextLanguage), language);
+      await win.waitForTimeout(160);
+      const states = await win.evaluate(() => ['autoCleanupTarget', 'autoCleanupAction'].map((id) => {
+        const select = document.getElementById(id);
+        const style = select ? getComputedStyle(select) : null;
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (context && style) context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        const options = [...(select?.options || [])].map((option) => {
+          const text = option.textContent?.trim() || '';
+          return { text, textWidth: context?.measureText(text).width || 0 };
+        });
+        const availableWidth = select && style
+          ? select.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)
+          : 0;
+        const availableHeight = select && style
+          ? select.clientHeight - Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom)
+          : 0;
+        const lineHeight = style ? Number.parseFloat(style.lineHeight) : 0;
+        const rect = select?.getBoundingClientRect();
+        return {
+          id,
+          exists: select instanceof HTMLSelectElement,
+          visible: Boolean(rect && rect.width > 0 && rect.height > 0 && style && style.display !== 'none' && style.visibility !== 'hidden'),
+          contextAvailable: Boolean(context),
+          optionCount: options.length,
+          options,
+          availableWidth,
+          availableHeight,
+          lineHeight
+        };
+      }));
+      cleanupSelects.push({ language, states });
+    }
+    checks.cleanupSelects = cleanupSelects;
+    check(cleanupSelects.every(({ states }) => states.length === 2 && states.every((select) => select.exists && select.visible && select.contextAvailable && select.optionCount > 0 && Number.isFinite(select.availableWidth) && select.availableWidth > 0 && Number.isFinite(select.availableHeight) && select.availableHeight > 0 && Number.isFinite(select.lineHeight) && select.lineHeight > 0)), `Cleanup select measurement is incomplete: ${JSON.stringify(cleanupSelects)}`);
+    check(cleanupSelects.every(({ states }) => states.every((select) => select.options.every((option) => select.availableWidth >= option.textWidth + 2))), `Cleanup select text is horizontally clipped: ${JSON.stringify(cleanupSelects)}`);
+    check(cleanupSelects.every(({ states }) => states.every((select) => select.availableHeight + 1 >= select.lineHeight)), `Cleanup select text is vertically clipped: ${JSON.stringify(cleanupSelects)}`);
+    const cleanupOverflow = await win.evaluate(() => {
+      const tab = document.getElementById('settingsTab');
+      return {
+        document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        tab: tab ? tab.scrollWidth - tab.clientWidth : 0
+      };
+    });
+    checks.cleanupOverflow = cleanupOverflow;
+    check(cleanupOverflow.document <= 1 && cleanupOverflow.tab <= 1, `Cleanup Settings causes horizontal overflow: ${JSON.stringify(cleanupOverflow)}`);
+    await win.evaluate(() => window.changeLanguage('de'));
+    await win.waitForTimeout(160);
+    await win.screenshot({
+      path: path.join(artifactDir, 'workspace-settings-storage-1280x800.png'),
+      fullPage: true
+    });
     await win.setViewportSize(TARGETS[0]);
 
     const dynamicQueue = await win.evaluate(() => {
@@ -932,7 +1087,6 @@ async function run() {
     check(profileGrammarAndAlignment.centerDeltas.length === 3 && profileGrammarAndAlignment.centerDeltas.every((delta) => delta <= 1), `Profile metadata icons and values are vertically misaligned: ${JSON.stringify(profileGrammarAndAlignment)}`);
     check(new Set(profileGrammarAndAlignment.lineHeights).size === 1 && profileGrammarAndAlignment.lineHeights[0] === '18px', `Profile metadata does not share one 18px line height: ${JSON.stringify(profileGrammarAndAlignment.lineHeights)}`);
 
-    await win.setViewportSize({ width: 1600, height: 900 });
     const captureTopNavigationLayout = async (language) => {
       await win.evaluate((nextLanguage) => window.changeLanguage(nextLanguage), language);
       await win.waitForTimeout(40);
@@ -944,16 +1098,26 @@ async function run() {
           text: label?.textContent?.trim() || '',
           left: rect.left,
           width: rect.width,
-          truncated: Boolean(label && label.scrollWidth > label.clientWidth + 1)
+          truncated: Boolean(label && label.scrollWidth > label.clientWidth + 1),
+          active: button.classList.contains('active'),
+          color: getComputedStyle(button).color,
+          fontSize: label ? Number.parseFloat(getComputedStyle(label).fontSize) : 0
         };
       }));
     };
-    const englishTopNavigation = await captureTopNavigationLayout('en');
-    const germanTopNavigation = await captureTopNavigationLayout('de');
-    checks.topNavigationLocaleLayout = { english: englishTopNavigation, german: germanTopNavigation };
-    check(germanTopNavigation.find((item) => item.tab === 'merge')?.text === 'Videos zusammenfügen', `German merge navigation says "${germanTopNavigation.find((item) => item.tab === 'merge')?.text}"`);
-    check(germanTopNavigation.every((item) => !item.truncated), `German top navigation truncates: ${germanTopNavigation.filter((item) => item.truncated).map((item) => item.text).join(', ')}`);
-    check(englishTopNavigation.every((item, index) => Math.abs(item.left - germanTopNavigation[index].left) <= 1 && Math.abs(item.width - germanTopNavigation[index].width) <= 1), 'Top navigation geometry shifts when switching language');
+    const topNavigationLocaleLayout = [];
+    for (const target of [TARGETS[2], TARGETS[1]]) {
+      await win.setViewportSize(target);
+      const english = await captureTopNavigationLayout('en');
+      const german = await captureTopNavigationLayout('de');
+      topNavigationLocaleLayout.push({ target, english, german });
+    }
+    checks.topNavigationLocaleLayout = topNavigationLocaleLayout;
+    check(topNavigationLocaleLayout.every(({ german }) => german.length === TABS.length && german.find((item) => item.tab === 'merge')?.text === 'Videos zusammenfügen'), `German merge navigation is missing or incorrect: ${JSON.stringify(topNavigationLocaleLayout)}`);
+    check(topNavigationLocaleLayout.every(({ german }) => german.every((item) => !item.truncated)), `German top navigation truncates: ${JSON.stringify(topNavigationLocaleLayout)}`);
+    check(topNavigationLocaleLayout.every(({ german }) => german.every((item) => item.fontSize >= 13)), `Top navigation labels are not one size larger: ${JSON.stringify(topNavigationLocaleLayout)}`);
+    check(topNavigationLocaleLayout.every(({ german }) => german.filter((item) => !item.active).every((item) => item.color === 'rgb(255, 255, 255)')), `Inactive top navigation labels are not white: ${JSON.stringify(topNavigationLocaleLayout)}`);
+    check(topNavigationLocaleLayout.every(({ english, german }) => english.length === german.length && english.every((item, index) => Math.abs(item.left - german[index].left) <= 1 && Math.abs(item.width - german[index].width) <= 1)), `Top navigation geometry shifts when switching language: ${JSON.stringify(topNavigationLocaleLayout)}`);
 
     const germanTextAudit = await win.evaluate(() => {
       const flatten = (value) => Object.values(value).flatMap((entry) => typeof entry === 'string' ? [entry] : entry && typeof entry === 'object' ? flatten(entry) : []);
@@ -1158,10 +1322,23 @@ async function run() {
         const background = effectiveBackground(element);
         return { foreground, background, contrast: contrast(parse(foreground), parse(background)) };
       };
+      const checkbox = document.getElementById('sidebarSplitViewToggle');
+      if (checkbox instanceof HTMLInputElement) checkbox.checked = true;
+      const checkboxStyle = checkbox ? getComputedStyle(checkbox) : null;
+      const inactiveNavigation = document.querySelector('.top-nav button[data-tab]:not(.active)');
+      const primaryProbe = document.createElement('span');
+      primaryProbe.style.color = 'var(--workspace-primary)';
+      document.body.appendChild(primaryProbe);
+      const primaryColor = getComputedStyle(primaryProbe).color;
+      primaryProbe.remove();
       return {
         bodyClass: document.body.className,
         bodyBackground: getComputedStyle(document.body).backgroundColor,
         bodyColor: getComputedStyle(document.body).color,
+        checkboxColor: checkboxStyle?.backgroundColor || '',
+        checkboxBackground: checkboxStyle?.backgroundImage || '',
+        primaryColor,
+        inactiveNavigationColor: inactiveNavigation ? getComputedStyle(inactiveNavigation).color : '',
         title: pair('#pageTitle'),
         contextHeading: pair('[data-context-for="settings"] [data-context-heading]'),
         settingsSearch: pair('#settingsSearchInput'),
@@ -1172,29 +1349,37 @@ async function run() {
     await win.evaluate(() => window.setSettingsPane('design'));
     await win.emulateMedia({ colorScheme: 'dark' });
     await win.locator('#workspaceThemePicker [data-theme="twitch"]').click();
-    await win.waitForTimeout(160);
+    await win.waitForTimeout(260);
     const darkTheme = await captureTheme();
+    await win.locator('#workspaceThemePicker [data-theme="system"]').click();
+    await win.waitForTimeout(260);
+    const systemDarkTheme = await captureTheme();
     await win.locator('#workspaceThemePicker [data-theme="light"]').click();
-    await win.waitForTimeout(160);
+    await win.waitForTimeout(260);
     const lightTheme = await captureTheme();
     await win.emulateMedia({ colorScheme: 'light' });
     await win.locator('#workspaceThemePicker [data-theme="system"]').click();
-    await win.waitForTimeout(160);
+    await win.waitForTimeout(260);
     const systemLightTheme = await captureTheme();
-    checks.themes = { darkTheme, lightTheme, systemLightTheme };
+    checks.themes = { darkTheme, systemDarkTheme, lightTheme, systemLightTheme };
 
-    for (const [name, theme] of Object.entries({ dark: darkTheme, light: lightTheme, systemLight: systemLightTheme })) {
+    for (const [name, theme] of Object.entries({ dark: darkTheme, systemDark: systemDarkTheme, light: lightTheme, systemLight: systemLightTheme })) {
       check(Boolean(theme.title && theme.contextHeading && theme.settingsSearch && theme.toolbarAction), `${name} theme is missing a representative computed-style target`);
       for (const [pairName, pair] of Object.entries({ title: theme.title, contextHeading: theme.contextHeading, settingsSearch: theme.settingsSearch, toolbarAction: theme.toolbarAction })) {
         if (pair) check(pair.contrast >= 4.5, `${name} ${pairName} contrast is ${pair.contrast.toFixed(2)}:1`);
       }
+      check(theme.inactiveNavigationColor === theme.bodyColor, `${name} inactive navigation color ${theme.inactiveNavigationColor} does not match primary text ${theme.bodyColor}`);
     }
     check(darkTheme.bodyClass === 'theme-twitch', `Dark theme body class is ${darkTheme.bodyClass}`);
+    check(systemDarkTheme.bodyClass === 'theme-system', `System-Dark theme body class is ${systemDarkTheme.bodyClass}`);
     check(lightTheme.bodyClass === 'theme-light', `Light theme body class is ${lightTheme.bodyClass}`);
     check(systemLightTheme.bodyClass === 'theme-system', `System theme body class is ${systemLightTheme.bodyClass}`);
+    check([darkTheme, systemDarkTheme].every((theme) => theme.checkboxColor === 'rgb(34, 197, 94)' && /23111111/i.test(theme.checkboxBackground)), `Dark checked Settings toggles do not use green with a black check: ${JSON.stringify({ darkTheme, systemDarkTheme })}`);
+    check([lightTheme, systemLightTheme].every((theme) => theme.checkboxColor === theme.primaryColor && /23ffffff/i.test(theme.checkboxBackground)), `Light checked Settings toggles do not use the theme primary color with a white check: ${JSON.stringify({ lightTheme, systemLightTheme })}`);
     check(darkTheme.bodyBackground !== lightTheme.bodyBackground, 'Explicit Dark and Light themes compute the same body background');
     check(systemLightTheme.bodyBackground === lightTheme.bodyBackground, `System-Light background ${systemLightTheme.bodyBackground} does not match Light ${lightTheme.bodyBackground}`);
     check(systemLightTheme.bodyColor === lightTheme.bodyColor, `System-Light text ${systemLightTheme.bodyColor} does not match Light ${lightTheme.bodyColor}`);
+    check(systemLightTheme.checkboxColor === lightTheme.checkboxColor && systemLightTheme.checkboxBackground === lightTheme.checkboxBackground, `System-Light checkbox does not match explicit Light: ${JSON.stringify({ lightTheme, systemLightTheme })}`);
 
     await win.screenshot({
       path: path.join(artifactDir, `workspace-settings-system-light-${TARGETS[0].width}x${TARGETS[0].height}.png`),

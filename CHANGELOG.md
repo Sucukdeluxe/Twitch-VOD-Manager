@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.15 - 2026-08-13
+
+- Keep update download progress within its popover and make changelog expansion and collapse easier to follow.
+- Expand Live Debug Log and Runtime Metrics to use the available Settings workspace.
+- Improve dark-theme checkbox contrast with a green selection and dark checkmark.
+- Prevent Auto-Cleanup options from being clipped.
+- Increase primary navigation label size and improve inactive-label contrast.
+
 ## 1.0.14 - 2026-08-12
 
 - Provision the Electron binary with a bounded retry before Windows CI smoke tests.

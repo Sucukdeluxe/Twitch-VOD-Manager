@@ -323,7 +323,7 @@ textarea:disabled,
     margin: 0;
     padding: 0;
     overflow: hidden;
-    color: var(--workspace-text-muted);
+    color: var(--workspace-text);
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--workspace-radius-small);
@@ -1454,6 +1454,16 @@ input[type="checkbox"] {
 input[type="checkbox"]:checked {
     background-color: var(--workspace-primary);
     border-color: var(--workspace-primary);
+}
+
+body.theme-twitch #settingsTab input[type="checkbox"]:checked,
+body.theme-dark #settingsTab input[type="checkbox"]:checked,
+body.theme-discord #settingsTab input[type="checkbox"]:checked,
+body.theme-youtube #settingsTab input[type="checkbox"]:checked,
+body.theme-apple #settingsTab input[type="checkbox"]:checked {
+    background-color: #22c55e;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23111111' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='3.5 8.5 6.5 11.5 12.5 5'/%3E%3C/svg%3E");
+    border-color: #22c55e;
 }
 
 input[type="radio"] {
@@ -2643,6 +2653,14 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
     }
 }
 
+@media (prefers-color-scheme: dark) {
+    body.theme-system #settingsTab input[type="checkbox"]:checked {
+        background-color: #22c55e;
+        background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23111111' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='3.5 8.5 6.5 11.5 12.5 5'/%3E%3C/svg%3E");
+        border-color: #22c55e;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .vod-bulk-bar {
         transition: transform 280ms cubic-bezier(0.22, 0.76, 0.22, 1), opacity 220ms ease, visibility 0s linear 280ms !important;
@@ -2662,7 +2680,7 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
     }
 
     .update-changelog-panel {
-        transition: max-height 260ms cubic-bezier(0.22, 0.76, 0.22, 1), padding 260ms cubic-bezier(0.22, 0.76, 0.22, 1), opacity 180ms ease, transform 260ms cubic-bezier(0.22, 0.76, 0.22, 1) !important;
+        transition: grid-template-rows 440ms cubic-bezier(0.22, 0.76, 0.22, 1), padding 440ms cubic-bezier(0.22, 0.76, 0.22, 1), opacity 320ms ease, transform 440ms cubic-bezier(0.22, 0.76, 0.22, 1) !important;
     }
 
     .top-nav::before {
@@ -2934,6 +2952,7 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
 
 .workspace-update-popover .update-banner-progress-wrap {
     width: 100%;
+    margin: 0;
 }
 
 .workspace-update-popover .update-banner-progress-track {
@@ -3519,6 +3538,35 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
     width: 100%;
 }
 
+#settingsTab .settings-card[data-settings-pane="storage"] {
+    width: 720px;
+}
+
+#settingsTab.active[data-settings-pane="debug"],
+#settingsTab.active[data-settings-pane="metrics"] {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#settingsTab[data-settings-pane="debug"] .settings-card[data-settings-pane="debug"],
+#settingsTab[data-settings-pane="metrics"] .settings-card[data-settings-pane="metrics"] {
+    display: flex;
+    width: 100%;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    padding-bottom: 0;
+}
+
+#debugLogOutput,
+#runtimeMetricsOutput {
+    width: 100%;
+    min-height: 0;
+    max-height: none;
+    flex: 1 1 auto;
+}
+
 #settingsTab .form-row:has(#downloadPath) {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
@@ -3908,7 +3956,7 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
         white-space: nowrap;
         text-overflow: ellipsis;
         border: 0;
-        font-size: 12px;
+        font-size: 13px;
     }
 
     .topbar-navigation-cluster .top-nav-item[data-tab="vods"] {
