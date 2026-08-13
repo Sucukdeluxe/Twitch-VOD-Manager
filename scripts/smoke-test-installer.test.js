@@ -130,19 +130,27 @@ test('shortcut inspection reads a real temporary Windows link', { skip: process.
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-link-contract-'));
   const targetPath = path.join(temporaryRoot, 'Twitch VOD Manager.exe');
   const iconPath = path.join(temporaryRoot, 'icon.ico');
+  const wrongTargetPath = path.join(temporaryRoot, 'Wrong Twitch VOD Manager.exe');
   const shortcutPath = path.join(temporaryRoot, 'Twitch VOD Manager.lnk');
   try {
     fs.writeFileSync(targetPath, 'target');
     fs.writeFileSync(iconPath, 'icon');
-    const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', "$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($env:TVM_TEST_SHORTCUT); $shortcut.TargetPath = $env:TVM_TEST_TARGET; $shortcut.IconLocation = $env:TVM_TEST_ICON; $shortcut.Save()"], {
+    fs.writeFileSync(wrongTargetPath, 'wrong target');
+    const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', "$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($env:TVM_TEST_SHORTCUT); $shortcut.TargetPath = $env:TVM_TEST_TARGET; $shortcut.IconLocation = $env:TVM_TEST_ICON; $shortcut.Save(); $folder = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($env:TVM_TEST_ROOT); [Console]::Write($folder.ShortPath)"], {
       encoding: 'utf8',
-      env: { ...process.env, TVM_TEST_ICON: iconPath, TVM_TEST_SHORTCUT: shortcutPath, TVM_TEST_TARGET: targetPath },
+      env: { ...process.env, TVM_TEST_ICON: iconPath, TVM_TEST_ROOT: temporaryRoot, TVM_TEST_SHORTCUT: shortcutPath, TVM_TEST_TARGET: targetPath },
       windowsHide: true
     });
     assert.strictEqual(result.status, 0, result.stderr);
     const details = readShortcutDetails(shortcutPath);
-    assert.strictEqual(details.targetPath.toLowerCase(), targetPath.toLowerCase());
-    assert.strictEqual(details.iconLocation.replace(/,\s*0$/, '').toLowerCase(), iconPath.toLowerCase());
+    const shortRoot = result.stdout.trim();
+    const expectedTarget = path.join(shortRoot, path.basename(targetPath));
+    const expectedIcon = path.join(shortRoot, path.basename(iconPath));
+    assert.doesNotThrow(() => assertShortcutDetails(details, { expectedIcon, expectedTarget }));
+    assert.throws(() => assertShortcutDetails(details, {
+      expectedIcon,
+      expectedTarget: wrongTargetPath
+    }), /target mismatch/i);
   } finally {
     fs.rmSync(temporaryRoot, { force: true, recursive: true });
   }

@@ -1,5 +1,7 @@
 const fs = require('fs');
 const path = require('path');
+const { isDeepStrictEqual } = require('node:util');
+const yaml = require('js-yaml');
 
 const root = path.resolve(__dirname, '..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -147,9 +149,13 @@ function parseWorkflow(source) {
     const onEndOffset = lines.slice(onStart + 1).findIndex((line) => /^\S/.test(line));
     const onEnd = onEndOffset < 0 ? lines.length : onStart + 1 + onEndOffset;
     const dispatchStart = lines.findIndex((line, index) => index > onStart && index < onEnd && line === '  workflow_dispatch:');
-    const inputsStart = lines.findIndex((line, index) => index > dispatchStart && index < onEnd && line === '    inputs:');
+    const dispatchEndOffset = dispatchStart < 0
+      ? -1
+      : lines.slice(dispatchStart + 1, onEnd).findIndex((line) => /^ {2}\S/.test(line));
+    const dispatchEnd = dispatchEndOffset < 0 ? onEnd : dispatchStart + 1 + dispatchEndOffset;
+    const inputsStart = dispatchStart < 0 ? -1 : lines.findIndex((line, index) => index > dispatchStart && index < dispatchEnd && line === '    inputs:');
     if (dispatchStart >= 0 && inputsStart >= 0) {
-      for (let index = inputsStart + 1; index < onEnd; index += 1) {
+      for (let index = inputsStart + 1; index < dispatchEnd; index += 1) {
         const field = parseMappingField(lines[index], 6);
         if (field?.[1] === '') addField(dispatchInputs, field[0], '');
       }
@@ -159,6 +165,97 @@ function parseWorkflow(source) {
 
   return { dispatchInputs, duplicateKeys: [...duplicateKeys], jobs };
 }
+
+function parseWorkflowDocument(source, label, errors) {
+  try {
+    const document = yaml.load(source, { schema: yaml.JSON_SCHEMA });
+    if (!document || typeof document !== 'object' || Array.isArray(document)) {
+      errors.push(`${label} must contain one YAML mapping document`);
+      return undefined;
+    }
+    return document;
+  } catch (error) {
+    const reason = error && typeof error === 'object' && 'reason' in error ? error.reason : 'invalid YAML';
+    errors.push(`${label} cannot be parsed as YAML: ${reason}`);
+    return undefined;
+  }
+}
+
+function sortedKeys(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).sort() : [];
+}
+
+function collectYamlNamesAndValues(value, values = [], visited = new Set()) {
+  if (typeof value === 'string') {
+    values.push(value);
+    return values;
+  }
+  if (!value || typeof value !== 'object' || visited.has(value)) return values;
+  visited.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) collectYamlNamesAndValues(item, values, visited);
+    return values;
+  }
+  for (const [key, item] of Object.entries(value)) {
+    values.push(key);
+    collectYamlNamesAndValues(item, values, visited);
+  }
+  return values;
+}
+
+function expressionUsesRoot(value, root) {
+  if (typeof value !== 'string') return false;
+  return [...value.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].some((match) => {
+    const normalized = match[1]
+      .replace(/\[\s*(['"])([A-Za-z_][A-Za-z0-9_-]*)\1\s*\]/g, '.$2')
+      .replace(/\s+/g, '')
+      .toLowerCase();
+    if (root === 'secrets') return /(?:^|[^a-z0-9_])secrets(?:$|[^a-z0-9_])/.test(normalized);
+    if (root === 'github.event.inputs') return /(?:^|[^a-z0-9_])github\.event\.inputs(?:$|[^a-z0-9_])/.test(normalized);
+    return false;
+  });
+}
+
+function validateRequiredDocumentSteps(job, label, errors) {
+  for (const step of Array.isArray(job?.steps) ? job.steps : []) {
+    const stepLabel = step.name || step.run || step.uses || 'unnamed step';
+    if (Object.hasOwn(step, 'if')) errors.push(`${label} ${stepLabel} must not be conditionally skipped`);
+    if (Object.hasOwn(step, 'continue-on-error')) errors.push(`${label} ${stepLabel} must not ignore failures`);
+  }
+}
+
+function validateWorkflowCompatibility(githubSource, giteaSource) {
+  const errors = [];
+  const githubDocument = parseWorkflowDocument(githubSource, 'GitHub workflow', errors);
+  const giteaDocument = parseWorkflowDocument(giteaSource, 'Gitea workflow', errors);
+  if (!githubDocument || !giteaDocument) return errors;
+
+  const githubTriggers = githubDocument.on;
+  const giteaTriggers = giteaDocument.on;
+  const expectedTriggers = ['pull_request', 'push', 'workflow_dispatch'];
+  if (!isDeepStrictEqual(sortedKeys(githubTriggers), expectedTriggers)) errors.push('GitHub workflow must define exactly push, pull_request and workflow_dispatch triggers');
+  if (!isDeepStrictEqual(sortedKeys(giteaTriggers), expectedTriggers)) errors.push('Gitea workflow must define exactly push, pull_request and workflow_dispatch triggers');
+  if (githubTriggers?.push !== null) errors.push('GitHub push trigger must remain unfiltered');
+  if (githubTriggers?.pull_request !== null) errors.push('GitHub pull_request trigger must remain unfiltered');
+  if (!isDeepStrictEqual(giteaTriggers?.push, githubTriggers?.push)) errors.push('GitHub and Gitea push triggers must be structurally equivalent');
+  if (!isDeepStrictEqual(giteaTriggers?.pull_request, githubTriggers?.pull_request)) errors.push('GitHub and Gitea pull_request triggers must be structurally equivalent');
+  if (giteaTriggers?.workflow_dispatch !== null) errors.push('Gitea workflow_dispatch must remain empty');
+
+  const githubJobs = githubDocument.jobs;
+  const giteaJobs = giteaDocument.jobs;
+  if (!isDeepStrictEqual(sortedKeys(githubJobs), ['twitch-live', 'updater-live-postpublish', 'verify'])) errors.push('GitHub workflow must define exactly verify, twitch-live and updater-live-postpublish jobs');
+  if (!isDeepStrictEqual(sortedKeys(giteaJobs), ['verify'])) errors.push('Gitea workflow must define exactly the verify job');
+  if (!isDeepStrictEqual(giteaJobs?.verify, githubJobs?.verify)) errors.push('GitHub and Gitea verify jobs must be structurally equivalent');
+  for (const jobName of ['verify', 'twitch-live', 'updater-live-postpublish']) validateRequiredDocumentSteps(githubJobs?.[jobName], `GitHub ${jobName}`, errors);
+  validateRequiredDocumentSteps(giteaJobs?.verify, 'Gitea verify', errors);
+
+  const giteaNamesAndValues = collectYamlNamesAndValues(giteaDocument);
+  if (giteaNamesAndValues.some((value) => expressionUsesRoot(value, 'secrets'))) errors.push('Gitea workflow must not reference secrets');
+  if (giteaNamesAndValues.some((value) => expressionUsesRoot(value, 'github.event.inputs'))) errors.push('Gitea workflow must not reference github.event.inputs');
+  if (giteaNamesAndValues.some((value) => /^TWITCH_VOD_MANAGER_LIVE_/i.test(value))) errors.push('Gitea workflow must not contain live integration bindings');
+  return errors;
+}
+
 
 function positiveTimeout(fields) {
   const values = fields.get('timeout-minutes') || [];
@@ -390,6 +487,58 @@ for (const command of ['npx install-electron --no', 'npm run pack', 'npm run dis
   check(!hasSingleConditionalRetry(`${command}\n${command}`, command), `CI retry contract accepts an unconditional ${command} retry`);
 }
 
+const compatibilityGithubFixture = `on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs: {}
+jobs:
+  verify:
+    runs-on: windows-latest
+  twitch-live:
+    runs-on: windows-latest
+  updater-live-postpublish:
+    runs-on: windows-latest`;
+const compatibilityGiteaFixture = `on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: windows-latest`;
+check(validateWorkflowCompatibility(compatibilityGithubFixture, compatibilityGiteaFixture).length === 0, 'Workflow compatibility contract rejects a compatible Gitea workflow');
+
+const quotedJobCompatibilityErrors = validateWorkflowCompatibility(compatibilityGithubFixture, compatibilityGiteaFixture.replace('jobs:', `jobs:
+  "extra":
+    runs-on: windows-latest`));
+check(quotedJobCompatibilityErrors.includes('Gitea workflow must define exactly the verify job'), 'Gitea compatibility contract accepts a quoted additional job');
+
+const filteredTriggerCompatibilityErrors = validateWorkflowCompatibility(compatibilityGithubFixture, compatibilityGiteaFixture.replace('  push:', `  push:
+    branches-ignore:
+      - '**'`));
+check(filteredTriggerCompatibilityErrors.includes('GitHub and Gitea push triggers must be structurally equivalent'), 'Gitea compatibility contract accepts a disabling push filter');
+
+const forbiddenExpressionCompatibilityErrors = validateWorkflowCompatibility(compatibilityGithubFixture, compatibilityGiteaFixture.replace('    runs-on: windows-latest', `    runs-on: windows-latest
+    env:
+      FIRST: \${{secrets.UNTRACKED_LIVE_TOKEN}}
+      SECOND: \${{ github['event']['inputs']['live_gate'] }}`));
+check(forbiddenExpressionCompatibilityErrors.includes('Gitea workflow must not reference secrets'), 'Gitea compatibility contract accepts an alternative secrets expression');
+check(forbiddenExpressionCompatibilityErrors.includes('Gitea workflow must not reference github.event.inputs'), 'Gitea compatibility contract accepts an indexed github.event.inputs expression');
+
+const skippedLiveStepGithubFixture = compatibilityGithubFixture.replace(`  twitch-live:
+    runs-on: windows-latest`, `  twitch-live:
+    runs-on: windows-latest
+    steps:
+      - name: provider
+        "if": false
+        run: npm run provider
+      - name: ignored
+        "continue-on-error": true
+        run: npm run ignored`);
+const skippedLiveStepErrors = validateWorkflowCompatibility(skippedLiveStepGithubFixture, compatibilityGiteaFixture);
+check(skippedLiveStepErrors.includes('GitHub twitch-live provider must not be conditionally skipped'), 'GitHub live gate contract accepts if: false on a required step');
+check(skippedLiveStepErrors.includes('GitHub twitch-live ignored must not ignore failures'), 'GitHub live gate contract accepts continue-on-error on a required step');
+
 const requiredScripts = {
   lint: 'eslint .',
   'security:check': 'node scripts/security-check.js && node scripts/smoke-test-public-release-config.js',
@@ -450,13 +599,19 @@ for (const relativePath of ['.github/workflows/windows-ci.yml', '.gitea/workflow
     'npm run test:installer'
   ];
 
-  check(workflow.jobs.size === 3 && verifyJob && twitchLiveJob && updaterLiveJob, `${relativePath} must define exactly verify, twitch-live and updater-live-postpublish jobs`);
+  if (relativePath === '.github/workflows/windows-ci.yml') {
+    check(workflow.jobs.size === 3 && verifyJob && twitchLiveJob && updaterLiveJob, `${relativePath} must define exactly verify, twitch-live and updater-live-postpublish jobs`);
+  } else {
+    check(workflow.jobs.size === 1 && verifyJob, `${relativePath} must define exactly the verify job`);
+  }
   check(workflow.duplicateKeys.length === 0, `${relativePath} contains duplicate YAML keys: ${workflow.duplicateKeys.join(', ')}`);
   validateTimeouts(workflow, relativePath, failures);
   validateCheckouts(workflow, relativePath, failures);
   validateSetupNode(workflow, relativePath, failures);
-  for (const input of ['source_version', 'source_sha256', 'update_version', 'update_sha512']) {
-    check((workflow.dispatchInputs.get(input) || []).length === 1, `${relativePath} workflow_dispatch must define explicit ${input}`);
+  if (relativePath === '.github/workflows/windows-ci.yml') {
+    for (const input of ['source_version', 'source_sha256', 'update_version', 'update_sha512']) {
+      check((workflow.dispatchInputs.get(input) || []).length === 1, `${relativePath} workflow_dispatch must define explicit ${input}`);
+    }
   }
   for (const job of workflow.jobs.values()) check(singleField(job.fields, 'runs-on') === 'windows-latest', `${relativePath} ${job.name} does not use a Windows runner`);
   for (const command of requiredCommands) {
@@ -471,34 +626,37 @@ for (const relativePath of ['.github/workflows/windows-ci.yml', '.gitea/workflow
   }
   check(hasSingleConditionalRetry(verifyJob?.steps.map((step) => step.raw).join('\n') || '', 'npx install-electron --no'), `${relativePath} does not retry Electron binary provisioning exactly once`);
   check(findSecretLeaks(verifyJob, undefined, secretNames).length === 0, `${relativePath} exposes Twitch live inputs to normal CI`);
-  validateManualGate(twitchLiveJob, 'twitch', relativePath, failures);
-  const twitchProviderStep = stepByName(twitchLiveJob, 'Twitch provider OAuth, Helix and bounded VOD gate');
-  for (const name of secretNames) {
-    check(singleField(twitchProviderStep?.env || new Map(), name) === `\${{ secrets.${name} }}`, `${relativePath} Twitch live ${name.toLowerCase()} is not scoped to the final provider step`);
+  if (relativePath === '.github/workflows/windows-ci.yml') {
+    validateManualGate(twitchLiveJob, 'twitch', relativePath, failures);
+    const twitchProviderStep = stepByName(twitchLiveJob, 'Twitch provider OAuth, Helix and bounded VOD gate');
+    for (const name of secretNames) {
+      check(singleField(twitchProviderStep?.env || new Map(), name) === `\${{ secrets.${name} }}`, `${relativePath} Twitch live ${name.toLowerCase()} is not scoped to the final provider step`);
+    }
+    check(findSecretLeaks(twitchLiveJob, twitchProviderStep, secretNames).length === 0, `${relativePath} exposes Twitch secrets outside the final provider step`);
+    check(singleField(twitchProviderStep?.env || new Map(), 'TWITCH_VOD_MANAGER_LIVE_INTEGRATION') === "'1'" && singleField(twitchProviderStep?.fields || new Map(), 'run') === 'npm run test:live:twitch', `${relativePath} Twitch live gate is not explicitly opted in at the final provider step`);
+    check(twitchLiveJob?.steps.some((step) => step.name === 'Provision pinned media tools' && step.raw.includes('TWITCH_VOD_MANAGER_LIVE_STREAMLINK_PATH') && step.raw.includes('TWITCH_VOD_MANAGER_LIVE_FFPROBE_PATH')), `${relativePath} Twitch live gate does not provision its real media tools`);
+    check(stepIndexByRun(twitchLiveJob, 'npm run build') >= 0 && stepIndexByRun(twitchLiveJob, 'npm run build') < stepIndexByRun(twitchLiveJob, 'npm run test:live-integration-contract'), `${relativePath} Twitch live gate must build before its integration contract`);
+    validateManualGate(updaterLiveJob, 'updater-postpublish', relativePath, failures);
+    for (const input of ['source_version', 'source_sha256', 'update_version', 'update_sha512']) {
+      check(singleField(updaterLiveJob?.env || new Map(), `TWITCH_VOD_MANAGER_LIVE_${input.toUpperCase()}`) === `\${{ github.event.inputs.${input} }}`, `${relativePath} updater live gate does not bind explicit ${input}`);
+    }
+    check(singleField(updaterLiveJob?.env || new Map(), 'TWITCH_VOD_MANAGER_LIVE_UPDATE_COMMIT_SHA') === '${{ github.sha }}', `${relativePath} updater live gate does not bind provenance to github.sha`);
+    const updaterCheckout = updaterLiveJob?.steps.filter((step) => singleField(step.fields, 'uses') === 'actions/checkout@v4') || [];
+    check(updaterCheckout.length === 1 && singleField(updaterCheckout[0].with, 'ref') === '${{ github.sha }}', `${relativePath} updater checkout is not explicitly bound to github.sha`);
+    check(singleField(updaterLiveJob?.env || new Map(), 'TWITCH_VOD_MANAGER_LIVE_INTEGRATION') === "'1'" && stepIndexByRun(updaterLiveJob, 'npm run test:live:updater-postpublish') >= 0, `${relativePath} updater live gate is not explicitly opted in`);
+    check(stepIndexByRun(updaterLiveJob, 'npm run build') >= 0 && stepIndexByRun(updaterLiveJob, 'npm run build') < stepIndexByRun(updaterLiveJob, 'npm run test:live-integration-contract'), `${relativePath} updater live gate must build before its integration contract`);
+    const updaterPreflight = stepByName(updaterLiveJob, 'Require explicit post-publish updater inputs');
+    check(updaterPreflight && secretNames.every((name) => !updaterPreflight.raw.includes(name)), `${relativePath} updater preflight references Twitch credentials`);
+    check(hasTrimmedLine(updaterPreflight, "'TWITCH_VOD_MANAGER_LIVE_UPDATE_COMMIT_SHA'") && hasTrimmedLine(updaterPreflight, "if ($env:TWITCH_VOD_MANAGER_LIVE_UPDATE_COMMIT_SHA -notmatch '^[0-9a-fA-F]{40}$') {") && hasTrimmedLine(updaterPreflight, 'if (-not [string]::Equals($env:TWITCH_VOD_MANAGER_LIVE_UPDATE_COMMIT_SHA, $env:GITHUB_SHA, [StringComparison]::OrdinalIgnoreCase)) {'), `${relativePath} updater preflight does not verify commit provenance against GITHUB_SHA`);
+    check(hasStrictUpdaterVersions(updaterPreflight) && hasTrimmedLine(updaterPreflight, 'if ($sourceVersion -ge $updateVersion) {'), `${relativePath} updater preflight does not require exact source_version < update_version`);
+    check(hasTrimmedLine(updaterPreflight, '$packageVersion = (Get-Content -Raw -LiteralPath package.json | ConvertFrom-Json).version') && hasTrimmedLine(updaterPreflight, 'if ($updateVersionText -ne $packageVersion) {') && hasTrimmedLine(updaterPreflight, '$expectedRef = "refs/tags/v$updateVersionText"') && hasTrimmedLine(updaterPreflight, 'if ($env:GITHUB_REF -ne $expectedRef) {'), `${relativePath} updater preflight does not bind the exact update version text to package.json and its release tag`);
+    const updaterExecutionStep = stepByName(updaterLiveJob, 'Verify published updater path');
+    check(singleField(updaterExecutionStep?.fields || new Map(), 'timeout-minutes') === '25', `${relativePath} updater live gate does not allow 25 minutes for a real installer download`);
   }
-  check(findSecretLeaks(twitchLiveJob, twitchProviderStep, secretNames).length === 0, `${relativePath} exposes Twitch secrets outside the final provider step`);
-  check(singleField(twitchProviderStep?.env || new Map(), 'TWITCH_VOD_MANAGER_LIVE_INTEGRATION') === "'1'" && singleField(twitchProviderStep?.fields || new Map(), 'run') === 'npm run test:live:twitch', `${relativePath} Twitch live gate is not explicitly opted in at the final provider step`);
-  check(twitchLiveJob?.steps.some((step) => step.name === 'Provision pinned media tools' && step.raw.includes('TWITCH_VOD_MANAGER_LIVE_STREAMLINK_PATH') && step.raw.includes('TWITCH_VOD_MANAGER_LIVE_FFPROBE_PATH')), `${relativePath} Twitch live gate does not provision its real media tools`);
-  check(stepIndexByRun(twitchLiveJob, 'npm run build') >= 0 && stepIndexByRun(twitchLiveJob, 'npm run build') < stepIndexByRun(twitchLiveJob, 'npm run test:live-integration-contract'), `${relativePath} Twitch live gate must build before its integration contract`);
-  validateManualGate(updaterLiveJob, 'updater-postpublish', relativePath, failures);
-  for (const input of ['source_version', 'source_sha256', 'update_version', 'update_sha512']) {
-    check(singleField(updaterLiveJob?.env || new Map(), `TWITCH_VOD_MANAGER_LIVE_${input.toUpperCase()}`) === `\${{ github.event.inputs.${input} }}`, `${relativePath} updater live gate does not bind explicit ${input}`);
-  }
-  check(singleField(updaterLiveJob?.env || new Map(), 'TWITCH_VOD_MANAGER_LIVE_UPDATE_COMMIT_SHA') === '${{ github.sha }}', `${relativePath} updater live gate does not bind provenance to github.sha`);
-  const updaterCheckout = updaterLiveJob?.steps.filter((step) => singleField(step.fields, 'uses') === 'actions/checkout@v4') || [];
-  check(updaterCheckout.length === 1 && singleField(updaterCheckout[0].with, 'ref') === '${{ github.sha }}', `${relativePath} updater checkout is not explicitly bound to github.sha`);
-  check(singleField(updaterLiveJob?.env || new Map(), 'TWITCH_VOD_MANAGER_LIVE_INTEGRATION') === "'1'" && stepIndexByRun(updaterLiveJob, 'npm run test:live:updater-postpublish') >= 0, `${relativePath} updater live gate is not explicitly opted in`);
-  check(stepIndexByRun(updaterLiveJob, 'npm run build') >= 0 && stepIndexByRun(updaterLiveJob, 'npm run build') < stepIndexByRun(updaterLiveJob, 'npm run test:live-integration-contract'), `${relativePath} updater live gate must build before its integration contract`);
-  const updaterPreflight = stepByName(updaterLiveJob, 'Require explicit post-publish updater inputs');
-  check(updaterPreflight && secretNames.every((name) => !updaterPreflight.raw.includes(name)), `${relativePath} updater preflight references Twitch credentials`);
-  check(hasTrimmedLine(updaterPreflight, "'TWITCH_VOD_MANAGER_LIVE_UPDATE_COMMIT_SHA'") && hasTrimmedLine(updaterPreflight, "if ($env:TWITCH_VOD_MANAGER_LIVE_UPDATE_COMMIT_SHA -notmatch '^[0-9a-fA-F]{40}$') {") && hasTrimmedLine(updaterPreflight, 'if (-not [string]::Equals($env:TWITCH_VOD_MANAGER_LIVE_UPDATE_COMMIT_SHA, $env:GITHUB_SHA, [StringComparison]::OrdinalIgnoreCase)) {'), `${relativePath} updater preflight does not verify commit provenance against GITHUB_SHA`);
-  check(hasStrictUpdaterVersions(updaterPreflight) && hasTrimmedLine(updaterPreflight, 'if ($sourceVersion -ge $updateVersion) {'), `${relativePath} updater preflight does not require exact source_version < update_version`);
-  check(hasTrimmedLine(updaterPreflight, '$packageVersion = (Get-Content -Raw -LiteralPath package.json | ConvertFrom-Json).version') && hasTrimmedLine(updaterPreflight, 'if ($updateVersionText -ne $packageVersion) {') && hasTrimmedLine(updaterPreflight, '$expectedRef = "refs/tags/v$updateVersionText"') && hasTrimmedLine(updaterPreflight, 'if ($env:GITHUB_REF -ne $expectedRef) {'), `${relativePath} updater preflight does not bind the exact update version text to package.json and its release tag`);
-  const updaterExecutionStep = stepByName(updaterLiveJob, 'Verify published updater path');
-  check(singleField(updaterExecutionStep?.fields || new Map(), 'timeout-minutes') === '25', `${relativePath} updater live gate does not allow 25 minutes for a real installer download`);
 }
 
-check(workflowSources.get('.github/workflows/windows-ci.yml') === workflowSources.get('.gitea/workflows/windows-ci.yml'), 'GitHub and Gitea workflows are not byte-identical');
+const giteaCompatibilitySource = workflowSources.get('.gitea/workflows/windows-ci.yml') || '';
+for (const error of validateWorkflowCompatibility(workflowSources.get('.github/workflows/windows-ci.yml') || '', giteaCompatibilitySource)) failures.push(error);
 
 const liveIntegrationSource = fs.readFileSync(path.join(root, 'scripts/smoke-test-live-integration.js'), 'utf8');
 check(/dist['"],\s*['"]main['"],\s*['"]twitch['"]/.test(liveIntegrationSource), 'Twitch provider live gate does not load the built Twitch product module');

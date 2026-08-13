@@ -62,6 +62,14 @@ function normalizeWindowsPath(candidate) {
   return path.win32.resolve(String(candidate)).replaceAll('/', '\\').toLowerCase();
 }
 
+function canonicalWindowsPath(candidate) {
+  try {
+    return normalizeWindowsPath(fs.realpathSync.native(candidate));
+  } catch {
+    return normalizeWindowsPath(candidate);
+  }
+}
+
 function assertPathInside(targetPath, parentPath) {
   const relative = path.win32.relative(path.win32.resolve(parentPath), path.win32.resolve(targetPath));
   if (!relative || relative.startsWith('..\\') || relative === '..' || path.win32.isAbsolute(relative)) {
@@ -80,10 +88,10 @@ function assertFile(filePath, label) {
 function assertShortcutDetails(details, { expectedIcon, expectedTarget, pathExists = fs.existsSync }) {
   const targetPath = String(details.targetPath || '');
   const iconPath = String(details.iconLocation || '').replace(/,\s*-?\d+$/, '');
-  if (normalizeWindowsPath(targetPath) !== normalizeWindowsPath(expectedTarget)) {
+  if (canonicalWindowsPath(targetPath) !== canonicalWindowsPath(expectedTarget)) {
     throw new Error(`Shortcut target mismatch: ${JSON.stringify({ actual: targetPath, expected: expectedTarget })}`);
   }
-  if (normalizeWindowsPath(iconPath) !== normalizeWindowsPath(expectedIcon)) {
+  if (canonicalWindowsPath(iconPath) !== canonicalWindowsPath(expectedIcon)) {
     throw new Error(`Shortcut icon mismatch: ${JSON.stringify({ actual: iconPath, expected: expectedIcon })}`);
   }
   if (!pathExists(targetPath)) throw new Error(`Shortcut target is missing: ${targetPath}`);
