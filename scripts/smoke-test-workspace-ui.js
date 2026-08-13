@@ -1844,19 +1844,19 @@ async function run() {
     await app.evaluate(({ ipcMain }) => {
       ipcMain.removeHandler('get-streamer-display-names');
       ipcMain.handle('get-streamer-display-names', (_, logins) => Object.fromEntries(
-        logins.map((login) => [String(login).toLowerCase(), String(login).toLowerCase() === 'xrohat' ? 'xRohat' : String(login)])
+        logins.map((login) => [String(login).toLowerCase(), String(login).toLowerCase() === 'fixturealpha' ? 'FixtureAlpha' : String(login)])
       ));
     });
 
     await win.evaluate(() => window.showTab('vods'));
     await win.waitForTimeout(480);
     const streamerSidebarLayout = await win.evaluate(async () => {
-      config.streamers = ['xrohat'];
+      config.streamers = ['fixturealpha'];
       config.streamer_display_names = {};
-      currentStreamer = 'xrohat';
-      window.setPageTitle('xrohat');
+      currentStreamer = 'fixturealpha';
+      window.setPageTitle('fixturealpha');
       await window.hydrateStreamerDisplayNames();
-      liveStatusByLogin.set('xrohat', true);
+      liveStatusByLogin.set('fixturealpha', true);
       renderStreamers();
       const item = document.querySelector('#streamerList .streamer-item');
       const remove = item?.querySelector('.remove');
@@ -1887,8 +1887,8 @@ async function run() {
       };
     });
     checks.streamerSidebarLayout = streamerSidebarLayout;
-    check(streamerSidebarLayout.displayName === 'xRohat', 'Streamer sidebar does not preserve Twitch display casing');
-    check(streamerSidebarLayout.title.startsWith('xRohat - '), 'Window title does not use the Twitch display casing');
+    check(streamerSidebarLayout.displayName === 'FixtureAlpha', 'Streamer sidebar does not preserve Twitch display casing');
+    check(streamerSidebarLayout.title.startsWith('FixtureAlpha - '), 'Window title does not use the Twitch display casing');
     check(!streamerSidebarLayout.hasInlineActions, 'Streamer row still renders inline automation actions');
     check(streamerSidebarLayout.nameBeforeRemove, 'Streamer name does not leave room for the remove action');
     check(streamerSidebarLayout.removeAtRightEdge, 'Streamer remove action is not aligned to the right edge of every row');
@@ -1906,21 +1906,21 @@ async function run() {
 
     const streamerSelectionMotion = await win.evaluate(async () => {
       const pause = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-      config.streamers = ['xrohat', 'fibii', 'montanablack88'];
-      currentStreamer = 'xrohat';
+      config.streamers = ['fixturealpha', 'fixturebeta', 'fixturegamma'];
+      currentStreamer = 'fixturealpha';
       renderStreamers();
       await pause(420);
       const list = document.getElementById('streamerList');
       const readY = () => new DOMMatrixReadOnly(getComputedStyle(list, '::before').transform).m42;
       const start = readY();
-      currentStreamer = 'montanablack88';
+      currentStreamer = 'fixturegamma';
       renderStreamers();
       await pause(150);
       const middle = readY();
       const activeBackgroundAtMiddle = getComputedStyle(document.querySelector('#streamerList .streamer-item.active')).backgroundColor;
       await pause(360);
       const target = readY();
-      currentStreamer = 'xrohat';
+      currentStreamer = 'fixturealpha';
       renderStreamers();
       await pause(150);
       const upwardMiddle = readY();
@@ -1935,7 +1935,7 @@ async function run() {
     check(Math.abs(streamerSelectionMotion.upwardTarget - streamerSelectionMotion.start) <= 1, `Streamer selection does not return to its first position: ${JSON.stringify(streamerSelectionMotion)}`);
     check(streamerSelectionMotion.activeBackgroundAtMiddle === 'rgba(0, 0, 0, 0)', `Target streamer paints a second background during motion: ${streamerSelectionMotion.activeBackgroundAtMiddle}`);
     await win.evaluate(() => {
-      currentStreamer = 'montanablack88';
+      currentStreamer = 'fixturegamma';
       renderStreamers();
     });
     await win.waitForTimeout(150);
