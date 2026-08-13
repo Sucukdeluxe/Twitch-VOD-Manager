@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.17 - 2026-08-13
+
+- Keep the loaded video cutter focused at every supported window size and give recovery notices their own layout space.
+- Preserve recovered hardware encoder selections until export capabilities finish loading, and reject unsupported cutter files without changing the current project.
+- Follow the Windows color scheme when the System theme is selected.
+- Fully localize Runtime Metrics in German, including values, counts and error classes.
+- Clear stale System Check results after configuration imports while keeping running controls correctly localized.
+- Bound child-process shutdown waits so stalled exports cannot keep the application open indefinitely.
+
 ## 1.0.16 - 2026-08-13
 
 - Preserve completed System Check results when switching between German and English.

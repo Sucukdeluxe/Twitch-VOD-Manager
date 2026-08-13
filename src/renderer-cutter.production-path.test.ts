@@ -12,6 +12,18 @@ function sourceFragment(start: string, end: string): string {
     return source.slice(from, to);
 }
 
+function streamerSourceFragment(start: string, end: string): string {
+    const source = readFileSync(join(__dirname, 'renderer-streamers.ts'), 'utf8');
+    const from = source.indexOf(start);
+    const to = source.indexOf(end, from);
+    if (from < 0 || to < 0) throw new Error('Missing renderer streamers production fragment');
+    return source.slice(from, to);
+}
+
+function cutterFileValidationFragment(): string {
+    return streamerSourceFragment('function isSupportedCutterVideoFile', 'function initCutterDragDrop');
+}
+
 function evaluate(source: string, context: Record<string, unknown>, expose: string): Record<string, (...args: unknown[]) => unknown> {
     context.globalThis = context;
     context.window = context;
@@ -22,7 +34,68 @@ function evaluate(source: string, context: Record<string, unknown>, expose: stri
     return (context as { __cutterProductionPath: Record<string, (...args: unknown[]) => unknown> }).__cutterProductionPath;
 }
 
+interface FakeOption {
+    value: string;
+    textContent: string;
+}
+
+interface FakeSelect {
+    value: string;
+    disabled: boolean;
+    options: FakeOption[];
+    replaceChildren(...children: FakeOption[]): void;
+    append(child: FakeOption): void;
+}
+
+function createCutterSelects(): Map<string, FakeSelect> {
+    const createSelect = (): FakeSelect => ({
+        value: '',
+        disabled: false,
+        options: [],
+        replaceChildren(...children) { this.options = [...children]; },
+        append(child) { this.options.push(child); },
+    });
+    return new Map([
+        ['cutterAudioStream', createSelect()],
+        ['cutterExportProfile', createSelect()],
+        ['cutterExportEncoder', createSelect()],
+    ]);
+}
+
 describe('cutter production paths', () => {
+    test('rejects a PNG drop before requesting a capability or loader', async () => {
+        const listeners = new Map<string, (event: Record<string, unknown>) => Promise<void> | void>();
+        let capabilityRequests = 0;
+        let loadRequests = 0;
+        const toasts: Array<[string, string]> = [];
+        const tab = {
+            addEventListener: (name: string, listener: (event: Record<string, unknown>) => Promise<void> | void) => listeners.set(name, listener),
+        };
+        const preview = { classList: { toggle: () => undefined } };
+        const api = evaluate(`${cutterFileValidationFragment()}\n${streamerSourceFragment('function initCutterDragDrop', 'let streamerContextMenu')}`, {
+            document: { getElementById: (id: string) => id === 'cutterTab' ? tab : preview },
+            UI_TEXT: { cutter: { unsupportedFile: 'unsupported' } },
+            showAppToast: (message: string, type: string) => toasts.push([message, type]),
+            requestCutterVideoReplacement: async () => { loadRequests += 1; },
+            api: {
+                selectDroppedVideo: async () => {
+                    capabilityRequests += 1;
+                    return { token: 'png-capability', name: 'frame.png' };
+                },
+            },
+        }, 'initCutterDragDrop');
+        api.initCutterDragDrop();
+
+        await listeners.get('drop')?.({
+            dataTransfer: { files: [{ name: 'frame.png', type: 'image/png' }] },
+            preventDefault: () => undefined,
+        });
+
+        expect(toasts).toEqual([['unsupported', 'warn']]);
+        expect(capabilityRequests).toBe(0);
+        expect(loadRequests).toBe(0);
+    });
+
     test('opens a saved project without first overwriting its autosave', async () => {
         let saves = 0;
         let opens = 0;
@@ -67,6 +140,86 @@ describe('cutter production paths', () => {
         await Promise.resolve();
 
         expect(saves).toBe(0);
+    });
+
+    test('keeps a recovered hardware encoder while export options are still loading', () => {
+        const selects = createCutterSelects();
+        const context: Record<string, unknown> = {
+            cutterEditorState: { duration: 90, fps: 30, trimStart: 0, trimEnd: 90, cuts: [] },
+            cutterVideoInfo: {
+                duration: 90,
+                fps: 30,
+                audioStreams: [{ index: 0, language: 'deu', codec: 'aac', channels: 2 }],
+            },
+            cutterExportProfile: 'balanced',
+            cutterExportEncoder: 'software',
+            cutterAudioStreamIndex: 0,
+            cutterExportOptions: undefined,
+            cutterHistoryPast: [],
+            cutterHistoryFuture: [],
+            cutterActiveCutId: null,
+            byId: (id: string) => selects.get(id),
+            document: { createElement: () => ({ value: '', textContent: '' }) },
+            renderCutterEditor: () => undefined,
+            seekCutterVideo: () => undefined,
+        };
+        const api = evaluate(sourceFragment('function updateCutterAudioStreams', 'async function recoverCutterProject'), context, 'applyCutterProject, updateCutterExportControls');
+
+        const applied = api.applyCutterProject({
+            duration: 90,
+            fps: 30,
+            trimStart: 12,
+            trimEnd: 80,
+            cuts: [],
+            profile: 'balanced',
+            encoder: 'h264_nvenc',
+            audioStreamIndex: 0,
+        });
+
+        expect(applied).toBe(true);
+        expect(context.cutterExportEncoder).toBe('h264_nvenc');
+        expect(selects.get('cutterExportEncoder')?.options.map((option) => option.value)).toContain('h264_nvenc');
+        expect(selects.get('cutterExportEncoder')?.value).toBe('h264_nvenc');
+        expect(selects.get('cutterExportEncoder')?.disabled).toBe(true);
+
+        api.updateCutterExportControls({
+            profiles: [
+                { id: 'quality', label: 'Quality', container: 'mp4' },
+                { id: 'balanced', label: 'Balanced', container: 'mp4' },
+                { id: 'fast', label: 'Fast', container: 'mp4' },
+                { id: 'archive', label: 'Archive', container: 'mkv' },
+            ],
+            hardwareEncoders: ['h264_nvenc'],
+        });
+
+        expect(context.cutterExportEncoder).toBe('h264_nvenc');
+        expect(selects.get('cutterExportEncoder')?.value).toBe('h264_nvenc');
+        expect(selects.get('cutterExportEncoder')?.disabled).toBe(false);
+    });
+
+    test('falls back to software when the export-option probe finishes without options', async () => {
+        const file = { token: 'source-capability', name: 'source.mp4' };
+        const selects = createCutterSelects();
+        const context: Record<string, unknown> = {
+            cutterExportProfile: 'balanced',
+            cutterExportEncoder: 'h264_nvenc',
+            cutterExportOptions: undefined,
+            cutterLoadGeneration: 4,
+            cutterFile: file,
+            byId: (id: string) => selects.get(id),
+            document: { createElement: () => ({ value: '', textContent: '' }) },
+            api: { getCutterExportOptions: async () => { throw new Error('probe failed'); } },
+        };
+        const api = evaluate(sourceFragment('function updateCutterExportControls', 'function applyCutterProject'), context, 'updateCutterExportControls, loadCutterExportOptions');
+
+        api.updateCutterExportControls(undefined);
+        expect(context.cutterExportEncoder).toBe('h264_nvenc');
+
+        await api.loadCutterExportOptions(file, 4);
+
+        expect(context.cutterExportEncoder).toBe('software');
+        expect(selects.get('cutterExportEncoder')?.value).toBe('software');
+        expect(selects.get('cutterExportEncoder')?.disabled).toBe(true);
     });
 
     test('offers recovery before enabling edits or starting the encoder probe', async () => {
@@ -149,5 +302,37 @@ describe('cutter production paths', () => {
 
         expect(events.indexOf('recovery')).toBeLessThan(events.indexOf('enable'));
         expect(events.indexOf('offer')).toBeLessThan(events.indexOf('probe'));
+    });
+
+    test('rejects an unsupported file returned by the video dialog before replacement', async () => {
+        let replacements = 0;
+        const toasts: Array<[string, string]> = [];
+        const api = evaluate(`${cutterFileValidationFragment()}\n${sourceFragment('async function selectCutterVideo', 'function updateTimeFromInput')}`, {
+            requestCutterVideoReplacement: async () => { replacements += 1; },
+            showAppToast: (message: string, type: string) => toasts.push([message, type]),
+            UI_TEXT: { cutter: { unsupportedFile: 'unsupported' } },
+            api: { selectVideoFile: async () => ({ token: 'png-capability', name: 'frame.png' }) },
+        }, 'selectCutterVideo');
+
+        await api.selectCutterVideo();
+
+        expect(replacements).toBe(0);
+        expect(toasts).toEqual([['unsupported', 'warn']]);
+    });
+
+    test('turns a rejected video dialog request into an unsupported-file warning', async () => {
+        let replacements = 0;
+        const toasts: Array<[string, string]> = [];
+        const api = evaluate(`${cutterFileValidationFragment()}\n${sourceFragment('async function selectCutterVideo', 'function updateTimeFromInput')}`, {
+            requestCutterVideoReplacement: async () => { replacements += 1; },
+            showAppToast: (message: string, type: string) => toasts.push([message, type]),
+            UI_TEXT: { cutter: { unsupportedFile: 'unsupported' } },
+            api: { selectVideoFile: async () => { throw new Error('invalid dialog selection'); } },
+        }, 'selectCutterVideo');
+
+        await api.selectCutterVideo();
+
+        expect(replacements).toBe(0);
+        expect(toasts).toEqual([['unsupported', 'warn']]);
     });
 });

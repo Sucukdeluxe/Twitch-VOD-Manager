@@ -5,15 +5,27 @@ export type QueueProcessPhase = 'streamlink' | 'merge' | 'split' | 'post-process
 export function waitForChildProcessExit(process: ChildProcess | null, forceKillAfterMs = 5000): Promise<void> {
     if (!process || process.exitCode !== null || process.signalCode !== null) return Promise.resolve();
     return new Promise((resolve) => {
+        let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+        let settleTimer: ReturnType<typeof setTimeout> | null = null;
+        let settled = false;
         const finish = (): void => {
-            clearTimeout(timer);
+            if (settled) return;
+            settled = true;
+            if (forceKillTimer) clearTimeout(forceKillTimer);
+            if (settleTimer) clearTimeout(settleTimer);
+            process.removeListener('close', finish);
             resolve();
         };
-        const timer = setTimeout(() => {
-            if (process.exitCode !== null || process.signalCode !== null) return;
+        process.once('close', finish);
+        forceKillTimer = setTimeout(() => {
+            forceKillTimer = null;
+            if (process.exitCode !== null || process.signalCode !== null) {
+                finish();
+                return;
+            }
+            settleTimer = setTimeout(finish, forceKillAfterMs);
             try { process.kill('SIGKILL'); } catch { }
         }, forceKillAfterMs);
-        process.once('close', finish);
     });
 }
 

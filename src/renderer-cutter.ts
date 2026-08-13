@@ -66,7 +66,7 @@ let cutterExportEncoder: 'software' | 'h264_nvenc' | 'h264_qsv' | 'h264_amf' = '
 let cutterAudioStreamIndex = 0;
 let cutterPendingProject: CutterProject | null = null;
 let cutterAutosaveTimer: number | null = null;
-let cutterExportOptions: CutterExportOptions | null = null;
+let cutterExportOptions: CutterExportOptions | null | undefined;
 let cutterRecoveryDecisionPending = false;
 const cutterMaximumCuts = 64;
 const cutterFrameTolerance = 1e-8;
@@ -212,7 +212,7 @@ function updateCutterAudioStreams(): void {
     select.disabled = false;
 }
 
-function updateCutterExportControls(options: CutterExportOptions | null): void {
+function updateCutterExportControls(options: CutterExportOptions | null | undefined): void {
     const profile = byId<HTMLSelectElement>('cutterExportProfile');
     const encoder = byId<HTMLSelectElement>('cutterExportEncoder');
     if (options) {
@@ -230,16 +230,18 @@ function updateCutterExportControls(options: CutterExportOptions | null): void {
     software.textContent = 'Software';
     encoder.append(software);
     if (cutterExportProfile !== 'archive') {
-        (options?.hardwareEncoders ?? []).forEach((value) => {
+        const hardwareEncoders = options?.hardwareEncoders
+            ?? (options === undefined && cutterExportEncoder !== 'software' ? [cutterExportEncoder] : []);
+        hardwareEncoders.forEach((value) => {
             const option = document.createElement('option');
             option.value = value;
             option.textContent = value === 'h264_nvenc' ? 'NVIDIA NVENC' : value === 'h264_qsv' ? 'Intel Quick Sync' : 'AMD AMF';
             encoder.append(option);
         });
     }
-    if (!Array.from(encoder.options).some((option) => option.value === cutterExportEncoder)) cutterExportEncoder = 'software';
+    if (cutterExportProfile === 'archive' || (options !== undefined && !Array.from(encoder.options).some((option) => option.value === cutterExportEncoder))) cutterExportEncoder = 'software';
     encoder.value = cutterExportEncoder;
-    encoder.disabled = cutterExportProfile === 'archive';
+    encoder.disabled = !options || cutterExportProfile === 'archive';
 }
 
 async function loadCutterExportOptions(file: FileCapabilityReference, generation: number): Promise<void> {
@@ -914,7 +916,7 @@ function setCutterControlsEnabled(enabled: boolean): void {
     byId<HTMLButtonElement>('cutterSaveProjectBtn').disabled = !enabled;
     byId<HTMLButtonElement>('cutterOpenProjectBtn').disabled = !enabled;
     byId<HTMLSelectElement>('cutterExportProfile').disabled = !enabled;
-    byId<HTMLSelectElement>('cutterExportEncoder').disabled = !enabled || cutterExportProfile === 'archive';
+    byId<HTMLSelectElement>('cutterExportEncoder').disabled = !enabled || !cutterExportOptions || cutterExportProfile === 'archive';
     byId<HTMLSelectElement>('cutterAudioStream').disabled = !enabled || (cutterVideoInfo?.audioStreams.length ?? 0) === 0;
     const volumeControl = document.querySelector<HTMLElement>('.cutter-volume-control');
     volumeControl?.classList.toggle('disabled', !enabled);
@@ -1072,6 +1074,7 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
     cutterActiveCutId = null;
     cutterExportProfile = 'balanced';
     cutterExportEncoder = 'software';
+    cutterExportOptions = undefined;
     cutterAudioStreamIndex = media.info.audioStreams[0]?.index ?? 0;
     cutterRecoveryDecisionPending = true;
     renderCutterProjectRecovery(null);
@@ -1160,8 +1163,19 @@ async function requestCutterVideoReplacement(file: FileCapabilityReference): Pro
 }
 
 async function selectCutterVideo(): Promise<void> {
-    const file = await window.api.selectVideoFile();
-    if (file) await requestCutterVideoReplacement(file);
+    let file: FileCapabilityReference | null;
+    try {
+        file = await window.api.selectVideoFile();
+    } catch {
+        showAppToast(UI_TEXT.cutter.unsupportedFile, 'warn');
+        return;
+    }
+    if (!file) return;
+    if (!isSupportedCutterVideoFile(file)) {
+        showAppToast(UI_TEXT.cutter.unsupportedFile, 'warn');
+        return;
+    }
+    await requestCutterVideoReplacement(file);
 }
 
 function updateTimeFromInput(): void {

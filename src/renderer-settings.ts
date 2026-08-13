@@ -55,6 +55,45 @@ function formatBytesForMetrics(bytes: number): string {
     return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function formatRuntimeMetricSummary(template: string, values: Record<string, string | number>): string {
+    return Object.entries(values).reduce(
+        (summary, [key, value]) => summary.replace(`{${key}}`, String(value)),
+        template
+    );
+}
+
+function getRuntimePerformanceModeLabel(mode: RuntimeMetricsSnapshot['config']['performanceMode']): string {
+    const labels: Record<RuntimeMetricsSnapshot['config']['performanceMode'], string> = {
+        stability: UI_TEXT.static.performanceModeStability,
+        balanced: UI_TEXT.static.performanceModeBalanced,
+        speed: UI_TEXT.static.performanceModeSpeed
+    };
+    return labels[mode];
+}
+
+function getRuntimeBooleanLabel(value: boolean): string {
+    return value ? UI_TEXT.static.runtimeMetricEnabled : UI_TEXT.static.runtimeMetricDisabled;
+}
+
+function formatRuntimeMetricCount(count: number, singular: string, plural: string): string {
+    return formatRuntimeMetricSummary(count === 1 ? singular : plural, { count });
+}
+
+function getRuntimeErrorClassLabel(errorClass: string | null): string {
+    if (!errorClass) return '-';
+    const labels: Record<string, string> = {
+        network: UI_TEXT.static.runtimeMetricErrorNetwork,
+        rate_limit: UI_TEXT.static.runtimeMetricErrorRateLimit,
+        auth: UI_TEXT.static.runtimeMetricErrorAuth,
+        tooling: UI_TEXT.static.runtimeMetricErrorTooling,
+        integrity: UI_TEXT.static.runtimeMetricErrorIntegrity,
+        io: UI_TEXT.static.runtimeMetricErrorIo,
+        validation: UI_TEXT.static.runtimeMetricErrorValidation,
+        unknown: UI_TEXT.static.runtimeMetricErrorUnknown
+    };
+    return labels[errorClass] ?? UI_TEXT.static.runtimeMetricErrorUnknown;
+}
+
 function validateFilenameTemplates(showAlert = false): boolean {
     const templates = [
         byId<HTMLInputElement>('vodFilenameTemplate').value.trim(),
@@ -123,15 +162,44 @@ async function refreshRuntimeMetrics(showLoading = true): Promise<void> {
     try {
         const metrics = await window.api.getRuntimeMetrics();
         const lines = [
-            `${UI_TEXT.static.runtimeMetricQueue}: ${metrics.queue.total} total (${metrics.queue.pending} pending, ${metrics.queue.downloading} downloading, ${metrics.queue.error} failed)`,
-            `${UI_TEXT.static.runtimeMetricMode}: ${metrics.config.performanceMode} | smartScheduler=${metrics.config.smartScheduler} | dedupe=${metrics.config.duplicatePrevention}`,
-            `${UI_TEXT.static.runtimeMetricRetries}: ${metrics.retriesScheduled} scheduled, ${metrics.retriesExhausted} exhausted`,
+            `${UI_TEXT.static.runtimeMetricQueue}: ${formatRuntimeMetricSummary(UI_TEXT.static.runtimeMetricQueueSummary, {
+                total: metrics.queue.total,
+                pending: metrics.queue.pending,
+                downloading: metrics.queue.downloading,
+                failed: metrics.queue.error
+            })}`,
+            `${UI_TEXT.static.runtimeMetricMode}: ${formatRuntimeMetricSummary(UI_TEXT.static.runtimeMetricModeSummary, {
+                mode: getRuntimePerformanceModeLabel(metrics.config.performanceMode),
+                smartScheduler: getRuntimeBooleanLabel(metrics.config.smartScheduler),
+                duplicatePrevention: getRuntimeBooleanLabel(metrics.config.duplicatePrevention)
+            })}`,
+            `${UI_TEXT.static.runtimeMetricRetries}: ${formatRuntimeMetricSummary(UI_TEXT.static.runtimeMetricRetriesSummary, {
+                scheduled: metrics.retriesScheduled,
+                exhausted: metrics.retriesExhausted
+            })}`,
             `${UI_TEXT.static.runtimeMetricIntegrity}: ${metrics.integrityFailures}`,
-            `${UI_TEXT.static.runtimeMetricCache}: hits=${metrics.cacheHits}, misses=${metrics.cacheMisses}, vod=${metrics.caches.vodList}, users=${metrics.caches.loginToUserId}, clips=${metrics.caches.clipInfo}`,
-            `${UI_TEXT.static.runtimeMetricBandwidth}: current=${formatBytesForMetrics(metrics.lastSpeedBytesPerSec)}/s, avg=${formatBytesForMetrics(metrics.avgSpeedBytesPerSec)}/s`,
-            `${UI_TEXT.static.runtimeMetricDownloads}: started=${metrics.downloadsStarted}, done=${metrics.downloadsCompleted}, failed=${metrics.downloadsFailed}, bytes=${formatBytesForMetrics(metrics.downloadedBytesTotal)}`,
+            `${UI_TEXT.static.runtimeMetricCache}: ${formatRuntimeMetricSummary(UI_TEXT.static.runtimeMetricCacheSummary, {
+                hits: formatRuntimeMetricCount(metrics.cacheHits, UI_TEXT.static.runtimeMetricCacheHitOne, UI_TEXT.static.runtimeMetricCacheHitMany),
+                misses: formatRuntimeMetricCount(metrics.cacheMisses, UI_TEXT.static.runtimeMetricCacheMissOne, UI_TEXT.static.runtimeMetricCacheMissMany),
+                vods: formatRuntimeMetricCount(metrics.caches.vodList, UI_TEXT.static.runtimeMetricCacheVodOne, UI_TEXT.static.runtimeMetricCacheVodMany),
+                users: formatRuntimeMetricCount(metrics.caches.loginToUserId, UI_TEXT.static.runtimeMetricCacheUserOne, UI_TEXT.static.runtimeMetricCacheUserMany),
+                clips: formatRuntimeMetricCount(metrics.caches.clipInfo, UI_TEXT.static.runtimeMetricCacheClipOne, UI_TEXT.static.runtimeMetricCacheClipMany)
+            })}`,
+            `${UI_TEXT.static.runtimeMetricBandwidth}: ${formatRuntimeMetricSummary(UI_TEXT.static.runtimeMetricBandwidthSummary, {
+                current: formatBytesForMetrics(metrics.lastSpeedBytesPerSec),
+                average: formatBytesForMetrics(metrics.avgSpeedBytesPerSec)
+            })}`,
+            `${UI_TEXT.static.runtimeMetricDownloads}: ${formatRuntimeMetricSummary(UI_TEXT.static.runtimeMetricDownloadsSummary, {
+                started: metrics.downloadsStarted,
+                completed: metrics.downloadsCompleted,
+                failed: metrics.downloadsFailed,
+                bytes: formatBytesForMetrics(metrics.downloadedBytesTotal)
+            })}`,
             `${UI_TEXT.static.runtimeMetricActive}: ${metrics.activeItemTitle || '-'} (${metrics.activeItemId || '-'})`,
-            `${UI_TEXT.static.runtimeMetricLastError}: ${metrics.lastErrorClass || '-'}, retryDelay=${metrics.lastRetryDelaySeconds}s`,
+            `${UI_TEXT.static.runtimeMetricLastError}: ${formatRuntimeMetricSummary(UI_TEXT.static.runtimeMetricLastErrorSummary, {
+                errorClass: getRuntimeErrorClassLabel(metrics.lastErrorClass),
+                retryDelay: metrics.lastRetryDelaySeconds
+            })}`,
             `${UI_TEXT.static.runtimeMetricUpdated}: ${new Date(metrics.timestamp).toLocaleString(currentLanguage === 'en' ? 'en-US' : 'de-DE')}`
         ];
 
@@ -591,12 +659,12 @@ async function importConfigFromFile(): Promise<void> {
     const result = await window.api.importConfig();
     const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
     if (result.success) {
+        invalidatePreflightResult();
         // Reload local config copy + refresh forms / streamer list / VOD grid
         try {
             config = await window.api.getConfig();
             if (typeof setLanguage === 'function' && typeof config.language === 'string') {
                 setLanguage(config.language);
-                invalidatePreflightResult();
             }
             if (typeof renderStreamers === 'function') renderStreamers();
             if (typeof syncSettingsFormFromConfig === 'function') syncSettingsFormFromConfig();
@@ -604,6 +672,7 @@ async function importConfigFromFile(): Promise<void> {
                 renderVodGridFromCurrentState();
             }
         } catch { /* ignore — next refresh will catch up */ }
+        refreshLocalizedPreflightUi();
         if (toast) toast(UI_TEXT.static.configImported, 'info');
     } else if (result.cancelled) {
         // User cancelled the dialog — no toast needed.

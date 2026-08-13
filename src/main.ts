@@ -7081,8 +7081,13 @@ async function processQueue(manualOverride = false): Promise<void> {
 // ==========================================
 // WINDOW CREATION
 // ==========================================
+function resolveNativeThemeSource(theme: string): 'system' | 'light' | 'dark' {
+    if (theme === 'system') return 'system';
+    return theme === 'light' ? 'light' : 'dark';
+}
+
 function createWindow(): void {
-    nativeTheme.themeSource = config.theme === 'light' ? 'light' : 'dark';
+    nativeTheme.themeSource = resolveNativeThemeSource(config.theme);
     const windowIconPath = WINDOWS_APP_ICON_PATH ?? path.join(__dirname, '../build/icon.png');
 
     mainWindow = new BrowserWindow({
@@ -7571,7 +7576,7 @@ ipcMain.handle('save-config', (event, newConfig: Partial<Config>, fileCapability
     }
 
     if (config.theme !== previousTheme) {
-        nativeTheme.themeSource = config.theme === 'light' ? 'light' : 'dark';
+        nativeTheme.themeSource = resolveNativeThemeSource(config.theme);
     }
 
     if (config.persist_queue_on_restart === false) {

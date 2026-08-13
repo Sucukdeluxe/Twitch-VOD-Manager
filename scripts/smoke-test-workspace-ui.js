@@ -229,6 +229,117 @@ async function run() {
     check(preflightAfterPathChange.english.result === 'No checks run yet.' && preflightAfterPathChange.english.badgeUnknown && preflightAfterPathChange.english.badge === 'System: Unknown', `Download path change kept a stale English system check: ${JSON.stringify(preflightAfterPathChange.english)}`);
     check(preflightAfterPathChange.german.result === 'Noch kein Check ausgeführt.' && preflightAfterPathChange.german.badgeUnknown && preflightAfterPathChange.german.badge === 'System: Unbekannt', `Download path change restored a stale German system check: ${JSON.stringify(preflightAfterPathChange.german)}`);
 
+    const configBeforeImportChecks = await win.evaluate(() => window.api.getConfig());
+    await app.evaluate(({ ipcMain }, currentConfig) => {
+      ipcMain.removeHandler('run-preflight');
+      ipcMain.handle('run-preflight', async () => ({
+        ok: true,
+        autoFixApplied: false,
+        checks: {
+          internet: true,
+          streamlink: true,
+          ffmpeg: true,
+          ffprobe: true,
+          downloadPathWritable: true
+        },
+        messages: [],
+        timestamp: '2026-01-01T00:00:00Z'
+      }));
+      ipcMain.removeHandler('import-config');
+      ipcMain.handle('import-config', async () => ({ success: true, filePath: 'fixture.json' }));
+      ipcMain.removeHandler('get-config');
+      const importedConfig = { ...currentConfig };
+      delete importedConfig.language;
+      ipcMain.handle('get-config', async () => importedConfig);
+    }, configBeforeImportChecks);
+    const preflightAfterImportWithoutLanguage = await win.evaluate(async () => {
+      window.changeLanguage('en');
+      await window.runPreflight(false);
+      await window.importConfigFromFile();
+      return {
+        result: document.getElementById('preflightResult')?.textContent || '',
+        badge: document.getElementById('healthBadge')?.textContent || '',
+        badgeUnknown: document.getElementById('healthBadge')?.classList.contains('unknown') || false
+      };
+    });
+    checks.preflightAfterImportWithoutLanguage = preflightAfterImportWithoutLanguage;
+    check(preflightAfterImportWithoutLanguage.result === 'No checks run yet.' && preflightAfterImportWithoutLanguage.badgeUnknown && preflightAfterImportWithoutLanguage.badge === 'System: Unknown', `Config import without a language field kept a stale system check: ${JSON.stringify(preflightAfterImportWithoutLanguage)}`);
+
+    await app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('get-config');
+      ipcMain.handle('get-config', async () => {
+        throw new Error('fixture get-config failure');
+      });
+    });
+    const preflightAfterImportRefreshFailure = await win.evaluate(async () => {
+      await window.runPreflight(false);
+      await window.importConfigFromFile();
+      return {
+        result: document.getElementById('preflightResult')?.textContent || '',
+        badge: document.getElementById('healthBadge')?.textContent || '',
+        badgeUnknown: document.getElementById('healthBadge')?.classList.contains('unknown') || false
+      };
+    });
+    checks.preflightAfterImportRefreshFailure = preflightAfterImportRefreshFailure;
+    check(preflightAfterImportRefreshFailure.result === 'No checks run yet.' && preflightAfterImportRefreshFailure.badgeUnknown && preflightAfterImportRefreshFailure.badge === 'System: Unknown', `Config import lost its system-check invalidation when getConfig failed: ${JSON.stringify(preflightAfterImportRefreshFailure)}`);
+
+    await app.evaluate(({ ipcMain }, currentConfig) => {
+      ipcMain.removeHandler('get-config');
+      ipcMain.handle('get-config', async () => ({ ...currentConfig, language: 'de' }));
+      ipcMain.removeHandler('run-preflight');
+      ipcMain.handle('run-preflight', () => new Promise((resolve) => {
+        globalThis.__workspaceImportedPreflightResolve = () => resolve({
+          ok: true,
+          autoFixApplied: false,
+          checks: {
+            internet: true,
+            streamlink: true,
+            ffmpeg: true,
+            ffprobe: true,
+            downloadPathWritable: true
+          },
+          messages: [],
+          timestamp: '2026-01-01T00:00:00Z'
+        });
+      }));
+    }, configBeforeImportChecks);
+    await win.evaluate(() => {
+      window.changeLanguage('en');
+      globalThis.__workspaceImportedPreflightPending = window.runPreflight(false);
+    });
+    await app.evaluate(async () => {
+      const deadline = Date.now() + 5000;
+      while (typeof globalThis.__workspaceImportedPreflightResolve !== 'function') {
+        if (Date.now() >= deadline) throw new Error('Timed out waiting for the imported-config system check');
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    });
+    const preflightDuringImport = await win.evaluate(async () => {
+      await window.importConfigFromFile();
+      return {
+        label: document.getElementById('btnPreflightRun')?.textContent || '',
+        disabled: document.getElementById('btnPreflightRun')?.disabled || false,
+        result: document.getElementById('preflightResult')?.textContent || '',
+        badge: document.getElementById('healthBadge')?.textContent || ''
+      };
+    });
+    await app.evaluate(() => globalThis.__workspaceImportedPreflightResolve());
+    const preflightAfterImportedRun = await win.evaluate(async () => {
+      await globalThis.__workspaceImportedPreflightPending;
+      return {
+        label: document.getElementById('btnPreflightRun')?.textContent || '',
+        disabled: document.getElementById('btnPreflightRun')?.disabled || false,
+        result: document.getElementById('preflightResult')?.textContent || '',
+        badge: document.getElementById('healthBadge')?.textContent || '',
+        badgeUnknown: document.getElementById('healthBadge')?.classList.contains('unknown') || false
+      };
+    });
+    checks.preflightImportInFlight = { during: preflightDuringImport, after: preflightAfterImportedRun };
+    check(preflightDuringImport.label === 'Prüfe...' && preflightDuringImport.disabled, `Config import replaced the localized running system-check label: ${JSON.stringify(preflightDuringImport)}`);
+    check(preflightDuringImport.result === 'Noch kein Check ausgeführt.' && preflightDuringImport.badge === 'System: Unbekannt', `Config import did not invalidate the running system check immediately: ${JSON.stringify(preflightDuringImport)}`);
+    check(preflightAfterImportedRun.label === 'Check ausführen' && !preflightAfterImportedRun.disabled, `Imported-config system check did not finish with the current localized label: ${JSON.stringify(preflightAfterImportedRun)}`);
+    check(preflightAfterImportedRun.result === 'Noch kein Check ausgeführt.' && preflightAfterImportedRun.badgeUnknown && preflightAfterImportedRun.badge === 'System: Unbekannt', `Stale system-check result returned after config import: ${JSON.stringify(preflightAfterImportedRun)}`);
+
     const mergeAddToolbarActions = await win.evaluate(() => {
       const capture = () => {
         const button = document.querySelector('[data-toolbar-for="merge"] button[onclick="addMergeFiles()"]');
@@ -880,6 +991,89 @@ async function run() {
     check(downloadSettingsNarrow.columns === 1, `Narrow Download Settings does not collapse to one column: ${downloadSettingsNarrow.columns}`);
     check(downloadSettingsNarrow.documentOverflow <= 1 && downloadSettingsNarrow.tabOverflow <= 1, `Narrow Download Settings causes horizontal overflow: ${JSON.stringify(downloadSettingsNarrow)}`);
 
+    await app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('get-runtime-metrics');
+      ipcMain.handle('get-runtime-metrics', async () => ({
+        cacheHits: 1,
+        cacheMisses: 2,
+        duplicateSkips: 0,
+        retriesScheduled: 4,
+        retriesExhausted: 1,
+        integrityFailures: 5,
+        downloadsStarted: 11,
+        downloadsCompleted: 12,
+        downloadsFailed: 13,
+        downloadedBytesTotal: 2048,
+        lastSpeedBytesPerSec: 2048,
+        avgSpeedBytesPerSec: 1024,
+        activeItemId: 'vod-42',
+        activeItemTitle: 'Fixture',
+        lastErrorClass: 'rate_limit',
+        lastRetryDelaySeconds: 14,
+        timestamp: '2026-01-01T12:34:56Z',
+        queue: {
+          pending: 2,
+          downloading: 3,
+          paused: 0,
+          completed: 0,
+          error: 2,
+          total: 7
+        },
+        caches: {
+          loginToUserId: 2,
+          vodList: 1,
+          clipInfo: 2
+        },
+        config: {
+          performanceMode: 'stability',
+          smartScheduler: false,
+          metadataCacheMinutes: 10,
+          duplicatePrevention: true
+        }
+      }));
+    });
+    const captureRuntimeMetrics = async (language) => win.evaluate(async (nextLanguage) => {
+      window.changeLanguage(nextLanguage);
+      await window.refreshRuntimeMetrics();
+      return {
+        title: document.getElementById('runtimeMetricsTitle')?.textContent?.trim() || '',
+        exportLabel: document.getElementById('btnExportMetrics')?.textContent?.trim() || '',
+        autoRefreshLabel: document.getElementById('runtimeMetricsAutoRefreshText')?.textContent?.trim() || '',
+        lines: (document.getElementById('runtimeMetricsOutput')?.textContent || '').split('\n')
+      };
+    }, language);
+    const germanRuntimeMetrics = await captureRuntimeMetrics('de');
+    const englishRuntimeMetrics = await captureRuntimeMetrics('en');
+    await win.evaluate(() => window.changeLanguage('de'));
+    checks.runtimeMetricsLocalization = { german: germanRuntimeMetrics, english: englishRuntimeMetrics };
+    const expectedGermanRuntimeLines = [
+      'Warteschlange: 7 insgesamt (2 ausstehend, 3 laufend, 2 fehlgeschlagen)',
+      'Modus: Max Stabilität | Intelligente Planung: deaktiviert | Duplikatschutz: aktiviert',
+      'Wiederholungen: 4 geplant, 1 ausgeschöpft',
+      'Integritätsfehler: 5',
+      'Zwischenspeicher: 1 Treffer, 2 Fehlzugriffe, 1 VOD, 2 Nutzer, 2 Clips',
+      'Bandbreite: aktuell 2.0 KB/s, durchschnittlich 1.0 KB/s',
+      'Downloads: 11 gestartet, 12 abgeschlossen, 13 fehlgeschlagen, 2.0 KB übertragen',
+      'Aktiver Eintrag: Fixture (vod-42)',
+      'Letzte Fehlerklasse: Anfragelimit, Wiederholungsverzögerung: 14 s'
+    ];
+    const expectedEnglishRuntimeLines = [
+      'Queue: 7 total (2 pending, 3 downloading, 2 failed)',
+      'Mode: Max Stability | Smart scheduler: disabled | Duplicate prevention: enabled',
+      'Retries: 4 scheduled, 1 exhausted',
+      'Integrity failures: 5',
+      'Cache: 1 hit, 2 misses, 1 VOD, 2 users, 2 clips',
+      'Bandwidth: current 2.0 KB/s, average 1.0 KB/s',
+      'Downloads: 11 started, 12 completed, 13 failed, 2.0 KB transferred',
+      'Active item: Fixture (vod-42)',
+      'Last error class: Rate limit, retry delay: 14 s'
+    ];
+    check(germanRuntimeMetrics.title === 'Laufzeitmetriken' && germanRuntimeMetrics.exportLabel === 'JSON exportieren' && germanRuntimeMetrics.autoRefreshLabel === 'Automatisch aktualisieren', `German runtime metrics controls are not fully localized: ${JSON.stringify(germanRuntimeMetrics)}`);
+    check(JSON.stringify(germanRuntimeMetrics.lines.slice(0, 9)) === JSON.stringify(expectedGermanRuntimeLines), `German runtime metrics output is not naturally localized: ${JSON.stringify(germanRuntimeMetrics.lines)}`);
+    check(!/\b(?:total|pending|downloading|failed|balanced|true|false|scheduled|exhausted|hits|misses|current|avg|started|done|bytes|retryDelay|smartScheduler|dedupe|network|rate_limit|auth|tooling|integrity|io|validation|unknown|Stabilitat)\b/i.test(germanRuntimeMetrics.lines.join('\n')), `German runtime metrics retain raw English fragments: ${germanRuntimeMetrics.lines.join(' | ')}`);
+    check(englishRuntimeMetrics.title === 'Runtime Metrics' && englishRuntimeMetrics.exportLabel === 'Export JSON' && englishRuntimeMetrics.autoRefreshLabel === 'Auto refresh', `English runtime metrics controls regressed: ${JSON.stringify(englishRuntimeMetrics)}`);
+    check(JSON.stringify(englishRuntimeMetrics.lines.slice(0, 9)) === JSON.stringify(expectedEnglishRuntimeLines), `English runtime metrics output regressed: ${JSON.stringify(englishRuntimeMetrics.lines)}`);
+
     const diagnosticLayouts = [];
     for (const target of [TARGETS[2], TARGETS[1], TARGETS[0]]) {
       await win.setViewportSize(target);
@@ -1483,17 +1677,17 @@ async function run() {
     await win.emulateMedia({ colorScheme: 'dark' });
     await win.locator('#workspaceThemePicker [data-theme="twitch"]').click();
     await win.waitForTimeout(260);
-    const darkTheme = await captureTheme();
+    const darkTheme = { ...await captureTheme(), nativeThemeSource: await app.evaluate(({ nativeTheme }) => nativeTheme.themeSource) };
     await win.locator('#workspaceThemePicker [data-theme="system"]').click();
     await win.waitForTimeout(260);
-    const systemDarkTheme = await captureTheme();
+    const systemDarkTheme = { ...await captureTheme(), nativeThemeSource: await app.evaluate(({ nativeTheme }) => nativeTheme.themeSource) };
     await win.locator('#workspaceThemePicker [data-theme="light"]').click();
     await win.waitForTimeout(260);
-    const lightTheme = await captureTheme();
+    const lightTheme = { ...await captureTheme(), nativeThemeSource: await app.evaluate(({ nativeTheme }) => nativeTheme.themeSource) };
     await win.emulateMedia({ colorScheme: 'light' });
     await win.locator('#workspaceThemePicker [data-theme="system"]').click();
     await win.waitForTimeout(260);
-    const systemLightTheme = await captureTheme();
+    const systemLightTheme = { ...await captureTheme(), nativeThemeSource: await app.evaluate(({ nativeTheme }) => nativeTheme.themeSource) };
     checks.themes = { darkTheme, systemDarkTheme, lightTheme, systemLightTheme };
 
     for (const [name, theme] of Object.entries({ dark: darkTheme, systemDark: systemDarkTheme, light: lightTheme, systemLight: systemLightTheme })) {
@@ -1507,6 +1701,9 @@ async function run() {
     check(systemDarkTheme.bodyClass === 'theme-system', `System-Dark theme body class is ${systemDarkTheme.bodyClass}`);
     check(lightTheme.bodyClass === 'theme-light', `Light theme body class is ${lightTheme.bodyClass}`);
     check(systemLightTheme.bodyClass === 'theme-system', `System theme body class is ${systemLightTheme.bodyClass}`);
+    check(darkTheme.nativeThemeSource === 'dark', `Explicit Dark sets Electron nativeTheme to ${darkTheme.nativeThemeSource}`);
+    check(lightTheme.nativeThemeSource === 'light', `Explicit Light sets Electron nativeTheme to ${lightTheme.nativeThemeSource}`);
+    check(systemDarkTheme.nativeThemeSource === 'system' && systemLightTheme.nativeThemeSource === 'system', `System theme is forced away from Electron/Windows: ${systemDarkTheme.nativeThemeSource}/${systemLightTheme.nativeThemeSource}`);
     check([darkTheme, systemDarkTheme].every((theme) => theme.checkboxColor === 'rgb(34, 197, 94)' && /23111111/i.test(theme.checkboxBackground)), `Dark checked Settings toggles do not use green with a black check: ${JSON.stringify({ darkTheme, systemDarkTheme })}`);
     check([lightTheme, systemLightTheme].every((theme) => theme.checkboxColor === theme.primaryColor && /23ffffff/i.test(theme.checkboxBackground)), `Light checked Settings toggles do not use the theme primary color with a white check: ${JSON.stringify({ lightTheme, systemLightTheme })}`);
     check(darkTheme.bodyBackground !== lightTheme.bodyBackground, 'Explicit Dark and Light themes compute the same body background');

@@ -15,9 +15,9 @@ function check(condition, message) {
   if (!condition) failures.push(message);
 }
 
-check(packageJson.version === '1.0.16', `package version is ${packageJson.version}`);
-check(packageLock.version === '1.0.16', `lockfile version is ${packageLock.version}`);
-check(packageLock.packages?.['']?.version === '1.0.16', `lockfile root package version is ${packageLock.packages?.['']?.version}`);
+check(packageJson.version === '1.0.17', `package version is ${packageJson.version}`);
+check(packageLock.version === '1.0.17', `lockfile version is ${packageLock.version}`);
+check(packageLock.packages?.['']?.version === '1.0.17', `lockfile root package version is ${packageLock.packages?.['']?.version}`);
 check(packageJson.build?.appId === 'io.github.sucukdeluxe.twitch-vod-manager', `appId is ${packageJson.build?.appId}`);
 check(packageJson.build?.publish?.provider === 'generic', `publish provider is ${packageJson.build?.publish?.provider}`);
 check(packageJson.build?.publish?.url === 'https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/latest/download/', `publish URL is ${packageJson.build?.publish?.url}`);
@@ -65,7 +65,7 @@ check(mainSource.includes('GITHUB_RELEASES_DOWNLOAD_BASE_URL'), 'GitHub releases
 check(mainSource.includes('https://api.github.com/repos/Sucukdeluxe/Twitch-VOD-Manager/releases/latest'), 'GitHub latest release API URL is missing');
 check(mainSource.includes('https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/download'), 'GitHub release download URL is missing');
 check(!/storyboards\/\d{8,12}(?:-|\/)/.test(mainSource), 'numeric Twitch VOD example remains in the public source');
-check(indexSource.includes('Version: v1.0.16'), 'initial version label is not 1.0.16');
+check(indexSource.includes('Version: v1.0.17'), 'initial version label is not 1.0.17');
 check(!indexSource.includes('Version: v4.1.13'), 'legacy version label is still present');
 check(fs.existsSync(manifestPath), 'public release manifest is missing');
 

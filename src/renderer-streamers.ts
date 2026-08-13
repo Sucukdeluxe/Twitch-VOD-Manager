@@ -452,6 +452,10 @@ function initVodScrollTracking(): void {
     }, { passive: true });
 }
 
+function isSupportedCutterVideoFile(file: { name: string }): boolean {
+    return /\.(mp4|m4v|mov|webm|mkv|ts|avi)$/i.test(file.name);
+}
+
 function initCutterDragDrop(): void {
     const tab = document.getElementById('cutterTab');
     if (!tab) return;
@@ -485,8 +489,7 @@ function initCutterDragDrop(): void {
 
         const files = Array.from(e.dataTransfer.files || []);
         if (files.length === 0) return;
-        const allowed = /\.(mp4|m4v|mov|webm|mkv|ts|avi)$/i;
-        const file = files.find((entry) => allowed.test(entry.name));
+        const file = files.find(isSupportedCutterVideoFile);
         if (!file) {
             showAppToast(UI_TEXT.cutter.unsupportedFile, 'warn');
             return;

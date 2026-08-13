@@ -75,6 +75,29 @@ async function loadCutterCapability(win, filePath) {
   return capability;
 }
 
+async function dropCutterFile(win, filePath) {
+  const inputId = `cutter-drop-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  await win.evaluate((id) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.id = id;
+    document.body.appendChild(input);
+  }, inputId);
+  await win.locator(`#${inputId}`).setInputFiles(filePath);
+  await win.evaluate((id) => {
+    const input = document.getElementById(id);
+    const file = input instanceof HTMLInputElement ? input.files?.[0] : null;
+    const tab = document.getElementById('cutterTab');
+    if (!file || !tab) throw new Error('Cutter drop fixture is unavailable');
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    for (const type of ['dragenter', 'dragover', 'drop']) {
+      tab.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    }
+    input.remove();
+  }, inputId);
+}
+
 function createTestVideo(environment) {
   const filePath = path.join(environment.mediaDir, 'Cutter Test #ä 01.mp4');
   runBinary(resolveBinary(environment, 'ffmpeg'), [
@@ -143,6 +166,12 @@ function createUnsupportedVideo(environment, sourceFile) {
   return filePath;
 }
 
+function createUnsupportedImage(environment) {
+  const filePath = path.join(environment.mediaDir, 'Unsupported drop.png');
+  fs.writeFileSync(filePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'));
+  return filePath;
+}
+
 function createLongVideo(environment) {
   const filePath = path.join(environment.mediaDir, 'Long Cutter Test.mp4');
   runBinary(resolveBinary(environment, 'ffmpeg'), [
@@ -157,17 +186,19 @@ function createLongVideo(environment) {
 
 async function run() {
   const environment = createE2eEnvironment('cutter', { language: 'en', theme: 'twitch' });
+  const remaindersOnly = process.env.TWITCH_VOD_MANAGER_CUTTER_REMAINDERS_ONLY === '1';
   const inputFile = createTestVideo(environment);
-  const scrubStressInputFile = process.env.TWITCH_VOD_MANAGER_SCRUB_MEDIA && fs.existsSync(process.env.TWITCH_VOD_MANAGER_SCRUB_MEDIA)
+  const scrubStressInputFile = remaindersOnly ? null : process.env.TWITCH_VOD_MANAGER_SCRUB_MEDIA && fs.existsSync(process.env.TWITCH_VOD_MANAGER_SCRUB_MEDIA)
     ? process.env.TWITCH_VOD_MANAGER_SCRUB_MEDIA
     : createScrubStressVideo(environment);
-  const mediumInputFile = process.env.TWITCH_VOD_MANAGER_MEDIUM_MEDIA && fs.existsSync(process.env.TWITCH_VOD_MANAGER_MEDIUM_MEDIA)
+  const mediumInputFile = remaindersOnly ? null : process.env.TWITCH_VOD_MANAGER_MEDIUM_MEDIA && fs.existsSync(process.env.TWITCH_VOD_MANAGER_MEDIUM_MEDIA)
     ? process.env.TWITCH_VOD_MANAGER_MEDIUM_MEDIA
     : createMediumVideo(environment);
-  const additionalContainerFiles = createAdditionalContainerVideos(environment, inputFile);
-  const unsupportedInputFile = createUnsupportedVideo(environment, inputFile);
-  const silentInputFile = createSilentPortraitVideo(environment);
-  const longInputFile = createLongVideo(environment);
+  const additionalContainerFiles = remaindersOnly ? {} : createAdditionalContainerVideos(environment, inputFile);
+  const unsupportedInputFile = remaindersOnly ? null : createUnsupportedVideo(environment, inputFile);
+  const unsupportedImageFile = createUnsupportedImage(environment);
+  const silentInputFile = remaindersOnly ? null : createSilentPortraitVideo(environment);
+  const longInputFile = remaindersOnly ? null : createLongVideo(environment);
   const outputFile = path.join(environment.mediaDir, 'Cutter Test #ä 01 edited.mp4');
   const silentOutputFile = path.join(environment.mediaDir, 'Silent Portrait edited.mp4');
   const failures = [];
@@ -200,33 +231,93 @@ async function run() {
     await win.setViewportSize({ width: 1440, height: 900 });
     await win.emulateMedia({ reducedMotion: 'reduce' });
     await win.evaluate(() => window.showTab('cutter'));
+    const cutterSourceVisibility = [];
+    for (const viewport of [{ width: 1060, height: 700 }, { width: 1180, height: 900 }, { width: 1184, height: 661 }, { width: 1440, height: 679 }, { width: 1440, height: 900 }, { width: 2048, height: 1152 }]) {
+      await win.setViewportSize(viewport);
+      cutterSourceVisibility.push(await win.evaluate((size) => {
+        const source = document.querySelector('.cutter-source-bar');
+        const workspace = document.getElementById('cutterWorkspace');
+        workspace.classList.remove('shown');
+        const emptyDisplay = getComputedStyle(source).display;
+        const emptyHeight = source.getBoundingClientRect().height;
+        workspace.classList.add('shown');
+        const loadedDisplay = getComputedStyle(source).display;
+        const loadedHeight = source.getBoundingClientRect().height;
+        return {
+          size,
+          emptyDisplay,
+          emptyHeight,
+          loadedDisplay,
+          loadedHeight
+        };
+      }, viewport));
+    }
+    check(
+      cutterSourceVisibility.every((entry) => entry.emptyDisplay !== 'none' && entry.emptyHeight > 0),
+      `The empty cutter source selector is not visible at every viewport: ${JSON.stringify(cutterSourceVisibility)}`
+    );
+    check(
+      cutterSourceVisibility.every((entry) => entry.loadedDisplay === 'none' && entry.loadedHeight === 0),
+      `The loaded cutter source selector remains visible at some viewports: ${JSON.stringify(cutterSourceVisibility)}`
+    );
+    await win.setViewportSize({ width: 1440, height: 900 });
     await win.evaluate(() => {
       document.getElementById('cutterWorkspace').classList.add('shown');
-      document.getElementById('cutterExportProfile').disabled = false;
+      for (const id of ['cutterExportProfile', 'cutterExportEncoder', 'cutterAudioStream']) document.getElementById(id).disabled = false;
     });
-    await win.locator('#cutterExportProfile').waitFor({ state: 'visible' });
-    const cutterExportProfileBox = await win.locator('#cutterExportProfile').boundingBox();
-    if (!cutterExportProfileBox) throw new Error('Export profile is not visible');
-    await win.mouse.move(cutterExportProfileBox.x + cutterExportProfileBox.width / 2, cutterExportProfileBox.y + cutterExportProfileBox.height / 2);
-    const cutterExportProfilePresentation = await win.evaluate(() => {
-      const style = getComputedStyle(document.getElementById('cutterExportProfile'));
-      return {
-        backgroundImage: style.backgroundImage,
-        backgroundRepeat: style.backgroundRepeat,
-        backgroundPosition: style.backgroundPosition,
-        sourceDisplay: getComputedStyle(document.querySelector('.cutter-source-bar')).display,
-      };
-    });
+    const cutterExportSelectPresentation = [];
+    for (const theme of ['theme-twitch', 'theme-light']) {
+      await win.evaluate((className) => { document.body.className = className; }, theme);
+      for (const id of ['cutterExportProfile', 'cutterExportEncoder', 'cutterAudioStream']) {
+        const select = win.locator(`#${id}`);
+        await select.waitFor({ state: 'visible' });
+        for (const state of ['default', 'hover', 'focus', 'disabled']) {
+          await win.evaluate(({ selectId, selectState }) => {
+            const element = document.getElementById(selectId);
+            element.disabled = selectState === 'disabled';
+            if (selectState !== 'focus') element.blur();
+          }, { selectId: id, selectState: state });
+          if (state === 'hover') await select.hover();
+          if (state === 'focus') await select.focus();
+          cutterExportSelectPresentation.push(await select.evaluate((element, meta) => {
+            const style = getComputedStyle(element);
+            const context = document.createElement('canvas').getContext('2d');
+            context.font = style.font;
+            const textWidth = context.measureText(element.selectedOptions[0]?.textContent || '').width;
+            const availableTextWidth = element.getBoundingClientRect().width
+              - Number.parseFloat(style.paddingLeft)
+              - Number.parseFloat(style.paddingRight)
+              - Number.parseFloat(style.borderLeftWidth)
+              - Number.parseFloat(style.borderRightWidth);
+            return {
+              ...meta,
+              appearance: style.appearance,
+              backgroundImages: (style.backgroundImage.match(/url\(/g) || []).length,
+              backgroundRepeat: style.backgroundRepeat,
+              backgroundPosition: style.backgroundPosition,
+              paddingRight: Number.parseFloat(style.paddingRight),
+              textWidth,
+              availableTextWidth,
+              horizontalOverflow: element.scrollWidth - element.clientWidth
+            };
+          }, { theme, id, state }));
+        }
+      }
+    }
     check(
-      cutterExportProfilePresentation.backgroundImage !== 'none'
-        && cutterExportProfilePresentation.backgroundRepeat === 'no-repeat'
-        && cutterExportProfilePresentation.backgroundPosition.includes('8px')
-        && cutterExportProfilePresentation.sourceDisplay === 'none',
-      `Export profile indicator is tiled or misplaced: ${JSON.stringify(cutterExportProfilePresentation)}`
+      cutterExportSelectPresentation.every((entry) => entry.appearance === 'none'
+        && entry.backgroundImages === 1
+        && entry.backgroundRepeat === 'no-repeat'
+        && entry.backgroundPosition.includes('8px')
+        && entry.paddingRight >= 28
+        && entry.textWidth <= entry.availableTextWidth + 0.5
+        && entry.horizontalOverflow <= 1),
+      `Cutter export selects have duplicate indicators or clipped text: ${JSON.stringify(cutterExportSelectPresentation)}`
     );
     await win.evaluate(() => {
+      document.body.className = 'theme-twitch';
       document.getElementById('cutterWorkspace').classList.remove('shown');
-      document.getElementById('cutterExportProfile').disabled = true;
+      for (const id of ['cutterExportProfile', 'cutterExportEncoder', 'cutterAudioStream']) document.getElementById(id).disabled = true;
     });
     const additionalContainerCapabilities = await Promise.all(Object.entries(additionalContainerFiles).map(async ([extension, filePath]) => ({
       extension,
@@ -344,7 +435,8 @@ async function run() {
       `Disabled empty-player volume control still expands on hover: ${JSON.stringify({ emptyVolumeBefore, emptyVolumeAfter })}`
     );
     if (process.env.TWITCH_VOD_MANAGER_CUTTER_EMPTY_ONLY === '1') {
-      console.log(JSON.stringify({ failures, runtimeIssues, cutterExportProfilePresentation, emptyLayout, emptyFullscreenLayout, emptyVolumeBefore, emptyVolumeAfter }, null, 2));
+      check(runtimeIssues.length === 0, runtimeIssues.join('\n'));
+      console.log(JSON.stringify({ failures, runtimeIssues, cutterSourceVisibility, cutterExportSelectPresentation, emptyLayout, emptyFullscreenLayout, emptyVolumeBefore, emptyVolumeAfter }, null, 2));
       if (failures.length > 0) process.exitCode = 1;
       return;
     }
@@ -418,41 +510,10 @@ async function run() {
       return video instanceof HTMLVideoElement
         && video.readyState >= HTMLMediaElement.HAVE_METADATA
         && document.querySelectorAll('#cutterThumbnailStrip img').length > 0
-        && window.__cutterAssetAudit.waveformLoads.length > 0;
+        && window.__cutterAssetAudit.waveformLoads.length > 0
+        && document.getElementById('cutterAudioStream').selectedOptions[0]?.textContent !== 'Keine Audiospur';
     }, null, { timeout: 90000 });
     await win.waitForTimeout(480);
-    const revealAnimation = await win.evaluate(() => {
-      const preview = document.getElementById('cutterPreview').getBoundingClientRect();
-      const frames = window.__cutterRevealFrames;
-      return {
-        frames: frames.length,
-        runningFrames: frames.filter((frame) => frame.running).length,
-        distinctWidths: new Set(frames.map((frame) => frame.width.toFixed(1))).size,
-        distinctHeights: new Set(frames.map((frame) => frame.height.toFixed(1))).size,
-        intermediate: frames.some((frame) => {
-          const widthMin = Math.min(frames[0].width, preview.width);
-          const widthMax = Math.max(frames[0].width, preview.width);
-          const heightMin = Math.min(frames[0].height, preview.height);
-          const heightMax = Math.max(frames[0].height, preview.height);
-          return frame.width > widthMin + 2 && frame.width < widthMax - 2
-            && frame.height > heightMin + 2 && frame.height < heightMax - 2;
-        }),
-        finalWidth: preview.width,
-        finalHeight: preview.height,
-        lastWidth: frames.at(-1)?.width ?? null,
-        lastHeight: frames.at(-1)?.height ?? null
-      };
-    });
-    check(
-      revealAnimation.frames >= 4
-        && revealAnimation.runningFrames >= 3
-        && revealAnimation.distinctWidths >= 3
-        && revealAnimation.distinctHeights >= 3
-        && revealAnimation.intermediate
-        && Math.abs(revealAnimation.lastWidth - revealAnimation.finalWidth) <= 2
-        && Math.abs(revealAnimation.lastHeight - revealAnimation.finalHeight) <= 2,
-      `Empty-to-editor geometry does not glide through visible frames: ${JSON.stringify(revealAnimation)}`
-    );
     const firstAssetQuality = await win.evaluate(async () => {
       const images = [...document.querySelectorAll('#cutterThumbnailStrip img')];
       const strip = document.getElementById('cutterThumbnailStrip');
@@ -521,6 +582,268 @@ async function run() {
       initialAssetStability.thumbnailSets === 1 && initialAssetStability.waveformLoads === 1,
       `Timeline assets visibly switch quality before an explicit zoom: ${JSON.stringify(initialAssetStability)}`
     );
+    await win.setViewportSize({ width: 1060, height: 700 });
+    const loadedCompactLayout = await win.evaluate(() => {
+      const tab = document.getElementById('cutterTab');
+      const workspace = document.getElementById('cutterWorkspace');
+      const sidebar = document.querySelector('.cutter-sidebar').getBoundingClientRect();
+      const preview = document.querySelector('.cutter-preview-panel').getBoundingClientRect();
+      return {
+        horizontalOverflow: Math.max(tab.scrollWidth - tab.clientWidth, workspace.scrollWidth - workspace.clientWidth),
+        workspaceWidth: workspace.getBoundingClientRect().width,
+        sidebarWidth: sidebar.width,
+        previewWidth: preview.width,
+        singleColumn: Math.abs(sidebar.width - preview.width) <= 1
+      };
+    });
+    check(
+      loadedCompactLayout.horizontalOverflow <= 1
+        && loadedCompactLayout.workspaceWidth > 0
+        && loadedCompactLayout.singleColumn,
+      `The wider cutter sidebar breaks the compact layout: ${JSON.stringify(loadedCompactLayout)}`
+    );
+    await win.setViewportSize({ width: 1184, height: 661 });
+    const loadedMinimumSource = await win.evaluate(() => {
+      const source = document.querySelector('.cutter-source-bar');
+      const tab = document.getElementById('cutterTab');
+      const workspace = document.getElementById('cutterWorkspace');
+      const sidebar = document.querySelector('.cutter-sidebar').getBoundingClientRect();
+      const preview = document.querySelector('.cutter-preview-panel').getBoundingClientRect();
+      return {
+        display: getComputedStyle(source).display,
+        height: source.getBoundingClientRect().height,
+        workspaceShown: document.getElementById('cutterWorkspace').classList.contains('shown'),
+        videoReady: document.getElementById('cutterVideo').readyState >= HTMLMediaElement.HAVE_METADATA,
+        horizontalOverflow: Math.max(tab.scrollWidth - tab.clientWidth, workspace.scrollWidth - workspace.clientWidth),
+        sidebarWidth: sidebar.width,
+        previewWidth: preview.width
+      };
+    });
+    check(
+      loadedMinimumSource.workspaceShown
+        && loadedMinimumSource.videoReady
+        && loadedMinimumSource.display === 'none'
+        && loadedMinimumSource.height === 0
+        && loadedMinimumSource.horizontalOverflow <= 1
+        && loadedMinimumSource.sidebarWidth >= 300
+        && loadedMinimumSource.previewWidth > loadedMinimumSource.sidebarWidth,
+      `The source selector remains visible after a real load at the native minimum viewport: ${JSON.stringify(loadedMinimumSource)}`
+    );
+    const loadedCutterExportSelectPresentation = [];
+    for (const viewport of [{ width: 1184, height: 661 }, { width: 1280, height: 800 }]) {
+      await win.setViewportSize(viewport);
+      for (const theme of ['theme-twitch', 'theme-light']) {
+        await win.evaluate((className) => { document.body.className = className; }, theme);
+        for (const id of ['cutterExportProfile', 'cutterExportEncoder', 'cutterAudioStream']) {
+          const select = win.locator(`#${id}`);
+          loadedCutterExportSelectPresentation.push(await select.evaluate((element, meta) => {
+            const style = getComputedStyle(element);
+            const context = document.createElement('canvas').getContext('2d');
+            context.font = style.font;
+            const textWidth = context.measureText(element.selectedOptions[0]?.textContent || '').width;
+            const availableTextWidth = element.getBoundingClientRect().width
+              - Number.parseFloat(style.paddingLeft)
+              - Number.parseFloat(style.paddingRight)
+              - Number.parseFloat(style.borderLeftWidth)
+              - Number.parseFloat(style.borderRightWidth);
+            return {
+              ...meta,
+              text: element.selectedOptions[0]?.textContent || '',
+              backgroundImages: (style.backgroundImage.match(/url\(/g) || []).length,
+              backgroundRepeat: style.backgroundRepeat,
+              paddingRight: Number.parseFloat(style.paddingRight),
+              textWidth,
+              availableTextWidth
+            };
+          }, { viewport, theme, id }));
+        }
+      }
+    }
+    check(
+      loadedCutterExportSelectPresentation.every((entry) => entry.backgroundImages === 1
+        && entry.backgroundRepeat === 'no-repeat'
+        && entry.paddingRight >= 28
+        && entry.textWidth <= entry.availableTextWidth + 0.5),
+      `Loaded cutter export selects have duplicate indicators or clipped text: ${JSON.stringify(loadedCutterExportSelectPresentation)}`
+    );
+    await win.evaluate(() => { document.body.className = 'theme-twitch'; });
+    await win.setViewportSize({ width: 1440, height: 900 });
+    const revealAnimation = await win.evaluate(() => {
+      const preview = document.getElementById('cutterPreview').getBoundingClientRect();
+      const frames = window.__cutterRevealFrames;
+      return {
+        frames: frames.length,
+        runningFrames: frames.filter((frame) => frame.running).length,
+        distinctWidths: new Set(frames.map((frame) => frame.width.toFixed(1))).size,
+        distinctHeights: new Set(frames.map((frame) => frame.height.toFixed(1))).size,
+        intermediate: frames.some((frame) => {
+          const widthMin = Math.min(frames[0].width, preview.width);
+          const widthMax = Math.max(frames[0].width, preview.width);
+          const heightMin = Math.min(frames[0].height, preview.height);
+          const heightMax = Math.max(frames[0].height, preview.height);
+          return frame.width > widthMin + 2 && frame.width < widthMax - 2
+            && frame.height > heightMin + 2 && frame.height < heightMax - 2;
+        }),
+        finalWidth: preview.width,
+        finalHeight: preview.height,
+        lastWidth: frames.at(-1)?.width ?? null,
+        lastHeight: frames.at(-1)?.height ?? null
+      };
+    });
+    check(
+      revealAnimation.frames >= 4
+        && revealAnimation.runningFrames >= 3
+        && revealAnimation.distinctWidths >= 3
+        && revealAnimation.distinctHeights >= 3
+        && revealAnimation.intermediate
+        && Math.abs(revealAnimation.lastWidth - revealAnimation.finalWidth) <= 2
+        && Math.abs(revealAnimation.lastHeight - revealAnimation.finalHeight) <= 2,
+      `Empty-to-editor geometry does not glide through visible frames: ${JSON.stringify(revealAnimation)}`
+    );
+    const recoveryGeometry = await win.evaluate(async () => {
+      const panel = document.getElementById('cutterRecoveryPanel');
+      const tab = document.getElementById('cutterTab');
+      const container = document.querySelector('.cutter-container');
+      const capture = () => {
+        const workspace = document.getElementById('cutterWorkspace').getBoundingClientRect();
+        const preview = document.getElementById('cutterPreview').getBoundingClientRect();
+        const timeline = document.getElementById('timelineContainer').getBoundingClientRect();
+        return {
+          workspace: { left: workspace.left, top: workspace.top, width: workspace.width, height: workspace.height },
+          preview: { left: preview.left, top: preview.top, width: preview.width, height: preview.height },
+          timeline: { left: timeline.left, top: timeline.top, width: timeline.width, height: timeline.height },
+          tabScrollTop: tab.scrollTop
+        };
+      };
+      panel.hidden = true;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const before = capture();
+      panel.hidden = false;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const shown = capture();
+      const panelRect = panel.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      panel.hidden = true;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const after = capture();
+      const delta = (left, right) => Math.max(...['left', 'top', 'width', 'height'].map((key) => Math.abs(left[key] - right[key])));
+      const workspaceShift = shown.workspace.top - before.workspace.top;
+      const workspaceShrink = before.workspace.height - shown.workspace.height;
+      return {
+        before,
+        shown,
+        after,
+        panelHeight: panelRect.height,
+        workspaceShift,
+        workspaceShrink,
+        workspaceBottomDelta: Math.abs((shown.workspace.top + shown.workspace.height) - (before.workspace.top + before.workspace.height)),
+        timelineShownDelta: delta(before.timeline, shown.timeline),
+        restoredDelta: Math.max(delta(before.workspace, after.workspace), delta(before.preview, after.preview), delta(before.timeline, after.timeline)),
+        scrollDelta: Math.max(Math.abs(shown.tabScrollTop - before.tabScrollTop), Math.abs(after.tabScrollTop - before.tabScrollTop)),
+        panelVisible: panelRect.width > 0 && panelRect.height > 0,
+        panelContained: panelRect.left >= containerRect.left - 1 && panelRect.right <= containerRect.right + 1 && panelRect.top >= containerRect.top - 1,
+        timelineVisible: shown.timeline.top >= tab.getBoundingClientRect().top - 1 && shown.timeline.top + shown.timeline.height <= Math.min(tab.getBoundingClientRect().bottom, window.innerHeight) + 1
+      };
+    });
+    check(
+      recoveryGeometry.panelVisible
+        && recoveryGeometry.panelContained
+        && recoveryGeometry.timelineVisible
+        && recoveryGeometry.timelineShownDelta <= 1
+        && recoveryGeometry.workspaceBottomDelta <= 1
+        && recoveryGeometry.workspaceShift >= recoveryGeometry.panelHeight + 11
+        && Math.abs(recoveryGeometry.workspaceShift - recoveryGeometry.workspaceShrink) <= 1
+        && recoveryGeometry.restoredDelta <= 1
+        && recoveryGeometry.scrollDelta <= 1,
+      `Cutter recovery shifts the loaded workspace or timeline: ${JSON.stringify(recoveryGeometry)}`
+    );
+    const pngDropBefore = await win.evaluate(() => ({
+      token: cutterFile?.token || null,
+      loadGeneration: cutterLoadGeneration,
+      mediaJobId: cutterMediaJobId,
+      editorState: JSON.stringify(cutterEditorState),
+      fileName: document.getElementById('cutterFilePath').value,
+      videoSource: document.getElementById('cutterVideo').src
+    }));
+    await dropCutterFile(win, unsupportedImageFile);
+    await win.waitForFunction(() => {
+      const toast = document.getElementById('appToast');
+      return toast?.classList.contains('warn') && toast.classList.contains('show') && toast.textContent === UI_TEXT.cutter.unsupportedFile;
+    });
+    const pngDropState = await win.evaluate((before) => {
+      const toast = document.getElementById('appToast');
+      const after = {
+        token: cutterFile?.token || null,
+        loadGeneration: cutterLoadGeneration,
+        mediaJobId: cutterMediaJobId,
+        editorState: JSON.stringify(cutterEditorState),
+        fileName: document.getElementById('cutterFilePath').value,
+        videoSource: document.getElementById('cutterVideo').src
+      };
+      return {
+        unchanged: Object.keys(before).every((key) => before[key] === after[key]),
+        before,
+        after,
+        warning: toast?.textContent || '',
+        warningRole: toast?.getAttribute('role') || '',
+        warningVisible: toast?.classList.contains('show') || false
+      };
+    }, pngDropBefore);
+    check(
+      pngDropState.unchanged
+        && pngDropState.warningRole === 'alert'
+        && pngDropState.warningVisible,
+      `A real PNG drop reached the loader or changed the loaded editor: ${JSON.stringify(pngDropState)}`
+    );
+    await app.evaluate(({ dialog }, pngPath) => {
+      const originalShowOpenDialog = dialog.showOpenDialog;
+      dialog.showOpenDialog = async () => {
+        dialog.showOpenDialog = originalShowOpenDialog;
+        return { canceled: false, filePaths: [pngPath] };
+      };
+    }, unsupportedImageFile);
+    const pngDialogState = await win.evaluate(async (before) => {
+      const toast = document.getElementById('appToast');
+      toast?.classList.remove('show', 'warn');
+      let rejected = false;
+      try {
+        await window.selectCutterVideo();
+      } catch {
+        rejected = true;
+      }
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const after = {
+        token: cutterFile?.token || null,
+        loadGeneration: cutterLoadGeneration,
+        mediaJobId: cutterMediaJobId,
+        editorState: JSON.stringify(cutterEditorState),
+        fileName: document.getElementById('cutterFilePath').value,
+        videoSource: document.getElementById('cutterVideo').src
+      };
+      return {
+        rejected,
+        unchanged: Object.keys(before).every((key) => before[key] === after[key]),
+        discardDialogVisible: document.getElementById('cutterDiscardModal').classList.contains('show'),
+        warning: toast?.textContent || '',
+        warningRole: toast?.getAttribute('role') || '',
+        warningVisible: toast?.classList.contains('show') || false
+      };
+    }, pngDropBefore);
+    check(
+      !pngDialogState.rejected
+        && pngDialogState.unchanged
+        && !pngDialogState.discardDialogVisible
+        && pngDialogState.warning === await win.evaluate(() => UI_TEXT.cutter.unsupportedFile)
+        && pngDialogState.warningRole === 'alert'
+        && pngDialogState.warningVisible,
+      `A PNG returned by the native dialog was not rejected defensively: ${JSON.stringify(pngDialogState)}`
+    );
+    if (remaindersOnly) {
+      check(runtimeIssues.length === 0, runtimeIssues.join('\n'));
+      console.log(JSON.stringify({ failures, runtimeIssues, cutterSourceVisibility, cutterExportSelectPresentation, loadedCompactLayout, loadedMinimumSource, loadedCutterExportSelectPresentation, revealAnimation, recoveryGeometry, pngDropState, pngDialogState }, null, 2));
+      if (failures.length > 0) process.exitCode = 1;
+      return;
+    }
     await win.evaluate(() => window.updateCutterZoom(Number(document.getElementById('cutterZoom').max)));
     await win.waitForFunction(() => {
       const waveform = document.getElementById('cutterWaveform');

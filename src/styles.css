@@ -3086,6 +3086,10 @@ input[type="checkbox"].vod-select-checkbox {
     gap: 12px;
 }
 
+#cutterTab .cutter-source-bar:has(~ .cutter-workspace.shown) {
+    display: none;
+}
+
 @media (min-width: 1181px) and (min-height: 680px) {
     #cutterTab {
         overflow-y: hidden;
@@ -3101,8 +3105,8 @@ input[type="checkbox"].vod-select-checkbox {
         grid-template-rows: minmax(0, 1fr) auto;
     }
 
-    #cutterTab .cutter-source-bar:has(~ .cutter-workspace.shown) {
-        display: none;
+    #cutterTab .cutter-container:has(.cutter-workspace.shown):has(> .cutter-recovery-panel:not([hidden])) {
+        grid-template-rows: auto minmax(0, 1fr) auto;
     }
 
     #cutterTab .cutter-workspace {
@@ -3214,7 +3218,7 @@ input[type="checkbox"].vod-select-checkbox {
 
 .cutter-workspace {
     display: grid;
-    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-columns: 300px minmax(0, 1fr);
     gap: 12px;
     min-height: 420px;
 }

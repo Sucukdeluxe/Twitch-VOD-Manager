@@ -1,5 +1,7 @@
+import type { ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { QueueProcessRegistry, QueueRunLifecycle, type QueueProcessResource } from './process-registry';
+import { QueueProcessRegistry, QueueRunLifecycle, waitForChildProcessExit, type QueueProcessResource } from './process-registry';
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
     let resolve!: () => void;
@@ -19,6 +21,82 @@ function createResource(wait: Promise<void> = Promise.resolve()): QueueProcessRe
         cleanup: vi.fn(async () => undefined),
     };
 }
+
+describe('waitForChildProcessExit', () => {
+    it('settles immediately on close without forcing termination', async () => {
+        vi.useFakeTimers();
+        try {
+            const child = Object.assign(new EventEmitter(), {
+                exitCode: null,
+                signalCode: null,
+                kill: vi.fn(() => true),
+            }) as unknown as ChildProcess;
+            let settled = false;
+            const waiting = waitForChildProcessExit(child, 25).then(() => {
+                settled = true;
+            });
+
+            child.emit('close', 0, null);
+            await waiting;
+
+            expect(settled).toBe(true);
+            expect(child.kill).not.toHaveBeenCalled();
+            expect(child.listenerCount('close')).toBe(0);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('returns immediately for an already exited child without allocating wait resources', async () => {
+        vi.useFakeTimers();
+        try {
+            const child = Object.assign(new EventEmitter(), {
+                exitCode: 0,
+                signalCode: null,
+                kill: vi.fn(() => true),
+            }) as unknown as ChildProcess;
+
+            await waitForChildProcessExit(child, 25);
+
+            expect(child.kill).not.toHaveBeenCalled();
+            expect(child.listenerCount('close')).toBe(0);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('settles and releases resources when close never arrives after forced termination', async () => {
+        vi.useFakeTimers();
+        try {
+            const child = Object.assign(new EventEmitter(), {
+                exitCode: null,
+                signalCode: null,
+                kill: vi.fn(() => true),
+            }) as unknown as ChildProcess;
+            let settled = false;
+            const waiting = waitForChildProcessExit(child, 25).then(() => {
+                settled = true;
+            });
+
+            await vi.advanceTimersByTimeAsync(25);
+
+            expect(child.kill).toHaveBeenCalledOnce();
+            expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+            expect(settled).toBe(false);
+
+            await vi.advanceTimersByTimeAsync(25);
+
+            expect(settled).toBe(true);
+            expect(child.listenerCount('close')).toBe(0);
+            expect(vi.getTimerCount()).toBe(0);
+            await waiting;
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
 
 describe('QueueProcessRegistry', () => {
     it('keeps parallel queue item process groups independent', async () => {

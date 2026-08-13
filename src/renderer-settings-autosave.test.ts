@@ -25,6 +25,19 @@ function createInput(value = '', checked = false): Input {
     return { value, checked };
 }
 
+function loadRuntimeErrorFormatter(language: 'de' | 'en'): (errorClass: string | null) => string {
+    const localeName = language === 'de' ? 'UI_TEXT_DE' : 'UI_TEXT_EN';
+    const localeSource = fs.readFileSync(path.join(process.cwd(), 'src', `renderer-locale-${language}.ts`), 'utf8');
+    const settingsSource = fs.readFileSync(path.join(process.cwd(), 'src', 'renderer-settings.ts'), 'utf8');
+    const compiled = ts.transpileModule(
+        `${localeSource}\nlet UI_TEXT = ${localeName};\n${settingsSource}\nglobalThis.__getRuntimeErrorClassLabel = getRuntimeErrorClassLabel;`,
+        { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }
+    ).outputText;
+    const context = vm.createContext({ console, window: {} });
+    vm.runInContext(compiled, context);
+    return context.__getRuntimeErrorClassLabel as (errorClass: string | null) => string;
+}
+
 describe('renderer settings autosave orchestration', () => {
     it('persists a pure download policy change through the real autosave fingerprint', async () => {
         const inputs = new Map(inputIds.map((id) => [id, createInput()]));
@@ -126,5 +139,27 @@ describe('renderer settings autosave orchestration', () => {
 
         expect(setClientSecretCalls).toEqual(['A', 'B']);
         expect(saveConfigCalls).toHaveLength(2);
+    });
+});
+
+describe('renderer runtime metrics localization', () => {
+    it('renders every runtime error class and unknown values as human-readable German and English labels', () => {
+        const german = loadRuntimeErrorFormatter('de');
+        const english = loadRuntimeErrorFormatter('en');
+        const cases = [
+            { errorClass: 'network', german: 'Netzwerk', english: 'Network' },
+            { errorClass: 'rate_limit', german: 'Anfragelimit', english: 'Rate limit' },
+            { errorClass: 'auth', german: 'Authentifizierung', english: 'Authentication' },
+            { errorClass: 'tooling', german: 'Externe Tools', english: 'External tools' },
+            { errorClass: 'integrity', german: 'Integrität', english: 'Integrity' },
+            { errorClass: 'io', german: 'Dateisystem', english: 'File system' },
+            { errorClass: 'validation', german: 'Validierung', english: 'Validation' },
+            { errorClass: 'unknown', german: 'Unbekannt', english: 'Unknown' },
+            { errorClass: 'future_error_class', german: 'Unbekannt', english: 'Unknown' },
+            { errorClass: null, german: '-', english: '-' }
+        ];
+
+        expect(cases.map(({ errorClass }) => german(errorClass))).toEqual(cases.map(({ german: label }) => label));
+        expect(cases.map(({ errorClass }) => english(errorClass))).toEqual(cases.map(({ english: label }) => label));
     });
 });
