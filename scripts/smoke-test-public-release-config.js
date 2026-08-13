@@ -21,10 +21,10 @@ check(packageLock.packages?.['']?.version === '1.0.15', `lockfile root package v
 check(packageJson.build?.appId === 'io.github.sucukdeluxe.twitch-vod-manager', `appId is ${packageJson.build?.appId}`);
 check(packageJson.build?.publish?.provider === 'generic', `publish provider is ${packageJson.build?.publish?.provider}`);
 check(packageJson.build?.publish?.url === 'https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/latest/download/', `publish URL is ${packageJson.build?.publish?.url}`);
-for (const pattern of ['!node_modules/better-sqlite3/build/**', '!node_modules/better-sqlite3/deps/**', '!node_modules/better-sqlite3/src/**']) {
-  check(packageJson.build?.files?.includes(pattern), `missing packaged native build exclusion: ${pattern}`);
+for (const pattern of ['!dist/**/*.test.js', '!node_modules/better-sqlite3/build/**', '!node_modules/better-sqlite3/deps/**', '!node_modules/better-sqlite3/src/**']) {
+  check(packageJson.build?.files?.includes(pattern), `missing packaged file exclusion: ${pattern}`);
 }
-check(JSON.stringify(packageJson.build?.files) === JSON.stringify(['dist/**/*', 'src/index.html', 'src/styles.css', 'src/workspace.css', 'build/icon.png', 'package.json', '!node_modules/better-sqlite3/build/**', '!node_modules/better-sqlite3/deps/**', '!node_modules/better-sqlite3/src/**']), 'packaged file list is not restricted');
+check(JSON.stringify(packageJson.build?.files) === JSON.stringify(['dist/**/*', '!dist/**/*.test.js', 'src/index.html', 'src/styles.css', 'src/workspace.css', 'build/icon.png', 'package.json', '!node_modules/better-sqlite3/build/**', '!node_modules/better-sqlite3/deps/**', '!node_modules/better-sqlite3/src/**']), 'packaged file list is not restricted');
 check(packageJson.build?.win?.icon === 'build/icon.ico', `Windows icon is ${packageJson.build?.win?.icon}`);
 check(packageJson.build?.nsis?.installerIcon === 'build/icon.ico', `installer icon is ${packageJson.build?.nsis?.installerIcon}`);
 check(packageJson.build?.nsis?.uninstallerIcon === 'build/icon.ico', `uninstaller icon is ${packageJson.build?.nsis?.uninstallerIcon}`);

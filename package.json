@@ -64,6 +64,7 @@
     "productName": "Twitch VOD Manager",
     "files": [
       "dist/**/*",
+      "!dist/**/*.test.js",
       "src/index.html",
       "src/styles.css",
     "src/workspace.css",
