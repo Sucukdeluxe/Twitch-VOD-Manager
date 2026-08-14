@@ -59,6 +59,14 @@ test('real installer smoke accepts the git.24-music.de Gitea Windows Actions ide
     RUNNER_OS: 'Windows',
     RUNNER_TEMP: 'C:\\runner-temp'
   }, 'win32'));
+  assert.doesNotThrow(() => assertHostedWindowsCi({
+    CI: 'true',
+    GITEA_ACTIONS: 'true',
+    GITHUB_RUN_ID: '456',
+    GITHUB_SERVER_URL: 'https://git.24-music.de',
+    RUNNER_OS: 'windows',
+    RUNNER_TEMP: 'C:\\runner-temp'
+  }, 'win32'));
 });
 
 test('installer phases cover current user then all users with scope-correct paths', () => {

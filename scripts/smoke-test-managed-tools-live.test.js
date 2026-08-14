@@ -14,6 +14,7 @@ const {
 test('accepts GitHub and Gitea Windows Actions while rejecting local opt-in', () => {
   assert.doesNotThrow(() => assertActionsWindowsCi({ CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_SERVER_URL: 'https://github.com', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_OS: 'Windows', RUNNER_TEMP: 'C:\\runner-temp', GITHUB_RUN_ID: '123' }, 'win32'));
   assert.doesNotThrow(() => assertActionsWindowsCi({ CI: 'true', GITEA_ACTIONS: 'true', GITHUB_SERVER_URL: 'https://git.24-music.de', RUNNER_OS: 'Windows', RUNNER_TEMP: 'C:\\runner-temp', GITHUB_RUN_ID: '456' }, 'win32'));
+  assert.doesNotThrow(() => assertActionsWindowsCi({ CI: 'true', GITEA_ACTIONS: 'true', GITHUB_SERVER_URL: 'https://git.24-music.de', RUNNER_OS: 'windows', RUNNER_TEMP: 'C:\\runner-temp', GITHUB_RUN_ID: '456' }, 'win32'));
   assert.throws(() => assertActionsWindowsCi({ CI: 'true', RUNNER_OS: 'Windows' }, 'win32'), /Windows Actions runner/);
   assert.throws(() => assertActionsWindowsCi({ TWITCH_VOD_MANAGER_MANAGED_TOOLS_LIVE: '1' }, 'win32'), /Windows Actions runner/);
   assert.throws(() => assertActionsWindowsCi({ CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_SERVER_URL: 'https://ci.example.test', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_OS: 'Windows', RUNNER_TEMP: 'C:\\runner-temp', GITHUB_RUN_ID: '123' }, 'win32'), /Windows Actions runner/);

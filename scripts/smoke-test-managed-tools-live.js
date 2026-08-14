@@ -8,7 +8,8 @@ function assertActionsWindowsCi(environment = process.env, platform = process.pl
   const serverUrl = String(environment.GITHUB_SERVER_URL || '').replace(/\/+$/, '').toLowerCase();
   const isGitHubActions = environment.GITHUB_ACTIONS === 'true' && environment.GITEA_ACTIONS !== 'true' && environment.RUNNER_ENVIRONMENT === 'github-hosted' && serverUrl === 'https://github.com';
   const isGiteaActions = environment.GITEA_ACTIONS === 'true' && serverUrl === 'https://git.24-music.de';
-  if (platform !== 'win32' || environment.CI !== 'true' || environment.RUNNER_OS !== 'Windows' || !environment.RUNNER_TEMP || !environment.GITHUB_RUN_ID || (!isGitHubActions && !isGiteaActions)) {
+  const runnerOs = String(environment.RUNNER_OS || '').toLowerCase();
+  if (platform !== 'win32' || environment.CI !== 'true' || runnerOs !== 'windows' || !environment.RUNNER_TEMP || !environment.GITHUB_RUN_ID || (!isGitHubActions && !isGiteaActions)) {
     throw new Error('Live managed-tool smoke is restricted to an approved Windows Actions runner');
   }
 }
