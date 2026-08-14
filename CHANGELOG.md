@@ -2,6 +2,8 @@
 
 ## 1.0.18 - 2026-08-14
 
+- Install managed Streamlink and FFmpeg successfully on systems whose PowerShell only ships the built-in archive tooling.
+- Recover interrupted merged downloads reliably when Windows reports the download folder through an 8.3 short path.
 - Keep downloads working through a runnable system-provided Streamlink or FFmpeg even when the managed tool installation cannot be repaired right away.
 - Fail managed tool downloads cleanly when the connection breaks mid-transfer instead of leaving the download start waiting indefinitely.
 - Show in Settings when downloads remain available through a system installation while a managed tool is missing or unverified.
