@@ -13,7 +13,7 @@ const installerSource = fs.readFileSync(path.join(root, 'build', 'installer.nsh'
 const installerSmokeSource = fs.readFileSync(path.join(root, 'scripts', 'smoke-test-installer.js'), 'utf8');
 const manifestPath = path.join(root, 'scripts', 'public-release-files.json');
 const failures = [];
-const expectedVersion = '1.0.18';
+const expectedVersion = '1.0.19';
 
 function check(condition, message) {
   if (!condition) failures.push(message);
