@@ -107,6 +107,18 @@ afterEach(() => {
 });
 
 describe('managed tool installer', () => {
+    it('stages the downloaded archive under a unique path that keeps the .zip extension', async () => {
+        const { installer, download } = createInstaller();
+
+        const result = await installer.repair(manifest());
+
+        expect(result.success).toBe(true);
+        expect(download).toHaveBeenCalledTimes(1);
+        const archivePath = download.mock.calls[0][1];
+        expect(path.extname(archivePath)).toBe('.zip');
+        expect(path.basename(archivePath)).not.toBe(manifest().archiveName);
+    });
+
     it('retains the working installation when the downloaded archive hash is corrupted', async () => {
         const { installer, installPath, download } = createInstaller({ archiveContents: 'corrupted archive' });
         writeExistingInstallation(installPath);
