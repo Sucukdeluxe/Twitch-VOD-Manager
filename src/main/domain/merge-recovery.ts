@@ -17,8 +17,24 @@ export interface MergeArtifactRootResolution {
     migrated: boolean;
 }
 
+function canonicalizeExistingPrefix(candidatePath: string): string {
+    let existingPath = path.resolve(candidatePath);
+    const missingSegments: string[] = [];
+    for (;;) {
+        try {
+            return path.join(fs.realpathSync.native(existingPath), ...missingSegments.reverse());
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return path.resolve(candidatePath);
+            const parentPath = path.dirname(existingPath);
+            if (parentPath === existingPath) return path.resolve(candidatePath);
+            missingSegments.push(path.basename(existingPath));
+            existingPath = parentPath;
+        }
+    }
+}
+
 function isInside(root: string, candidate: string): boolean {
-    const relative = path.relative(path.resolve(root), path.resolve(candidate));
+    const relative = path.relative(canonicalizeExistingPrefix(root), canonicalizeExistingPrefix(candidate));
     return relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 

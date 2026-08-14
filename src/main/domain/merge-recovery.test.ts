@@ -1,9 +1,22 @@
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { QueueItem } from '../../types';
 import { getInterruptedMergeItemIds, recoverInterruptedMergeArtifacts } from './merge-recovery';
+
+function getWindowsShortPath(targetPath: string): string {
+    const command = `for %I in ("${targetPath}") do @echo %~sI`;
+    const result = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', command], {
+        encoding: 'utf8',
+        windowsHide: true,
+        windowsVerbatimArguments: true
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(result.stderr.trim() || `ShortPath lookup exited with ${result.status}`);
+    return result.stdout.trim();
+}
 
 let directory: string;
 
@@ -66,6 +79,32 @@ describe('recoverInterruptedMergeArtifacts', () => {
         expect(fs.existsSync(first)).toBe(false);
         expect(fs.existsSync(second)).toBe(false);
         expect(fs.existsSync(merged)).toBe(false);
+        expect(result.queue[0].artifactRoot).toBe(fs.realpathSync.native(directory));
+    });
+
+    it.skipIf(process.platform !== 'win32')('removes crash artifacts referenced through a Windows 8.3 short path root', (context) => {
+        const shortDirectory = getWindowsShortPath(directory);
+        if (!shortDirectory || shortDirectory.toLowerCase() === fs.realpathSync.native(directory).toLowerCase()) {
+            context.skip();
+            return;
+        }
+        const jobDirectory = path.join(shortDirectory, 'alice');
+        fs.mkdirSync(jobDirectory);
+        const first = path.join(jobDirectory, 'merge_tmp_0_100.mp4');
+        const merged = path.join(jobDirectory, '.merge_output_300_123.mp4');
+        fs.writeFileSync(first, 'partial-a');
+        fs.writeFileSync(merged, 'partial-merge');
+        const item = queueItem();
+        item.mergeGroup!.downloadedFiles = { 0: first };
+        item.mergeGroup!.mergedFile = merged;
+
+        const result = recoverInterruptedMergeArtifacts([item], shortDirectory, new Set([item.id]));
+
+        expect(result.failedFiles).toEqual([]);
+        expect(result.removedFiles.sort()).toEqual([first, merged].sort());
+        expect(fs.existsSync(first)).toBe(false);
+        expect(fs.existsSync(merged)).toBe(false);
+        expect(result.queue[0]).toMatchObject({ status: 'pending', progress: 0 });
         expect(result.queue[0].artifactRoot).toBe(fs.realpathSync.native(directory));
     });
 
