@@ -665,10 +665,18 @@ function analyzeExport(environment, runtime, definition, source) {
   };
 }
 
+function canonicalComparablePath(candidatePath) {
+  try {
+    return resolveCanonicalPath(candidatePath);
+  } catch {
+    return path.resolve(candidatePath);
+  }
+}
+
 function sameResolvedPath(left, right) {
   if (typeof left !== 'string' || typeof right !== 'string') return false;
-  const resolvedLeft = path.resolve(left);
-  const resolvedRight = path.resolve(right);
+  const resolvedLeft = canonicalComparablePath(left);
+  const resolvedRight = canonicalComparablePath(right);
   return process.platform === 'win32'
     ? resolvedLeft.toLowerCase() === resolvedRight.toLowerCase()
     : resolvedLeft === resolvedRight;

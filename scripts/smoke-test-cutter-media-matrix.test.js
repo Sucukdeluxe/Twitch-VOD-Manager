@@ -458,6 +458,27 @@ test('runner lifecycle still restores and cleans up when bounded app close fails
   assert.equal(fs.existsSync(environment.rootDir), false);
 });
 
+test('locked target accepts canonical long-path diagnostics for a short-path output file', { skip: process.platform !== 'win32' }, (t) => {
+  const environment = createEnvironment();
+  t.after(() => fs.rmSync(environment.rootDir, { recursive: true, force: true }));
+  const longRoot = fs.realpathSync.native(environment.rootDir);
+  const shortRoot = getWindowsShortPath(environment.rootDir);
+  if (!shortRoot || shortRoot.toLowerCase() === longRoot.toLowerCase()) {
+    t.skip('8.3 short names are unavailable');
+    return;
+  }
+  const outputFile = path.join(shortRoot, 'result.mp4');
+  const before = '[2026-08-13T00:00:00.000Z] startup';
+  const after = `${before}\n[2026-08-13T00:00:01.000Z] video-editor-export-failed | Error: EBUSY: resource busy or locked, rename '${path.join(longRoot, '.result.tvm-edit.mp4')}' -> '${path.join(longRoot, 'result.mp4')}'`;
+  assert.doesNotThrow(() => assertLockedTargetFailure({
+    result: { success: false, outputName: null },
+    debugBefore: before,
+    debugAfter: after,
+    outputFile,
+    runtimeIssues: []
+  }));
+});
+
 test('locked target requires a resolved production publish failure with a Windows lock diagnostic', () => {
   const before = '[2026-08-13T00:00:00.000Z] startup';
   const outputFile = 'C:\\media\\result.mp4';
