@@ -85,6 +85,14 @@ describe('main runtime safety production paths', () => {
         expect(closeHandler.indexOf('finish({ success: true, filename })')).toBeGreaterThan(closeHandler.indexOf('partialDownloadRegistry.commit'));
     });
 
+    it('provisions managed tools in the background after a packaged startup', () => {
+        const source = mainSource();
+        expect(source).toContain('let startupToolsProvisionTimer: NodeJS.Timeout | null = null;');
+        expect(source).toContain('clearTimeout(startupToolsProvisionTimer)');
+        expect(source).toMatch(/if \(app\.isPackaged\) \{\s*startupToolsProvisionTimer = setTimeout\([\s\S]*?appShutdownStarted[\s\S]*?startup-tools-provisioning-start[\s\S]*?ensureStreamlinkInstalled\(\)[\s\S]*?ensureFfmpegInstalled\(\)[\s\S]*?startup-tools-provisioning-finished/);
+        expect(source).toMatch(/\} else \{\s*appendDebugLog\('startup-tools-check-skipped', 'Deferred to first use'\);/);
+    });
+
     it('announces tool preparation before every download tool gate', () => {
         const source = mainSource();
         const vod = source.slice(source.indexOf('async function downloadVOD'), source.indexOf('async function processDownloadMergeGroup'));

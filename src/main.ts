@@ -171,6 +171,7 @@ const DEFAULT_FILENAME_TEMPLATE_CLIP = '{date}_{part}.mp4';
 // ./main/domain/config-normalize (Single-Source-Of-Truth, vermeidet
 // Drift wenn man eine der Defaults aendert).
 const QUEUE_SAVE_DEBOUNCE_MS = 250;
+const STARTUP_TOOLS_PROVISION_DELAY_MS = 15 * 1000;
 const MIN_FREE_DISK_BYTES = 128 * 1024 * 1024;
 const DEBUG_LOG_FLUSH_INTERVAL_MS = 1000;
 const DEBUG_LOG_BUFFER_FLUSH_LINES = 48;
@@ -4970,6 +4971,14 @@ function runStorageCleanup(opts: { dryRun: boolean }): CleanupReport {
 let autoCleanupTimer: NodeJS.Timeout | null = null;
 let autoCleanupStartupTimer: NodeJS.Timeout | null = null;
 let lastAutoCleanupAt = 0;
+let startupToolsProvisionTimer: NodeJS.Timeout | null = null;
+
+function stopStartupToolsProvisionTimer(): void {
+    if (startupToolsProvisionTimer) {
+        clearTimeout(startupToolsProvisionTimer);
+        startupToolsProvisionTimer = null;
+    }
+}
 
 function stopAutoCleanupTimer(): void {
     if (autoCleanupTimer) {
@@ -9052,7 +9061,23 @@ app.whenReady().then(() => {
     restartAutoCleanupTimer();
     createWindow();
     startDevelopmentReload();
-    appendDebugLog('startup-tools-check-skipped', 'Deferred to first use');
+    if (app.isPackaged) {
+        startupToolsProvisionTimer = setTimeout(() => {
+            startupToolsProvisionTimer = null;
+            if (appShutdownStarted) return;
+            appendDebugLog('startup-tools-provisioning-start');
+            void (async () => {
+                const streamlinkReady = await ensureStreamlinkInstalled();
+                if (appShutdownStarted) return;
+                const ffmpegReady = await ensureFfmpegInstalled();
+                appendDebugLog('startup-tools-provisioning-finished', { streamlinkReady, ffmpegReady });
+            })().catch((error) => {
+                appendDebugLog('startup-tools-provisioning-failed', String(error));
+            });
+        }, STARTUP_TOOLS_PROVISION_DELAY_MS);
+    } else {
+        appendDebugLog('startup-tools-check-skipped', 'Deferred to first use');
+    }
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
@@ -9110,6 +9135,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
         ['auto-vod-poller', () => stopAutoVodPoller()],
         ['live-status-poller', () => stopLiveStatusPoller()],
         ['auto-cleanup-timer', () => stopAutoCleanupTimer()],
+        ['startup-tools-provision-timer', () => stopStartupToolsProvisionTimer()],
         ['queue-lifecycle', async () => {
             await queueRunLifecycle.shutdown(
                 () => {
