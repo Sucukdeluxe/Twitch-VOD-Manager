@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.19 - 2026-08-14
+
+- Provision managed Streamlink and FFmpeg automatically in the background after installation so first downloads start without tool setup delays.
+- Show a dedicated "Preparing download tools" status in the queue while download tools are checked or installed before a download begins.
+
 ## 1.0.18 - 2026-08-14
 
 - Install managed Streamlink and FFmpeg successfully on systems whose PowerShell only ships the built-in archive tooling.
