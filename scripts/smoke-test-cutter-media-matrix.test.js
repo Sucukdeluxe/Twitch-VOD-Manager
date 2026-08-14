@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -26,6 +27,18 @@ function createEnvironment() {
   const appDataDir = path.join(rootDir, 'programdata', 'Twitch_VOD_Manager');
   fs.mkdirSync(appDataDir, { recursive: true });
   return { rootDir, appDataDir };
+}
+
+function getWindowsShortPath(targetPath) {
+  const command = `for %I in ("${targetPath}") do @echo %~sI`;
+  const result = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', command], {
+    encoding: 'utf8',
+    windowsHide: true,
+    windowsVerbatimArguments: true
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(result.stderr.trim() || `ShortPath lookup exited with ${result.status}`);
+  return result.stdout.trim();
 }
 
 function createProvisioningFixture() {
@@ -103,6 +116,77 @@ test('provisions and verifies the pinned product toolchain inside the isolated A
   assert.equal(result.paths.ffmpeg, fs.realpathSync.native(path.join(initialized.ffmpegDirectory, 'bin', 'ffmpeg.exe')));
   assert.equal(result.paths.ffprobe, fs.realpathSync.native(path.join(initialized.ffmpegDirectory, 'bin', 'ffprobe.exe')));
   assert.equal(result.paths.streamlink, fs.realpathSync.native(path.join(initialized.streamlinkDirectory, 'bin', 'streamlink.exe')));
+});
+
+test('accepts a Windows ShortPath root when managed executables resolve to the same long path', { skip: process.platform !== 'win32' }, async (t) => {
+  const environment = createEnvironment();
+  t.after(() => fs.rmSync(environment.rootDir, { recursive: true, force: true }));
+  const shortRoot = getWindowsShortPath(environment.rootDir);
+  const longRoot = fs.realpathSync.native(environment.rootDir);
+  if (!shortRoot || shortRoot.toLowerCase() === longRoot.toLowerCase()) {
+    t.skip('8.3 short names are unavailable');
+    return;
+  }
+  const shortEnvironment = {
+    rootDir: shortRoot,
+    appDataDir: path.join(shortRoot, 'programdata', 'Twitch_VOD_Manager')
+  };
+  const fixture = createProvisioningFixture();
+
+  const result = await provisionManagedCutterTools(shortEnvironment, {
+    loadBuiltArtifacts: () => ({ tools: fixture.tools, manifest: fixture.manifest }),
+    runVersionCheck: (executablePath, _args, label) => {
+      if (label.includes('Streamlink')) return 'Streamlink 8.4.0';
+      if (path.basename(executablePath).toLowerCase() === 'ffprobe.exe') return 'ffprobe version 8.1.2';
+      return 'ffmpeg version 8.1.2';
+    }
+  });
+
+  assert.equal(result.paths.streamlink.startsWith(longRoot), true);
+  assert.equal(result.paths.ffmpeg.startsWith(longRoot), true);
+  assert.equal(result.paths.ffprobe.startsWith(longRoot), true);
+});
+
+test('rejects a nonexistent managed directory below a junction before writing outside the owned tree', { skip: process.platform !== 'win32' }, async (t) => {
+  const environment = createEnvironment();
+  const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-cutter-junction-outside-'));
+  t.after(() => fs.rmSync(environment.rootDir, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(outsideRoot, { recursive: true, force: true }));
+  const junctionPath = path.join(environment.rootDir, 'escaped');
+  fs.symlinkSync(outsideRoot, junctionPath, 'junction');
+  const fixture = createProvisioningFixture();
+  let loadedArtifacts = false;
+
+  await assert.rejects(() => provisionManagedCutterTools({
+    rootDir: environment.rootDir,
+    appDataDir: path.join(junctionPath, 'programdata', 'Twitch_VOD_Manager')
+  }, {
+    loadBuiltArtifacts: () => {
+      loadedArtifacts = true;
+      return { tools: fixture.tools, manifest: fixture.manifest };
+    },
+    runVersionCheck: () => '8.1.2'
+  }), /outside the owned managed-tool directory/);
+
+  assert.equal(loadedArtifacts, false);
+  assert.equal(fs.existsSync(path.join(outsideRoot, 'programdata')), false);
+});
+
+test('accepts casing differences for the same existing Windows tree', { skip: process.platform !== 'win32' }, async (t) => {
+  const environment = createEnvironment();
+  t.after(() => fs.rmSync(environment.rootDir, { recursive: true, force: true }));
+  const fixture = createProvisioningFixture();
+  const upperEnvironment = {
+    rootDir: environment.rootDir.toUpperCase(),
+    appDataDir: environment.appDataDir.toUpperCase()
+  };
+
+  await assert.doesNotReject(() => provisionManagedCutterTools(upperEnvironment, {
+    loadBuiltArtifacts: () => ({ tools: fixture.tools, manifest: fixture.manifest }),
+    runVersionCheck: (_executablePath, _args, label) => label === 'Streamlink'
+      ? 'Streamlink 8.4.0'
+      : `${label.toLowerCase()} version 8.1.2`
+  }));
 });
 
 test('rejects a product tool path that escapes the owned installation directory', async (t) => {

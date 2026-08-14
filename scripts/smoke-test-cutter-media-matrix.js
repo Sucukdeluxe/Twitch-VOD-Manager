@@ -41,9 +41,25 @@ const markerTimes = Object.freeze({
 });
 const markerAudioSampleRate = 48000;
 
+function resolveCanonicalPath(candidatePath) {
+  let existingPath = path.resolve(candidatePath);
+  const missingSegments = [];
+  while (true) {
+    try {
+      return path.join(fs.realpathSync.native(existingPath), ...missingSegments.reverse());
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      const parentPath = path.dirname(existingPath);
+      if (parentPath === existingPath) return path.resolve(candidatePath);
+      missingSegments.push(path.basename(existingPath));
+      existingPath = parentPath;
+    }
+  }
+}
+
 function assertPathInside(targetPath, parentPath, label) {
-  const resolvedTarget = path.resolve(targetPath);
-  const resolvedParent = path.resolve(parentPath);
+  const resolvedTarget = resolveCanonicalPath(targetPath);
+  const resolvedParent = resolveCanonicalPath(parentPath);
   const relative = path.relative(resolvedParent, resolvedTarget);
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error(`${label} is outside the owned managed-tool directory: ${resolvedTarget}`);
