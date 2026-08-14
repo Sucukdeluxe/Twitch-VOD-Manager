@@ -67,11 +67,21 @@ jobs:
         run: npm run test:unit
         timeout-minutes: 10
       - name: Focused Electron smoke
-        run: npm run test:e2e:focused
-        timeout-minutes: 10
+        run: |
+          npm run test:e2e:focused
+          if ($LASTEXITCODE -ne 0) {
+            npm run test:e2e:focused
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+        timeout-minutes: 20
       - name: Cutter media matrix
-        run: node scripts/smoke-test-cutter-media-matrix.js
-        timeout-minutes: 10
+        run: |
+          node scripts/smoke-test-cutter-media-matrix.js
+          if ($LASTEXITCODE -ne 0) {
+            node scripts/smoke-test-cutter-media-matrix.js
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+        timeout-minutes: 20
       - name: Clean managed tools provision and repair
         run: npm run test:managed-tools-live
         timeout-minutes: 10

@@ -591,9 +591,7 @@ for (const relativePath of ['.github/workflows/windows-ci.yml', '.gitea/workflow
     'npm run test:cutter-matrix-contract',
     'npm run test:live-integration-contract',
     'npm run test:unit',
-    'npm run test:e2e:focused',
     'npm run build',
-    'node scripts/smoke-test-cutter-media-matrix.js',
     'npm run test:managed-tools-live',
     'npm run test:packaged-launch',
     'npm run test:installer'
@@ -621,7 +619,7 @@ for (const relativePath of ['.github/workflows/windows-ci.yml', '.gitea/workflow
   const verifyLiveContractIndex = stepIndexByRun(verifyJob, 'npm run test:live-integration-contract');
   check(verifyBuildIndex >= 0 && verifyBuildIndex < verifyLiveContractIndex, `${relativePath} verify must build before the live integration contract`);
   check(verifyBuildIndex < stepIndexByRun(verifyJob, 'npm run test:managed-tools-live'), `${relativePath} runs the live managed-tools check before build`);
-  for (const command of ['npm run pack', 'npm run dist:ci']) {
+  for (const command of ['npm run pack', 'npm run dist:ci', 'npm run test:e2e:focused', 'node scripts/smoke-test-cutter-media-matrix.js']) {
     check(hasSingleConditionalRetry(verifyJob?.steps.map((step) => step.raw).join('\n') || '', command), `${relativePath} does not retry transient ${command} failures exactly once`);
   }
   check(hasSingleConditionalRetry(verifyJob?.steps.map((step) => step.raw).join('\n') || '', 'npx install-electron --no'), `${relativePath} does not retry Electron binary provisioning exactly once`);

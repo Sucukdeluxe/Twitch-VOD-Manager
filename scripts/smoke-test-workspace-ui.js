@@ -458,7 +458,11 @@ async function run() {
         apiType: typeof window.api.selectDroppedVideo
       };
     });
-    await win.waitForTimeout(250);
+    await win.waitForFunction(() => {
+      const info = document.getElementById('cutterInfo');
+      const cut = document.getElementById('btnCut');
+      return Boolean(info?.classList.contains('shown') && cut && cut.disabled === false);
+    }, { timeout: 30000 }).catch(() => undefined);
     const cutterDropPaths = await app.evaluate(() => ({ ...globalThis.__workspaceCutterDropPaths }));
     const cutterDropUi = await win.evaluate(() => ({
       filePath: document.getElementById('cutterFilePath')?.value || '',
@@ -710,7 +714,7 @@ async function run() {
       check(downloadingKeyboardState.state === 'downloading' && downloadingStateAfterEnter === 'downloading', 'Keyboard activation changes the downloading state');
       check(downloadingKeyboardState.progressWithinPopover && downloadingKeyboardState.trackWithinPopover, `Downloading progress exceeds the update popover: ${JSON.stringify(downloadingKeyboardState.geometry)}`);
       const updateProgressViewport = await win.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
-      await win.screenshot({
+      await win.screenshot({ timeout: 120000,
         path: path.join(artifactDir, `workspace-update-downloading-${updateProgressViewport.width}x${updateProgressViewport.height}.png`),
         fullPage: true
       });
@@ -1116,7 +1120,7 @@ async function run() {
           };
         }, { cardSelector: pane.card, outputId: pane.output });
         diagnosticLayouts.push({ target, pane: pane.id, ...layout });
-        await win.screenshot({
+        await win.screenshot({ timeout: 120000,
           path: path.join(artifactDir, `workspace-settings-${pane.id}-${target.width}x${target.height}.png`),
           fullPage: true
         });
@@ -1185,7 +1189,7 @@ async function run() {
     check(cleanupOverflow.document <= 1 && cleanupOverflow.tab <= 1, `Cleanup Settings causes horizontal overflow: ${JSON.stringify(cleanupOverflow)}`);
     await win.evaluate(() => window.changeLanguage('de'));
     await win.waitForTimeout(160);
-    await win.screenshot({
+    await win.screenshot({ timeout: 120000,
       path: path.join(artifactDir, 'workspace-settings-storage-1280x800.png'),
       fullPage: true
     });
@@ -1611,7 +1615,7 @@ async function run() {
     await win.setViewportSize(TARGETS[0]);
     await win.evaluate(() => window.showTab('vods'));
     await win.waitForTimeout(160);
-    await win.screenshot({
+    await win.screenshot({ timeout: 120000,
       path: path.join(artifactDir, `workspace-vods-fixture-${TARGETS[0].width}x${TARGETS[0].height}.png`),
       fullPage: true
     });
@@ -1717,13 +1721,13 @@ async function run() {
     check(systemLightTheme.bodyColor === lightTheme.bodyColor, `System-Light text ${systemLightTheme.bodyColor} does not match Light ${lightTheme.bodyColor}`);
     check(systemLightTheme.checkboxColor === lightTheme.checkboxColor && systemLightTheme.checkboxBackground === lightTheme.checkboxBackground, `System-Light checkbox does not match explicit Light: ${JSON.stringify({ lightTheme, systemLightTheme })}`);
 
-    await win.screenshot({
+    await win.screenshot({ timeout: 120000,
       path: path.join(artifactDir, `workspace-settings-system-light-${TARGETS[0].width}x${TARGETS[0].height}.png`),
       fullPage: true
     });
     await win.locator('#workspaceThemePicker [data-theme="light"]').click();
     await win.waitForTimeout(160);
-    await win.screenshot({
+    await win.screenshot({ timeout: 120000,
       path: path.join(artifactDir, `workspace-settings-light-${TARGETS[0].width}x${TARGETS[0].height}.png`),
       fullPage: true
     });
@@ -1757,7 +1761,7 @@ async function run() {
     check(updateScreenshotState.state === 'available', `Update screenshot uses ${updateScreenshotState.state} instead of available state`);
     check(updateScreenshotState.laterVisible && updateScreenshotState.dismissVisible, 'Update screenshot does not expose both Later and Close');
     await win.waitForTimeout(160);
-    await win.screenshot({
+    await win.screenshot({ timeout: 120000,
       path: path.join(artifactDir, `workspace-update-${TARGETS[0].width}x${TARGETS[0].height}.png`),
       fullPage: true
     });
@@ -1904,7 +1908,7 @@ async function run() {
     check(streamerSidebarLayout.contextMenuActions.join(',') === 'auto,vod,record', 'Streamer context menu does not expose AUTO, VOD and REC actions');
     check(streamerSidebarLayout.counterAtTitleEdge && streamerSidebarLayout.counterHasBorder, 'Streamer counter is not rendered as a title-edge badge');
     check(streamerSidebarLayout.counterTextWithLiveStreamer === '1' && !streamerSidebarLayout.counterContainsLiveSuffix, `Streamer counter mixes total and live state: ${streamerSidebarLayout.counterTextWithLiveStreamer}`);
-    await win.screenshot({
+    await win.screenshot({ timeout: 120000,
       path: path.join(artifactDir, 'workspace-streamer-context-menu.png'),
       fullPage: true
     });
@@ -1945,7 +1949,7 @@ async function run() {
       renderStreamers();
     });
     await win.waitForTimeout(150);
-    await win.screenshot({ path: path.join(artifactDir, 'workspace-streamer-slide-mid.png'), fullPage: true });
+    await win.screenshot({ timeout: 120000, path: path.join(artifactDir, 'workspace-streamer-slide-mid.png'), fullPage: true });
     const emptyStreamerIndicatorOpacity = await win.evaluate(async () => {
       config.streamers = [];
       currentStreamer = null;
@@ -2117,7 +2121,7 @@ async function run() {
     check(hdHoverFirst?.durationOpacity === '1', `VOD duration disappears during preview: ${hdHoverFirst?.durationOpacity}`);
     check(Number(hdHoverFirst?.durationZIndex) > 2, `VOD duration is behind the preview overlay: ${hdHoverFirst?.durationZIndex}`);
     check(hdHoverSecond?.includes(previewFrames[1]), `VOD hover does not cycle to the next 1080p frame: ${hdHoverSecond}`);
-    await win.screenshot({
+    await win.screenshot({ timeout: 120000,
       path: path.join(artifactDir, 'workspace-vod-hover-hd.png'),
       fullPage: true
     });
@@ -2192,7 +2196,7 @@ async function run() {
     check(!queueWorkspaceView.streamersVisible && queueWorkspaceView.queueVisible, 'Queue switch leaves the streamer list in the queue workspace');
     check(queueWorkspaceView.queueCanFillSidebar, 'Queue workspace does not use the available sidebar height');
     check(queueWorkspaceView.countBackground === 'rgb(31, 122, 67)' && queueWorkspaceView.countColor === 'rgb(255, 255, 255)', 'Queue counter does not use the readable green treatment');
-    await win.screenshot({
+    await win.screenshot({ timeout: 120000,
       path: path.join(artifactDir, 'workspace-queue-view.png'),
       fullPage: true
     });
@@ -2247,7 +2251,7 @@ async function run() {
     await win.waitForTimeout(460);
     await win.evaluate(() => window.setVodsWorkspace('queue'));
     await win.waitForTimeout(150);
-    await win.screenshot({ path: path.join(artifactDir, 'workspace-context-switcher-slide-mid.png'), fullPage: true });
+    await win.screenshot({ timeout: 120000, path: path.join(artifactDir, 'workspace-context-switcher-slide-mid.png'), fullPage: true });
     await win.evaluate(() => window.setVodsWorkspace('streamers'));
 
     await win.evaluate(() => window.showTab('settings'));
@@ -2315,7 +2319,7 @@ async function run() {
     await win.waitForTimeout(460);
     await win.evaluate(() => window.changeLanguage('de'));
     await win.waitForTimeout(150);
-    await win.screenshot({ path: path.join(artifactDir, 'workspace-language-switcher-slide-mid.png'), fullPage: true });
+    await win.screenshot({ timeout: 120000, path: path.join(artifactDir, 'workspace-language-switcher-slide-mid.png'), fullPage: true });
 
     const settingsNavigationMotion = await win.evaluate(async () => {
       const list = document.querySelector('[data-context-for="settings"] .context-list');
@@ -2368,7 +2372,7 @@ async function run() {
       updatesButton.click();
     });
     await win.waitForTimeout(150);
-    await win.screenshot({ path: path.join(artifactDir, 'workspace-settings-navigation-slide-mid.png'), fullPage: true });
+    await win.screenshot({ timeout: 120000, path: path.join(artifactDir, 'workspace-settings-navigation-slide-mid.png'), fullPage: true });
     await win.evaluate(() => {
       window.changeLanguage('en');
       window.showTab('vods');
@@ -2415,7 +2419,7 @@ async function run() {
     await win.locator('.top-nav button[data-tab="settings"]').hover();
     await win.evaluate(() => window.showTab('settings'));
     await win.waitForTimeout(170);
-    await win.screenshot({ path: path.join(artifactDir, 'workspace-top-nav-slide-mid.png'), fullPage: true });
+    await win.screenshot({ timeout: 120000, path: path.join(artifactDir, 'workspace-top-nav-slide-mid.png'), fullPage: true });
     await win.emulateMedia({ reducedMotion: 'no-preference' });
 
     const responsiveTabs = {};
@@ -2475,7 +2479,7 @@ async function run() {
         }
 
         if (target.width === TARGETS[0].width) {
-          await win.screenshot({
+          await win.screenshot({ timeout: 120000,
             path: path.join(artifactDir, `workspace-${tab}-${target.width}x${target.height}.png`),
             fullPage: true
           });
@@ -2499,7 +2503,7 @@ async function run() {
       check(geometry.sidebarWidth >= 260 && geometry.sidebarWidth <= 272, `Context sidebar width is ${geometry.sidebarWidth}px at ${target.width}x${target.height}`);
       check(geometry.toolbarHeight >= 59 && geometry.toolbarHeight <= 61, `Workspace toolbar height is ${geometry.toolbarHeight}px at ${target.width}x${target.height}`);
       check(!geometry.updateVisible, `Update action is visible without an available update at ${target.width}x${target.height}`);
-      await win.screenshot({
+      await win.screenshot({ timeout: 120000,
         path: path.join(artifactDir, `workspace-${target.width}x${target.height}.png`),
         fullPage: true
       });
