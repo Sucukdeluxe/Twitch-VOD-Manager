@@ -85,6 +85,20 @@ describe('main runtime safety production paths', () => {
         expect(closeHandler.indexOf('finish({ success: true, filename })')).toBeGreaterThan(closeHandler.indexOf('partialDownloadRegistry.commit'));
     });
 
+    it('announces tool preparation before every download tool gate', () => {
+        const source = mainSource();
+        const vod = source.slice(source.indexOf('async function downloadVOD'), source.indexOf('async function processDownloadMergeGroup'));
+        const live = source.slice(source.indexOf('async function downloadLiveStream'), source.indexOf('async function downloadVOD'));
+        const mergeGroup = source.slice(source.indexOf('async function processDownloadMergeGroup'), source.indexOf('// ---- PHASE 2: MERGING ----'));
+        for (const [label, fragment] of [['vod', vod], ['live', live], ['merge', mergeGroup]] as const) {
+            const announce = fragment.indexOf("tBackend('statusPreparingTools')");
+            const gate = fragment.indexOf('await ensureStreamlinkInstalled()');
+            expect(announce, `${label} announces tool preparation`).toBeGreaterThan(-1);
+            expect(gate, `${label} gates on streamlink`).toBeGreaterThan(announce);
+        }
+        expect(source).not.toContain("tBackend('statusCheckingTools')");
+    });
+
     it('reports the auto-install failure guidance on every download tool gate', () => {
         const source = mainSource();
         const mergeGroup = source.slice(source.indexOf('async function processDownloadMergeGroup'), source.indexOf('// ---- PHASE 2: MERGING ----'));

@@ -129,7 +129,7 @@ import {
     refreshBundledToolPaths, ensureStreamlinkInstalled, ensureFfmpegInstalled,
     getManagedToolStatuses, repairManagedTools, resetManagedTools,
     canExecute, canExecuteCommand,
-    cacheVerifiedStreamlinkCommand, isVerifiedStreamlinkCommand,
+    cacheVerifiedStreamlinkCommand,
     cacheVerifiedFfmpegCommands, isVerifiedFfmpegCommands,
     invalidateVerifiedToolCaches, setManagedToolExecutionObserver
 } from './tools';
@@ -5885,6 +5885,16 @@ async function downloadLiveStream(
     item: QueueItem,
     onProgress: (progress: DownloadProgress) => void
 ): Promise<DownloadResult> {
+    onProgress({
+        id: item.id,
+        progress: -1,
+        speed: '',
+        eta: '',
+        status: tBackend('statusPreparingTools'),
+        currentPart: 0,
+        totalParts: 0
+    });
+
     const streamlinkReady = await ensureStreamlinkInstalled();
     if (!streamlinkReady) {
         return { success: false, error: tBackend('streamlinkAutoInstallFailed') };
@@ -6203,21 +6213,15 @@ async function downloadVOD(
         };
     }
 
-    const streamlinkCmd = getStreamlinkCommand();
-    const streamlinkVersionArgs = [...streamlinkCmd.prefixArgs, '--version'];
-    const streamlinkAlreadyVerified = isVerifiedStreamlinkCommand(streamlinkCmd.command, streamlinkVersionArgs);
-
-    if (!streamlinkAlreadyVerified) {
-        onProgress({
-            id: item.id,
-            progress: -1,
-            speed: '',
-            eta: '',
-            status: tBackend('statusCheckingTools'),
-            currentPart: 0,
-            totalParts: 0
-        });
-    }
+    onProgress({
+        id: item.id,
+        progress: -1,
+        speed: '',
+        eta: '',
+        status: tBackend('statusPreparingTools'),
+        currentPart: 0,
+        totalParts: 0
+    });
 
     const streamlinkReady = await ensureStreamlinkInstalled();
     if (!streamlinkReady) {
@@ -6469,6 +6473,16 @@ async function processDownloadMergeGroup(
 
     // ---- PHASE 1: DOWNLOADING ----
     if (mg.mergePhase === 'downloading') {
+        onProgress({
+            id: item.id,
+            progress: -1,
+            speed: '',
+            eta: '',
+            status: tBackend('statusPreparingTools'),
+            currentPart: 0,
+            totalParts: 0
+        });
+
         const streamlinkReady = await ensureStreamlinkInstalled();
         if (!streamlinkReady) {
             return { success: false, error: tBackend('streamlinkAutoInstallFailed') };
