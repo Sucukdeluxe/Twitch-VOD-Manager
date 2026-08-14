@@ -11,6 +11,7 @@ const {
   assertInstallerSurfaceClean,
   assertPathInside,
   assertShortcutDetails,
+  waitForInstallerSurfaceClean,
   createInstallerPhases,
   readShortcutDetails,
   registryKeys
@@ -220,6 +221,41 @@ test('clean surface contract includes both registry hives and both shortcut scop
     keyExists: (key) => key === registryKeys('HKLM').uninstall,
     pathExists: (candidate) => candidate === phases[0].startMenuShortcut
   }), /HKLM.*Twitch VOD Manager\.lnk/i);
+});
+
+test('surface wait tolerates asynchronous uninstaller cleanup before the deadline', async () => {
+  const phases = createInstallerPhases('C:\\smoke', {
+    commonDesktop: 'C:\\shared-desktop',
+    commonPrograms: 'C:\\shared-programs',
+    currentDesktop: 'C:\\user-desktop',
+    currentPrograms: 'C:\\user-programs'
+  });
+  let sweeps = 0;
+  await waitForInstallerSurfaceClean(phases, {
+    keyExists: (key) => {
+      if (key === registryKeys('HKCU').uninstall) sweeps += 1;
+      return sweeps < 3;
+    },
+    pathExists: () => sweeps < 3,
+    timeoutMs: 5000,
+    pollIntervalMs: 5
+  });
+  assert.ok(sweeps >= 3);
+});
+
+test('surface wait still fails when the uninstaller never cleans up', async () => {
+  const phases = createInstallerPhases('C:\\smoke', {
+    commonDesktop: 'C:\\shared-desktop',
+    commonPrograms: 'C:\\shared-programs',
+    currentDesktop: 'C:\\user-desktop',
+    currentPrograms: 'C:\\user-programs'
+  });
+  await assert.rejects(() => waitForInstallerSurfaceClean(phases, {
+    keyExists: () => true,
+    pathExists: () => false,
+    timeoutMs: 60,
+    pollIntervalMs: 5
+  }), /clean registry and shortcut surface/);
 });
 
 test('recursive cleanup is limited to the dedicated runner temp directory', () => {

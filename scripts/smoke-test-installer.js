@@ -223,6 +223,19 @@ function verifyInstalledPhase(phase) {
   return uninstallerPath;
 }
 
+async function waitForInstallerSurfaceClean(phases, { keyExists, pathExists = fs.existsSync, timeoutMs = 30000, pollIntervalMs = 250 }) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      assertInstallerSurfaceClean(phases, { keyExists, pathExists });
+      return;
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+  }
+}
+
 async function waitForPathRemoval(targetPath, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   while (fs.existsSync(targetPath)) {
@@ -274,7 +287,7 @@ async function main() {
       if (!await waitForPathRemoval(phase.installationDirectory, 30000)) {
         throw new Error(`Silent uninstall left the installation directory behind: ${phase.installationDirectory}`);
       }
-      assertCleanInstallerSmokeSurface(phases);
+      await waitForInstallerSurfaceClean(phases, { keyExists: registryKeyExists });
       results.push({
         flag: phase.flag,
         hive: phase.hive,
@@ -314,5 +327,6 @@ module.exports = {
   assertShortcutDetails,
   createInstallerPhases,
   readShortcutDetails,
-  registryKeys
+  registryKeys,
+  waitForInstallerSurfaceClean
 };
