@@ -342,6 +342,7 @@ const UI_TEXT_EN = {
         managedToolsVerified: 'Verified',
         managedToolsUnverified: 'Unverified',
         managedToolsCorrupt: 'Corrupt',
+        managedToolsFallbackActive: 'Downloads still available',
         debugLogTitle: 'Live Debug Log',
         refreshLog: 'Refresh',
         autoRefresh: 'Auto refresh',

@@ -338,6 +338,10 @@ async function downloadFile(url: string, destinationPath: string): Promise<boole
 
         await new Promise<void>((resolve, reject) => {
             const writer = fs.createWriteStream(destinationPath);
+            response.data.on('error', (err: Error) => {
+                writer.destroy();
+                reject(err);
+            });
             response.data.pipe(writer);
             writer.on('finish', () => resolve());
             writer.on('error', (err) => reject(err));
@@ -412,14 +416,27 @@ function getManagedToolInstaller(toolId: 'streamlink' | 'ffmpeg'): ManagedToolIn
 }
 
 export interface ManagedToolStatuses {
-    streamlink: ManagedToolStatus;
-    ffmpeg: ManagedToolStatus;
+    streamlink: ManagedToolStatus & { fallbackRunnable: boolean };
+    ffmpeg: ManagedToolStatus & { fallbackRunnable: boolean };
 }
 
 export async function getManagedToolStatuses(): Promise<ManagedToolStatuses> {
+    refreshBundledToolPaths();
+    const streamlinkCommand = getStreamlinkCommand();
+    const streamlinkVersionArgs = [...streamlinkCommand.prefixArgs, '--version'];
+    const ffmpegPath = getFFmpegPath();
+    const ffprobePath = getFFprobePath();
     return {
-        streamlink: await getManagedToolInstaller('streamlink').status(APPLICATION_TOOL_MANIFEST.streamlink),
-        ffmpeg: await getManagedToolInstaller('ffmpeg').status(APPLICATION_TOOL_MANIFEST.ffmpeg)
+        streamlink: {
+            ...(await getManagedToolInstaller('streamlink').status(APPLICATION_TOOL_MANIFEST.streamlink)),
+            fallbackRunnable: isVerifiedStreamlinkCommand(streamlinkCommand.command, streamlinkVersionArgs)
+                || fallbackToRunnableStreamlink(streamlinkCommand.command, streamlinkVersionArgs)
+        },
+        ffmpeg: {
+            ...(await getManagedToolInstaller('ffmpeg').status(APPLICATION_TOOL_MANIFEST.ffmpeg)),
+            fallbackRunnable: isVerifiedFfmpegCommands(ffmpegPath, ffprobePath)
+                || fallbackToRunnableFfmpeg(ffmpegPath, ffprobePath)
+        }
     };
 }
 
@@ -450,6 +467,22 @@ export async function resetManagedTools(): Promise<{ success: boolean; statuses:
 // ==========================================
 // AUTO-INSTALL TOOLS
 // ==========================================
+function fallbackToRunnableStreamlink(command: string, versionArgs: string[]): boolean {
+    if (!canExecuteCommand(command, versionArgs)) {
+        return false;
+    }
+    cacheVerifiedStreamlinkCommand(command, versionArgs);
+    return true;
+}
+
+function fallbackToRunnableFfmpeg(ffmpegPath: string, ffprobePath: string): boolean {
+    if (!canExecuteCommand(ffmpegPath, ['-version']) || !canExecuteCommand(ffprobePath, ['-version'])) {
+        return false;
+    }
+    cacheVerifiedFfmpegCommands(ffmpegPath, ffprobePath);
+    return true;
+}
+
 export async function ensureStreamlinkInstalled(): Promise<boolean> {
     refreshBundledToolPaths();
 
@@ -468,7 +501,7 @@ export async function ensureStreamlinkInstalled(): Promise<boolean> {
     }
 
     if (process.platform !== 'win32') {
-        return false;
+        return fallbackToRunnableStreamlink(current.command, versionArgs);
     }
 
     _appendDebugLog('streamlink-install-start');
@@ -476,7 +509,7 @@ export async function ensureStreamlinkInstalled(): Promise<boolean> {
         const result = await getManagedToolInstaller('streamlink').install(manifest);
         if (!result.success) {
             _appendDebugLog('streamlink-install-failed', { error: result.error, status: result.status });
-            return false;
+            return fallbackToRunnableStreamlink(current.command, versionArgs);
         }
 
         refreshBundledToolPaths(true);
@@ -489,10 +522,10 @@ export async function ensureStreamlinkInstalled(): Promise<boolean> {
             cacheVerifiedStreamlinkCommand(cmd.command, installedVersionArgs);
         }
         _appendDebugLog('streamlink-install-finished', { works, command: cmd.command, prefixArgs: cmd.prefixArgs });
-        return works;
+        return works || fallbackToRunnableStreamlink(current.command, versionArgs);
     } catch (e) {
         _appendDebugLog('streamlink-install-failed', String(e));
-        return false;
+        return fallbackToRunnableStreamlink(current.command, versionArgs);
     }
 }
 
@@ -514,7 +547,7 @@ export async function ensureFfmpegInstalled(): Promise<boolean> {
     }
 
     if (process.platform !== 'win32') {
-        return false;
+        return fallbackToRunnableFfmpeg(ffmpegPath, ffprobePath);
     }
 
     _appendDebugLog('ffmpeg-install-start');
@@ -522,7 +555,7 @@ export async function ensureFfmpegInstalled(): Promise<boolean> {
         const result = await getManagedToolInstaller('ffmpeg').install(manifest);
         if (!result.success) {
             _appendDebugLog('ffmpeg-install-failed', { error: result.error, status: result.status });
-            return false;
+            return fallbackToRunnableFfmpeg(ffmpegPath, ffprobePath);
         }
 
         refreshBundledToolPaths(true);
@@ -534,9 +567,9 @@ export async function ensureFfmpegInstalled(): Promise<boolean> {
             cacheVerifiedFfmpegCommands(newFfmpegPath, newFfprobePath);
         }
         _appendDebugLog('ffmpeg-install-finished', { works, ffmpeg: newFfmpegPath, ffprobe: newFfprobePath });
-        return works;
+        return works || fallbackToRunnableFfmpeg(ffmpegPath, ffprobePath);
     } catch (e) {
         _appendDebugLog('ffmpeg-install-failed', String(e));
-        return false;
+        return fallbackToRunnableFfmpeg(ffmpegPath, ffprobePath);
     }
 }

@@ -85,6 +85,15 @@ describe('main runtime safety production paths', () => {
         expect(closeHandler.indexOf('finish({ success: true, filename })')).toBeGreaterThan(closeHandler.indexOf('partialDownloadRegistry.commit'));
     });
 
+    it('reports the auto-install failure guidance on every download tool gate', () => {
+        const source = mainSource();
+        const mergeGroup = source.slice(source.indexOf('async function processDownloadMergeGroup'), source.indexOf('// ---- PHASE 2: MERGING ----'));
+        expect(mergeGroup).toContain("tBackend('streamlinkAutoInstallFailed')");
+        expect(mergeGroup).toContain("tBackend('ffmpegAutoInstallFailed')");
+        expect(source).not.toContain("tBackend('streamlinkMissing')");
+        expect(source).not.toContain("tBackend('ffmpegMissing')");
+    });
+
     it('guards and tracks every standalone cut and merge process across shutdown', () => {
         const source = mainSource();
         const cut = source.slice(source.indexOf('async function cutVideo('), source.indexOf('async function mergeVideos('));

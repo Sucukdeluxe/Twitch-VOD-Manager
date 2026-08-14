@@ -6471,12 +6471,12 @@ async function processDownloadMergeGroup(
     if (mg.mergePhase === 'downloading') {
         const streamlinkReady = await ensureStreamlinkInstalled();
         if (!streamlinkReady) {
-            return { success: false, error: tBackend('streamlinkMissing') };
+            return { success: false, error: tBackend('streamlinkAutoInstallFailed') };
         }
 
         const ffmpegReady = await ensureFfmpegInstalled();
         if (!ffmpegReady) {
-            return { success: false, error: tBackend('ffmpegMissing') };
+            return { success: false, error: tBackend('ffmpegAutoInstallFailed') };
         }
 
         const streamer = mg.items[0].streamer.replace(/[^a-zA-Z0-9_-]/g, '');

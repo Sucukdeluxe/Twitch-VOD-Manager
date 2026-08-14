@@ -471,7 +471,11 @@ function getManagedToolStateLabel(state: ManagedToolStatus['state']): string {
 function renderManagedToolStatus(statuses: ManagedToolStatuses): void {
     const lines = [statuses.streamlink, statuses.ffmpeg].map((status) => {
         const verification = status.verified ? UI_TEXT.static.managedToolsVerified : UI_TEXT.static.managedToolsUnverified;
-        return `${status.id} ${status.version}: ${getManagedToolStateLabel(status.state)} · ${verification}`;
+        const parts = [`${status.id} ${status.version}: ${getManagedToolStateLabel(status.state)} · ${verification}`];
+        if (!status.verified && status.fallbackRunnable) {
+            parts.push(UI_TEXT.static.managedToolsFallbackActive);
+        }
+        return parts.join(' · ');
     });
     byId('managedToolStatus').textContent = lines.join('\n');
 }

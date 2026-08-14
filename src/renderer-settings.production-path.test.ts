@@ -77,6 +77,43 @@ function createElements(...ids: string[]): Map<string, FakeElement> {
 }
 
 describe('renderer settings production diagnostics paths', () => {
+    it('marks unverified managed tools as still downloadable when a runnable installation exists', () => {
+        const elements = createElements('managedToolStatus');
+        const context = {
+            UI_TEXT: {
+                static: {
+                    managedToolsMissing: 'Missing',
+                    managedToolsInstalling: 'Installing',
+                    managedToolsVerified: 'Verified',
+                    managedToolsUnverified: 'Unverified',
+                    managedToolsCorrupt: 'Corrupt',
+                    managedToolsFallbackActive: 'Downloads still available',
+                },
+            },
+            byId: (id: string) => elements.get(id),
+        };
+        const api = evaluate(
+            sourceFragment('function getManagedToolStateLabel', 'async function refreshManagedToolStatus'),
+            context,
+            'renderManagedToolStatus'
+        );
+
+        api.renderManagedToolStatus({
+            streamlink: { id: 'streamlink', version: '8.4.0', state: 'missing', verified: false, fallbackRunnable: true },
+            ffmpeg: { id: 'ffmpeg', version: '8.1.2', state: 'missing', verified: false, fallbackRunnable: false },
+        });
+
+        const lines = (elements.get('managedToolStatus')?.textContent ?? '').split('\n');
+        expect(lines[0]).toBe('streamlink 8.4.0: Missing · Unverified · Downloads still available');
+        expect(lines[1]).toBe('ffmpeg 8.1.2: Missing · Unverified');
+
+        api.renderManagedToolStatus({
+            streamlink: { id: 'streamlink', version: '8.4.0', state: 'verified', verified: true, fallbackRunnable: true },
+            ffmpeg: { id: 'ffmpeg', version: '8.1.2', state: 'verified', verified: true, fallbackRunnable: true },
+        });
+        expect(elements.get('managedToolStatus')?.textContent).not.toContain('Downloads still available');
+    });
+
     it('ends every consecutive runtime metrics rejection in the localized error state', async () => {
         const elements = createElements('runtimeMetricsOutput');
         const context = {

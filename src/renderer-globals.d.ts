@@ -305,6 +305,7 @@ interface ManagedToolStatus {
     archiveName: string;
     state: 'missing' | 'installing' | 'verified' | 'unverified' | 'corrupt';
     verified: boolean;
+    fallbackRunnable: boolean;
 }
 
 interface ManagedToolStatuses {

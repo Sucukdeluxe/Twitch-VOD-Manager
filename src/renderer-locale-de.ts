@@ -342,6 +342,7 @@ const UI_TEXT_DE = {
         managedToolsVerified: 'Verifiziert',
         managedToolsUnverified: 'Nicht verifiziert',
         managedToolsCorrupt: 'Beschädigt',
+        managedToolsFallbackActive: 'Downloads weiterhin möglich',
         debugLogTitle: 'Live Debug-Log',
         refreshLog: 'Aktualisieren',
         autoRefresh: 'Auto-Refresh',
