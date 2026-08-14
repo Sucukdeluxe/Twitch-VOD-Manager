@@ -1,7 +1,11 @@
 # Changelog
 
-## 1.0.18 - 2026-08-13
+## 1.0.18 - 2026-08-14
 
+- Keep downloads working through a runnable system-provided Streamlink or FFmpeg even when the managed tool installation cannot be repaired right away.
+- Fail managed tool downloads cleanly when the connection breaks mid-transfer instead of leaving the download start waiting indefinitely.
+- Show in Settings when downloads remain available through a system installation while a managed tool is missing or unverified.
+- Explain failed automatic tool installations consistently across single, live and merged downloads.
 - Keep update downloads, progress, errors and changelog controls contained and responsive throughout the complete update flow.
 - Preserve System Check results across language changes and keep repeated diagnostics in a clear terminal state.
 - Expand Live Debug Log and Runtime Metrics layouts, improve dark-theme controls and make navigation and settings labels easier to read.

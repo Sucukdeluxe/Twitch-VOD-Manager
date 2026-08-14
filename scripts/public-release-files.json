@@ -151,6 +151,7 @@
     "src/renderer-vod-hover.ts",
     "src/renderer.ts",
     "src/styles.css",
+    "src/tools.test.ts",
     "src/tools.ts",
     "src/types.ts",
     "src/workspace.css",
