@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.22 - 2026-09-06
 
 - Show small round profile pictures beside streamer names in the sidebar, with an initial fallback when an image is unavailable.
 
