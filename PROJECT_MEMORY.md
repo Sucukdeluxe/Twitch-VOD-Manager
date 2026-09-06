@@ -6,7 +6,7 @@ Windows-Desktopanwendung auf Basis von Electron und TypeScript zum Durchsuchen, 
 
 Am 6. September 2026 nach einem Festplatten-Reset aus den vorhandenen Remote-Repositories wiederhergestellt. Der lokale Projektordner heißt `Twitch Downloader`. Die Anwendung, Paketkennung, Installer, Update-Adressen und Remote-Repositories heißen weiterhin `Twitch VOD Manager` beziehungsweise `Twitch-VOD-Manager`. Die vollständige Produktumbenennung ist noch offen.
 
-Aktueller veröffentlichter Stand: **1.0.21**, Tag `v1.0.21`, veröffentlicht am 6. September 2026 auf GitHub und Forgejo. Der Tag zeigt auf `750861acc1daf7bd15cbf98d6002a026c36fbd42`; nachfolgende Memory-Commits gehören nicht zum Installer.
+Aktueller veröffentlichter Stand: **1.0.22**, Tag `v1.0.22`, veröffentlicht am 6. September 2026 auf GitHub und Forgejo. Der Tag zeigt auf `a526bd3541fd1d909dae0060ba92d64347668099`; nachfolgende Memory-Commits gehören nicht zum Installer.
 
 ## Git und maßgeblicher Stand
 
@@ -20,8 +20,8 @@ Aktueller veröffentlichter Stand: **1.0.21**, Tag `v1.0.21`, veröffentlicht am
 
 ## Letzte Änderungen
 
-- Release 1.0.22 von Sascha beauftragt: runde Profilbilder in der Streamerliste; Versionsangaben und Changelog aktualisiert. Release-Prüfung und Veröffentlichung auf beiden Plattformen laufen.
-- Linke Streamerliste zeigt runde Profilbilder in 24 × 24 px direkt vor dem Namen. Verwendet den bestehenden Profil-Cache und dessen Vorladen/Hintergrundaktualisierung ohne zusätzliche Profilanfragen. Bilder werden in der vorhandenen Zeile nachgeladen und erhalten den Tastaturfokus; fehlende oder defekte Bilder zeigen den Anfangsbuchstaben. Bildklick wählt den Streamer, lange Namen werden einzeilig gekürzt und bleiben im Tooltip lesbar. Build, 37 gezielte Tests und vollständige Workspace-UI-Prüfung inklusive Laden, Fallback, Auswahl und Hell/Dunkel erfolgreich; Lint ohne Fehler bei 15 bestehenden Warnungen. Screenshots unter `tmp_streamer-avatar-artifacts/`. Noch nicht veröffentlicht, im Hot-Dev aktiv.
+- Release 1.0.22 abgeschlossen: runde Profilbilder in der Streamerliste; auf GitHub und Forgejo mit identischen Assets sowie englischem/deutschem Changelog veröffentlicht und geprüft.
+- Linke Streamerliste zeigt runde Profilbilder in 24 × 24 px direkt vor dem Namen. Verwendet den bestehenden Profil-Cache und dessen Vorladen/Hintergrundaktualisierung ohne zusätzliche Profilanfragen. Bilder werden in der vorhandenen Zeile nachgeladen und erhalten den Tastaturfokus; fehlende oder defekte Bilder zeigen den Anfangsbuchstaben. Bildklick wählt den Streamer, lange Namen werden einzeilig gekürzt und bleiben im Tooltip lesbar. Build, 37 gezielte Tests und vollständige Workspace-UI-Prüfung inklusive Laden, Fallback, Auswahl und Hell/Dunkel erfolgreich; Lint ohne Fehler bei 15 bestehenden Warnungen. Screenshots unter `tmp_streamer-avatar-artifacts/`. Mit 1.0.22 veröffentlicht, auch im Hot-Dev aktiv.
 - Release 1.0.21 abgeschlossen: alle Queue-Nachbesserungen seit 1.0.20 enthalten; auf GitHub und Forgejo mit identischen Assets sowie englischem/deutschem Changelog veröffentlicht und geprüft.
 - Streamer in Queue-Details verwendet jetzt den aufgelösten Twitch-Anzeigenamen mit originaler Groß-/Kleinschreibung, etwa `xRohat` statt `xrohat`. Gespeicherter Login bleibt unverändert; noch unbekannte Anzeigenamen fallen auf den Login zurück. Nachgeladene Profilnamen aktualisieren vorhandene Queue-Cards sofort und werden bei der Render-Erkennung berücksichtigt. Build, 43 gezielte Tests, Queue-UI-Test einschließlich nachgeladener Groß-/Kleinschreibung und Lint erfolgreich (15 bestehende Warnungen). Mit 1.0.21 veröffentlicht.
 - Queue-Details zeigen `URL:` separat und darunter einen einzeiligen, anklickbaren Link in 11 px. Klick, Enter oder Leertaste kopieren die vollständige URL über die vorhandene Kopierfunktion mit lokalisierter Erfolgs-/Fehlermeldung. Standard-VOD-URL einschließlich zehnstelliger ID vollständig sichtbar; überlange URLs werden nur in der Anzeige mit Ellipse gekürzt, bleiben vollständig kopierbar und im Tooltip lesbar. Build, 19 gezielte Tests, Queue-UI-Prüfung einschließlich Layout und Kopieraktionen sowie Lint erfolgreich (15 bestehende Warnungen); Hell/Dunkel visuell geprüft. Mit 1.0.21 veröffentlicht.
@@ -66,7 +66,7 @@ npm run dev
 
 ## Entscheidungen und offene nächste Schritte
 
-- Wiederherstellung und die von Sascha beauftragten Releases 1.0.20 und 1.0.21 abgeschlossen. Auf `public-v1` weiterarbeiten; beide Plattformen enthalten identische Assets und englische/deutsche Changelogs.
+- Wiederherstellung und die von Sascha beauftragten Releases bis einschließlich 1.0.22 abgeschlossen. Auf `public-v1` weiterarbeiten; beide Plattformen enthalten identische Assets und englische/deutsche Changelogs.
 - Die gewünschte Umbenennung zu `Twitch Downloader` ist lokal umgesetzt. Eine Umbenennung der Remotes und der Anwendung samt Update-Kompatibilität ist gesondert abzustimmen und zu prüfen.
 - Die Standardbranches wurden bei der Wiederherstellung nicht umgestellt oder mit älteren Entwicklungslinien zusammengeführt.
 - Nächste fachliche Änderung von Sascha entgegennehmen; vor Änderungen diese Memory, `README.md`, `CHANGELOG.md` und den Git-Status lesen.
@@ -134,3 +134,14 @@ Abschließende Verifikation von Release 1.0.21 am 6. September 2026:
 - Alle Assets von beiden Plattformen heruntergeladen und bytegenau per SHA-256/SHA-512 gegen den lokalen Build geprüft. Nach Veröffentlichung alle öffentlichen Asset-URLs sowie beide öffentlichen Metadaten einschließlich GitHubs Latest-Update-Kanal erneut geprüft.
 - Installer: 110.441.722 Bytes, SHA-256 `4819a7dfa524c085cbe00943163cde29dbed5c9a99d179feead05638e29dcd85`. Blockmap: 117.209 Bytes. Update-Metadaten: 368 Bytes mit passender Version, Dateigröße und SHA-512-Prüfsumme.
 - Keine produktiven Datenbankänderungen und keine vollständige Live-Update-Installation einer alten Version auf diesem Rechner. Hot-Dev bleibt aktiv. Ignorierte Prüfdateien liegen in `tmp_release_1.0.21/`, Testprotokolle im Windows-Temp-Verzeichnis.
+
+Abschließende Verifikation von Release 1.0.22 am 6. September 2026:
+
+- Vollständiger lokaler Durchlauf von `npm run test:e2e:release` erfolgreich: 83 Unit-Testdateien mit 633 Tests, Verträge, Workspace einschließlich Profilbildern, Cutter, Medienformat-Matrix, Smoke-/Full-/Template-Test und Einstellungen-Autosave. Zusätzlich Queue-UI-Prüfung, Security-/Public-Manifest-/CI-Prüfungen erfolgreich; Lint ohne Fehler bei 15 bestehenden Warnungen.
+- Windows-CI des exakten Release-Commits vollständig erfolgreich: https://github.com/Sucukdeluxe/Twitch-VOD-Manager/actions/runs/34031703977. Beim ersten Versuch überschritt der isolierte SQLite-WAL-Test sein 5-Sekunden-Zeitlimit; der erneute Lauf mit unverändertem Code bestand alle Stufen einschließlich Werkzeuginstallation/Reparatur, Paketstart, Installer-Build und Installer-Smoke.
+- Lokaler Installer mit `electron-builder --win --publish never --config.npmRebuild=false` gebaut. Version 1.0.22 und enthaltene Renderer-/CSS-/HTML-Dateien gegen den Quellstand abgeglichen; SQLite ausschließlich im Arbeitsspeicher und zusätzlicher isolierter Paketstart erfolgreich geprüft.
+- GitHub: https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/tag/v1.0.22 — Englisch. Forgejo: https://git.24-music.de/Administrator/Twitch-VOD-Manager/releases/tag/v1.0.22 — inhaltlich gleichwertiges Changelog Deutsch.
+- Auf beiden Plattformen regulärer veröffentlichter Latest-Release mit Titel `Twitch VOD Manager 1.0.22`, identischem annotiertem Tag und drei Assets: `Twitch-VOD-Manager-Setup-1.0.22.exe`, zugehörige `.blockmap` und `latest.yml`.
+- Alle Assets von beiden Plattformen heruntergeladen und bytegenau per SHA-256/SHA-512 gegen den lokalen Build geprüft. Nach Veröffentlichung öffentliche Asset-URLs, Latest-Release und Update-Metadaten beider Plattformen einschließlich GitHubs Update-Kanal erfolgreich verifiziert.
+- Installer: 110.441.936 Bytes, SHA-256 `bbfc1ab5ac2e7e7d0d5b5e86c7c757ab2c3e03e854a4e0a830156283af2131ba`. Blockmap: 117.025 Bytes. Update-Metadaten: 368 Bytes mit passender Version, Dateigröße und SHA-512-Prüfsumme.
+- Keine produktiven Datenbankänderungen und keine vollständige Live-Update-Installation einer alten Version auf diesem Rechner. Hot-Dev bleibt aktiv. Ignorierte Prüfdateien liegen in `tmp_release_1.0.22/`, Testprotokolle im Windows-Temp-Verzeichnis.
