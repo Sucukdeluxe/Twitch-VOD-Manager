@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Show a yellow left border on waiting queue cards, matching their status dot.
 - Place the queue-card date on the left beside the details arrow and the download status on the right below the progress bar.
 
 ## 1.0.20 - 2026-09-06

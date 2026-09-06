@@ -20,7 +20,7 @@ describe('production style modules', () => {
             .replace(/\r\n/g, '\n'));
         const digest = createHash('sha256').update(content).digest('hex');
 
-        expect(digest).toBe('eccaa49c879b53f95816408514a741f9aef7701ec9153ef9c8d70173a5b67056');
+        expect(digest).toBe('d95a7929a6641a1bc1f2000f4348b7d736d3fd99916c9e640d5fb34fdade3bc5');
     });
 
     test('derives the Windows hot-development executable version from package metadata', () => {

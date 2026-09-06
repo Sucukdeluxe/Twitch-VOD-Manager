@@ -77,6 +77,10 @@
     transition: border-color 0.2s, background 0.2s;
 }
 
+.queue-item:has(.status.pending) {
+    border-left-color: var(--warning);
+}
+
 .queue-item:has(.status.downloading) {
     border-left-color: var(--accent);
     background: rgba(145, 70, 255, 0.06);
