@@ -105,7 +105,11 @@ async function main() {
     await toggle.click();
     assert.equal(await toggle.getAttribute('aria-expanded'), 'false', 'Toggle collapses');
     await toggle.dblclick();
-    assert.equal(await toggle.getAttribute('aria-expanded'), 'true', 'Double-clicking toggle changes state only once');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'false', 'Both rapid toggle clicks are applied');
+    for (const detail of [3, 4, 5]) {
+      await toggle.dispatchEvent('click', { detail });
+      assert.equal(await toggle.getAttribute('aria-expanded'), String(detail % 2 === 1), 'Rapid repeated clicks are never suppressed');
+    }
     await toggle.focus();
     await win.keyboard.press('Space');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'false', 'Space collapses');

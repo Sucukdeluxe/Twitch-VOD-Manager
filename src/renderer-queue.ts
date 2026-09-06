@@ -135,7 +135,6 @@ function initQueueActions(): void {
     list.addEventListener('click', (event: MouseEvent) => {
         const control = resolveQueueControl(event.target);
         if (!control || !list.contains(control)) return;
-        if (control.dataset.queueAction === 'details' && event.detail > 1) return;
         void activateQueueControl(control);
     });
     list.addEventListener('dblclick', (event: MouseEvent) => {

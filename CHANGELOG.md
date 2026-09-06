@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Respond to every rapid click on the queue details toggle, allowing the animation to reverse immediately without a perceived cooldown.
 - Animate queue details expanding and collapsing with a matching chevron rotation; keep collapsed file actions out of keyboard navigation.
 - Keep the waiting queue status unboxed with a transparent background and its yellow status dot.
 - Rework queue cards with two-line titles, clearer status badges, larger dates below the progress bar on the right, and 32-pixel remove and retry buttons. Keep paused progress visible and wrap long download errors.
