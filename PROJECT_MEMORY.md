@@ -55,7 +55,7 @@ npm run dev
 
 ## Entscheidungen und offene nächste Schritte
 
-- Zunächst den aktuellen Quellstand und die Entwicklungsumgebung wiederherstellen. Keine neue Version veröffentlichen.
+- Wiederherstellung abgeschlossen. Sascha hat am 6. September 2026 die Veröffentlichung ausdrücklich beauftragt; Release 1.0.20 wird auf `public-v1` vorbereitet, mit identischen Assets und englischen/deutschen Changelogs auf GitHub/Forgejo.
 - Die gewünschte Umbenennung zu `Twitch Downloader` ist lokal umgesetzt. Eine Umbenennung der Remotes und der Anwendung samt Update-Kompatibilität ist gesondert abzustimmen und zu prüfen.
 - Die Standardbranches wurden bei der Wiederherstellung nicht umgestellt oder mit älteren Entwicklungslinien zusammengeführt.
 - Nächste fachliche Änderung von Sascha entgegennehmen; vor Änderungen diese Memory, `README.md`, `CHANGELOG.md` und den Git-Status lesen.
@@ -91,3 +91,9 @@ npm run dev
 - Lint ohne Fehler bei den bekannten 15 Warnungen. Lokale Entwicklungsdaten und installierte Drittanbieter-Werkzeuge sind nun ausdrücklich von ESLint ausgeschlossen; vier Lint-Konfigurationstests erfolgreich.
 - Security-/Public-Manifest-, CI- und E2E-Isolationsprüfungen erfolgreich. Der neue UI-Test steht in der öffentlichen Datei-Allowlist; Entwicklungsdaten und Screenshots bleiben außerhalb von Git.
 - Hot-Dev bleibt aktiv. Keine Veröffentlichung und kein Live-Download für diese UI-Änderung.
+
+Release-Vorbereitung 1.0.20 am 6. September 2026:
+
+- Versionsangaben in Paket, Lockfile, Oberfläche, README und Release-Vertrag auf 1.0.20 gesetzt; Changelog datiert.
+- CI-Race im Queue-UI-Test behoben: Die Hintergrundsynchronisierung erhält dieselben Offline-Fixtures wie der Renderer, damit sie die Testkarten auf langsameren Runnern nicht entfernt. Keine Änderung am produktiven Queue-Verhalten.
+- Vollständige lokale Release-Prüfung und Installer-Build laufen; Veröffentlichung erst nach erfolgreicher Validierung. Abschließende Release-Verifikation folgt hier.

@@ -1,13 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.0.20 - 2026-09-06
 
-- Respond to every rapid click on the queue details toggle, allowing the animation to reverse immediately without a perceived cooldown.
-- Animate queue details expanding and collapsing with a matching chevron rotation; keep collapsed file actions out of keyboard navigation.
-- Keep the waiting queue status unboxed with a transparent background and its yellow status dot.
-- Rework queue cards with two-line titles, clearer status badges, larger dates below the progress bar on the right, and 32-pixel remove and retry buttons. Keep paused progress visible and wrap long download errors.
-- Expand or collapse queue details by double-clicking the card surface or using the dedicated keyboard-accessible toggle. Add isolated queue-card checks for both languages and themes.
-- Resolve the repository icon during Windows hot development even when the branded Electron executable reports itself as packaged, preventing a startup crash.
+- Make queue cards easier to read with two-line titles, larger dates below the progress bar on the right, and 32-pixel remove and retry buttons.
+- Show clearer download states, preserve the progress percentage while paused, and wrap long error messages. Keep the waiting status simple with a yellow dot and no badge background or outline.
+- Open and close download details by double-clicking the card surface or using the dedicated keyboard-accessible arrow.
+- Animate details smoothly in both directions with a matching arrow rotation. Respond immediately to rapid clicks and keep collapsed file actions out of keyboard navigation.
+- Fix the Windows hot-development startup crash caused by looking for the application icon in the packaged resource directory.
+- Add isolated queue-card checks for both languages and themes, keyboard controls, animation and rapid clicks; exclude local development data and bundled third-party tools from linting.
 
 ## 1.0.19 - 2026-08-14
 

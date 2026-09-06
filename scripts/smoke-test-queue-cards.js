@@ -17,7 +17,8 @@ async function main() {
     const errors = [];
     win.on('pageerror', (error) => errors.push(String(error)));
     await win.waitForFunction(() => typeof window.showTab === 'function' && typeof window.changeLanguage === 'function');
-    await win.evaluate(() => {
+    await win.waitForFunction((version) => appVersion === version, require('../package.json').version);
+    const fixtures = await win.evaluate(() => {
       showTab('vods');
       const panel = document.querySelector('[data-context-for="vods"]');
       panel.dataset.vodsLayout = 'tabs';
@@ -31,7 +32,14 @@ async function main() {
         { id: 'live', status: 'downloading', title: 'Live aus dem Studio', progress: 0, isLive: true, recordingHealth: 'ok', progressStatus: 'Live-Aufnahme läuft' }
       ].map((item) => ({ url: `https://example.invalid/${item.id}`, date: '2026-09-06T10:00:00Z', streamer: 'Beispielkanal', duration_str: '2h 34m', ...item }));
       renderQueue();
+      return queue;
     });
+    await app.evaluate(({ ipcMain }, items) => {
+      ipcMain.removeHandler('get-queue');
+      ipcMain.handle('get-queue', async () => items);
+    }, fixtures);
+    await win.evaluate(() => syncQueueAndDownloadState());
+    assert.equal(await win.locator('#queueList .queue-item').count(), fixtures.length, 'Queue fixtures survive background synchronization');
     for (const theme of ['twitch', 'light']) {
       for (const language of ['de', 'en']) {
         await win.setViewportSize({ width: 1280, height: 900 });
@@ -126,6 +134,8 @@ async function main() {
       ipcMain.removeHandler('remove-from-queue');
       ipcMain.handle('remove-from-queue', async (_event, id) => {
         if (id !== 'pending') throw new Error('Unexpected removal target');
+        ipcMain.removeHandler('get-queue');
+        ipcMain.handle('get-queue', async () => []);
         return [];
       });
     });
