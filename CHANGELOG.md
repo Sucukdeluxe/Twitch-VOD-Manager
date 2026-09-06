@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Place the queue-card date on the left beside the details arrow and the download status on the right below the progress bar.
+
 ## 1.0.20 - 2026-09-06
 
 - Fix automatic media-tool setup in long Windows paths by using the built-in archive extractor. Report extraction failures instead of accepting incomplete installations.

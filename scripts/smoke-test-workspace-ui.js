@@ -1222,7 +1222,7 @@ async function run() {
       const remove = downloading?.querySelector('.remove');
       const statusRect = statusLabel?.getBoundingClientRect();
       const removeRect = remove?.getBoundingClientRect();
-      const statusLeftEdges = leftEdges('.status');
+      const statusRightEdges = alignedRows.map((row) => row?.querySelector('.queue-status-badge')?.getBoundingClientRect().right || 0);
       const titleLeftEdges = leftEdges('.title');
       const dateLeftEdges = leftEdges('.queue-date');
       const successProbe = document.createElement('span');
@@ -1258,7 +1258,7 @@ async function run() {
         startingAnimated: starting?.querySelector('.queue-progress-status')?.classList.contains('is-starting') === true,
         resumedProgress: paused?.querySelector('.queue-progress-wrap')?.getAttribute('aria-valuenow') || '',
         resumedBarWidth: paused?.querySelector('.queue-progress-bar')?.style.width || '',
-        statusLeftEdges,
+        statusRightEdges,
         titleLeftEdges,
         dateLeftEdges,
         dateText: starting?.querySelector('.queue-date')?.textContent || '',
@@ -1283,8 +1283,8 @@ async function run() {
     check(dynamicQueue.startingStatusCount === 1, `Starting queue status is rendered ${dynamicQueue.startingStatusCount} times instead of once`);
     check(dynamicQueue.startingStatusText === dynamicQueue.expectedStartingStatusText && dynamicQueue.startingAnimated, `Queue start state is not visibly active: ${dynamicQueue.startingStatusText}`);
     check(dynamicQueue.resumedProgress === '42' && dynamicQueue.resumedBarWidth === '42%', `Resuming queue item loses its paused progress: value=${dynamicQueue.resumedProgress}, width=${dynamicQueue.resumedBarWidth}`);
-    check(dynamicQueue.statusLeftEdges.every((value) => value > 0) && dynamicQueue.titleLeftEdges.every((value) => value > 0) && dynamicQueue.dateLeftEdges.every((value) => value > 0), 'Queue alignment fixture was measured while hidden');
-    check(Math.max(...dynamicQueue.statusLeftEdges) - Math.min(...dynamicQueue.statusLeftEdges) <= 1, `Queue status columns are offset: ${dynamicQueue.statusLeftEdges.join(', ')}`);
+    check(dynamicQueue.statusRightEdges.every((value) => value > 0) && dynamicQueue.titleLeftEdges.every((value) => value > 0) && dynamicQueue.dateLeftEdges.every((value) => value > 0), 'Queue alignment fixture was measured while hidden');
+    check(Math.max(...dynamicQueue.statusRightEdges) - Math.min(...dynamicQueue.statusRightEdges) <= 1, `Queue status columns are offset: ${dynamicQueue.statusRightEdges.join(', ')}`);
     check(Math.max(...dynamicQueue.titleLeftEdges) - Math.min(...dynamicQueue.titleLeftEdges) <= 1, `Queue title columns are offset: ${dynamicQueue.titleLeftEdges.join(', ')}`);
     check(Math.max(...dynamicQueue.dateLeftEdges) - Math.min(...dynamicQueue.dateLeftEdges) <= 1, `Queue date columns are offset: ${dynamicQueue.dateLeftEdges.join(', ')}`);
     check(dynamicQueue.dateText === '10.08.2026', `Queue VOD date is missing or incorrectly formatted: ${dynamicQueue.dateText}`);

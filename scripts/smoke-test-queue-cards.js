@@ -51,11 +51,14 @@ async function main() {
           const rect = (selector) => item.querySelector(selector).getBoundingClientRect();
           const date = rect('.queue-date');
           const bar = rect('.queue-progress-wrap');
+          const status = rect('.queue-status-badge');
+          const toggle = rect('.queue-details-toggle');
           const remove = rect('.remove');
           return {
             id: item.dataset.id,
             dateBelow: date.top >= bar.bottom,
-            dateRight: Math.abs(date.right - bar.right) <= 1,
+            dateLeft: date.left >= toggle.right && date.right < status.left,
+            statusRight: Math.abs(status.right - bar.right) <= 1,
             dateSize: parseFloat(getComputedStyle(item.querySelector('.queue-date')).fontSize),
             removeSize: Math.min(remove.width, remove.height),
             overflow: item.scrollWidth - item.clientWidth,
@@ -63,7 +66,7 @@ async function main() {
           };
         }));
         for (const card of layout) {
-          assert(card.dateBelow && card.dateRight, `Date placement: ${JSON.stringify(card)}`);
+          assert(card.dateBelow && card.dateLeft && card.statusRight, `Footer placement: ${JSON.stringify(card)}`);
           assert(card.dateSize >= 12 && card.removeSize >= 32 && card.tinyText === 0, `Readability: ${JSON.stringify(card)}`);
           assert(card.overflow <= 1, `Card overflow: ${JSON.stringify(card)}`);
         }

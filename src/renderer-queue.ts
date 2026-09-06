@@ -718,9 +718,9 @@ function renderQueue(): void {
                     <div class="queue-footer">
                         <div class="queue-summary">
                             <button class="queue-details-toggle" type="button" aria-label="${escapeHtml(UI_TEXT.queue.toggleDetails)}" title="${escapeHtml(UI_TEXT.queue.toggleDetails)}" aria-expanded="${expandedQueueIds.has(item.id) ? 'true' : 'false'}" aria-controls="${detailsId}" data-queue-action="details"><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m7 10 5 5 5-5"/></svg></button>
-                            <span class="queue-status-badge" title="${safeProgressStatus}"><span class="status ${item.status}" aria-hidden="true"></span><span class="queue-status-label">${safeStatusLabel}</span></span>
+                            <span class="queue-date">${safeDate}</span>
                         </div>
-                        <span class="queue-date">${safeDate}</span>
+                        <span class="queue-status-badge" title="${safeProgressStatus}"><span class="status ${item.status}" aria-hidden="true"></span><span class="queue-status-label">${safeStatusLabel}</span></span>
                     </div>
                     <div class="queue-progress-info${item.status === 'pending' || item.status === 'completed' ? ' is-hidden' : ''}">
                         <span class="queue-progress-status${progressStatusClass}${item.status === 'paused' ? ' is-hidden' : ''}">${safeProgressStatus}</span>
