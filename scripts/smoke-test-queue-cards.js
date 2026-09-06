@@ -64,6 +64,36 @@ async function main() {
     }
     const card = win.locator('.queue-item[data-id="pending"]');
     const toggle = card.locator('[data-queue-action="details"]');
+    for (const reducedMotion of ['no-preference', 'reduce']) {
+      await win.emulateMedia({ reducedMotion });
+      const motion = await card.evaluate(async (item) => {
+        const details = item.querySelector('.queue-details');
+        const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+        const sample = async () => {
+          await frame();
+          await frame();
+          const animations = details.getAnimations();
+          const slide = animations.find((animation) => animation.transitionProperty === 'grid-template-rows');
+          if (!slide) throw new Error('Queue details have no height transition');
+          for (const animation of animations) animation.currentTime = Number(animation.effect.getTiming().duration) / 2;
+          const middle = details.getBoundingClientRect().height;
+          for (const animation of animations) animation.finish();
+          await frame();
+          return { middle, end: details.getBoundingClientRect().height };
+        };
+        const collapsed = details.getBoundingClientRect().height;
+        toggleQueueDetails(item.dataset.id);
+        const opening = await sample();
+        toggleQueueDetails(item.dataset.id);
+        const closing = await sample();
+        return { collapsed, opening, closing, inert: details.inert };
+      });
+      assert.equal(motion.collapsed, 0);
+      assert(motion.opening.middle > 0 && motion.opening.middle < motion.opening.end, 'Details slide open');
+      assert(motion.closing.middle > 0 && motion.closing.middle < motion.opening.end, 'Details slide closed');
+      assert.equal(motion.closing.end, 0);
+      assert(motion.inert, 'Collapsed details cannot receive keyboard input');
+    }
     for (const selector of ['.title', '.queue-date', '.queue-progress-wrap', '.queue-status-label']) {
       await card.locator(selector).dblclick();
       assert.equal(await toggle.getAttribute('aria-expanded'), 'true', `${selector} expands`);

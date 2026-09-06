@@ -2662,6 +2662,11 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .queue-details,
+    .queue-details-toggle svg {
+        transition-duration: 160ms !important;
+    }
+
     .vod-bulk-bar {
         transition: transform 280ms cubic-bezier(0.22, 0.76, 0.22, 1), opacity 220ms ease, visibility 0s linear 280ms !important;
     }

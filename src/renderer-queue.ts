@@ -575,7 +575,11 @@ function toggleQueueDetails(id: string): void {
     }
     const item = Array.from(byId<HTMLElement>('queueList').querySelectorAll<HTMLElement>('.queue-item'))
         .find((candidate) => candidate.dataset.id === id);
-    item?.querySelector('.queue-details')?.classList.toggle('expanded', expandedQueueIds.has(id));
+    const details = item?.querySelector<HTMLElement>('.queue-details');
+    if (details) {
+        details.classList.toggle('expanded', expandedQueueIds.has(id));
+        details.inert = !expandedQueueIds.has(id);
+    }
     item?.querySelector('[data-queue-action="details"]')?.setAttribute('aria-expanded', String(expandedQueueIds.has(id)));
 }
 
@@ -723,12 +727,14 @@ function renderQueue(): void {
                         <span class="queue-progress-status${progressStatusClass}${item.status === 'paused' ? ' is-hidden' : ''}">${safeProgressStatus}</span>
                         <span class="queue-progress-metrics">${safeProgressMetrics}</span>
                     </div>
-                    <div class="queue-details${expandedQueueIds.has(item.id) ? ' expanded' : ''}" id="${detailsId}">
+                    <div class="queue-details${expandedQueueIds.has(item.id) ? ' expanded' : ''}" id="${detailsId}"${expandedQueueIds.has(item.id) ? '' : ' inert'}>
+                        <div class="queue-details-clip"><div class="queue-details-content">
                         <div><span class="queue-detail-label">URL:</span> ${escapeHtml(item.url)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailStreamer)}</span> ${escapeHtml(item.streamer)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDuration)}</span> ${escapeHtml(item.duration_str)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDate)}</span> ${escapeHtml(formatUiDateTime(item.date))}</div>
                         ${renderQueueItemFileActions(item)}
+                        </div></div>
                     </div>
                 </div>
             </div>
