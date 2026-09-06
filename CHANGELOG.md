@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.21 - 2026-09-06
 
 - Show the Twitch display name with its original capitalization in queue details and refresh it when profile names load.
 - Put queue detail URLs on a separate single line; click or use the keyboard to copy the complete URL with confirmation.
