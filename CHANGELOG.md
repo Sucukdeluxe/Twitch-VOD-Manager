@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Resolve the repository icon during Windows hot development even when the branded Electron executable reports itself as packaged, preventing a startup crash.
+
 ## 1.0.19 - 2026-08-14
 
 - Provision managed Streamlink and FFmpeg automatically in the background after installation so first downloads start without tool setup delays.

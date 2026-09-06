@@ -18,6 +18,7 @@ Am 6. September 2026 nach einem Festplatten-Reset aus den vorhandenen Remote-Rep
 
 ## Letzte Änderungen
 
+- 6. September 2026: Windows-Hot-Dev-Start repariert. Die umbenannte Electron-EXE meldet `app.isPackaged` auch im Entwicklungsbetrieb als wahr; die Symbolauflösung berücksichtigt nun ausdrücklich `TWITCH_VOD_MANAGER_DEV` und verwendet das vorhandene `build/icon.ico`.
 - 1.0.19: Streamlink und FFmpeg werden nach der Installation automatisch im Hintergrund eingerichtet; die Queue zeigt die Vorbereitung der Download-Werkzeuge an. Außerdem wurden instabile Electron-Smoke-Tests korrigiert.
 - 1.0.18: Reparaturen bei Werkzeuginstallation und Windows-Kurzpfaden, robustere Download- und Wiederherstellungsabläufe, Verbesserungen an Updates, Diagnosen, Queue, Streamer-Auswahl und Video-Cutter sowie zusätzliche isolierte Prüfungen.
 - 1.0.15 bis 1.0.17: bessere Einstellungsdarstellung, deutsche Diagnosetexte, System-Theme, Cutter-Wiederherstellung und begrenzte Wartezeiten beim Beenden.
@@ -66,3 +67,10 @@ npm run dev
 - `npm run test:e2e`: erfolgreicher Electron-Start und Smoke-Test mit isolierten Datenverzeichnissen und Offline-Fixtures, keine gemeldeten Probleme.
 - `PROJECT_MEMORY.md` separat auf sensible Inhalte geprüft; Ignore-Regeln für Umgebungsdateien, Entwicklungsdaten, Abhängigkeiten und lokale npm-Konfiguration geprüft.
 - Kein vollständiger Release-, Installer- oder Live-Twitch-Test in dieser Wiederherstellung; keine Veröffentlichung erstellt.
+
+6. September 2026, anschließende Hot-Dev-Reparatur:
+
+- `npm run build`, die sechs Tests für App-Identität und Entwicklungs-EXE, `npm run security:check` und `npm run test:e2e` erfolgreich.
+- `npm run lint`: keine Fehler, weiterhin 15 bestehende Warnungen.
+- Tatsächlicher Start über `scripts/dev.mjs` mit der umbenannten Windows-EXE erfolgreich: Anwendungsfenster geöffnet, TypeScript-Watcher aktiv mit null Fehlern. Renderer-Dateien werden automatisch neu geladen; Änderungen am Main-Prozess lösen einen Neustart aus.
+- Hot-Dev läuft mit den isolierten Entwicklungsdatenverzeichnissen. Der Launcher kann im Hintergrund über Node gestartet werden; Konsolenprotokolle liegen bei diesem Start außerhalb des Repositories im Windows-Temp-Verzeichnis.

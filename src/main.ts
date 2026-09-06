@@ -144,7 +144,7 @@ app.setName(WINDOWS_APP_IDENTITY.name);
 app.setAppUserModelId(WINDOWS_APP_IDENTITY.appUserModelId);
 const WINDOWS_APP_ICON_PATH = process.platform === 'win32'
     ? resolveWindowsAppIconPath({
-        isPackaged: app.isPackaged,
+        isPackaged: app.isPackaged && !IS_HOT_DEVELOPMENT,
         appPath: app.getAppPath(),
         resourcesPath: process.resourcesPath,
         version: APP_VERSION,
