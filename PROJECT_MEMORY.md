@@ -18,6 +18,7 @@ Am 6. September 2026 nach einem Festplatten-Reset aus den vorhandenen Remote-Rep
 
 ## Letzte Änderungen
 
+- Queue-Card-Nachbesserung am 6. September 2026: Wartestatus ohne sichtbare Umrandung und ohne gelblichen Hintergrund; gelber Statuspunkt und bisherige Abstände bleiben erhalten. In Hell/Dunkel geprüft, Queue-UI- und Stylesheet-Tests erfolgreich.
 - 6. September 2026: Queue-Cards überarbeitet. Titel mit bis zu zwei Zeilen in 13 px; Datum von 10 auf 12 px vergrößert und rechts unter den Fortschrittsbalken gesetzt. Status als beschriftetes Badge, Entfernen/Wiederholen mit 32 × 32 px Klickfläche, Details und Fortschritt in 12 px, keine Kartenschrift unter 10 px. Wartende Einträge ohne doppelte Statuszeile, pausierte Downloads mit erhaltenem Prozentstand, längere Fehler umbrechend.
 - Details lassen sich per Doppelklick auf die freie Kartenfläche einschließlich Titel, Datum und Balken umschalten. Ein eigener Pfeil unterstützt Einzelklick, Enter und Leertaste; Schaltflächen lösen keine zusätzliche Kartenaktion aus. Aufklappen aktualisiert die vorhandenen Elemente und erhält den Tastaturfokus.
 - 6. September 2026: Windows-Hot-Dev-Start repariert. Die umbenannte Electron-EXE meldet `app.isPackaged` auch im Entwicklungsbetrieb als wahr; die Symbolauflösung berücksichtigt nun ausdrücklich `TWITCH_VOD_MANAGER_DEV` und verwendet das vorhandene `build/icon.ico`.

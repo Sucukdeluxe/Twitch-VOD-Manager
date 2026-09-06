@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep the waiting queue status unboxed with a transparent background and its yellow status dot.
 - Rework queue cards with two-line titles, clearer status badges, larger dates below the progress bar on the right, and 32-pixel remove and retry buttons. Keep paused progress visible and wrap long download errors.
 - Expand or collapse queue details by double-clicking the card surface or using the dedicated keyboard-accessible toggle. Add isolated queue-card checks for both languages and themes.
 - Resolve the repository icon during Windows hot development even when the branded Electron executable reports itself as packaged, preventing a startup crash.
