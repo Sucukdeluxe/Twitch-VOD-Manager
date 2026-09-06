@@ -20,6 +20,7 @@ Aktueller veröffentlichter Stand: **1.0.20**, Tag `v1.0.20`, veröffentlicht am
 
 ## Letzte Änderungen
 
+- Löschen-Button in Queue-Cards um jeweils 3 px nach oben und rechts verschoben; Klickfläche bleibt 32 × 32 px. Build, fünf Stylesheet-Tests und isolierter Queue-UI-Test erfolgreich; Hell/Dunkel visuell geprüft. Noch nicht veröffentlicht.
 - Wartende Queue-Cards haben jetzt eine gelbe linke Statuslinie passend zum Wartepunkt. Der Wartet-Text bleibt ohne Umrandung oder gelblichen Hintergrund. Build, fünf Stylesheet-Tests und isolierter Queue-UI-Test erfolgreich; Linie in Hell/Dunkel visuell geprüft. Noch nicht veröffentlicht.
 - Nach Release 1.0.20: Datum und Status in der Queue-Card getauscht. Datum steht jetzt links neben dem Detailpfeil, Status rechts unter dem Fortschrittsbalken. Schriftgrößen, gelber Wartepunkt und Aufklappanimation bleiben erhalten. Build, 19 gezielte Tests, Queue-UI-Test in Deutsch/Englisch und Hell/Dunkel sowie vollständiger Workspace-UI-Test erfolgreich; Lint ohne Fehler bei 15 bestehenden Warnungen. Änderung zunächst nur auf `public-v1`/Hot-Dev, noch nicht veröffentlicht.
 - Queue-Detailpfeil reagiert seit der Nachbesserung am 6. September 2026 auf jeden Klick, auch während der Animation. Die frühere Sperre für `MouseEvent.detail > 1` hatte schnelle Folge-Klicks verschluckt und wurde entfernt. Doppelklick auf freie Kartenflächen bleibt erhalten; auf dem Pfeil zählen beide Klicks einzeln. Build, gezielte Queue-Tests und isolierte UI-Prüfung inklusive schneller Klickfolgen erfolgreich.

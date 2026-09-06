@@ -327,6 +327,12 @@
     transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
+.queue-item .remove {
+    position: relative;
+    top: -3px;
+    right: -3px;
+}
+
 .queue-item .remove:hover {
     color: var(--error);
     background: color-mix(in srgb, var(--error) 12%, transparent);
