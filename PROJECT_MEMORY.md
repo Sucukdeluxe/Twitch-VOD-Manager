@@ -6,6 +6,8 @@ Windows-Desktopanwendung auf Basis von Electron und TypeScript zum Durchsuchen, 
 
 Am 6. September 2026 nach einem Festplatten-Reset aus den vorhandenen Remote-Repositories wiederhergestellt. Der lokale Projektordner heißt `Twitch Downloader`. Die Anwendung, Paketkennung, Installer, Update-Adressen und Remote-Repositories heißen weiterhin `Twitch VOD Manager` beziehungsweise `Twitch-VOD-Manager`. Die vollständige Produktumbenennung ist noch offen.
 
+Aktueller veröffentlichter Stand: **1.0.20**, Tag `v1.0.20`, veröffentlicht am 6. September 2026 auf GitHub und Forgejo. Der Tag zeigt auf `6b41767a71eae03293f54819fdb88f7bd3dafb9d`; nachfolgende Memory-Commits gehören nicht zum Installer.
+
 ## Git und maßgeblicher Stand
 
 - Arbeitsbranch: `public-v1`, Tracking: `origin/public-v1`.
@@ -55,7 +57,7 @@ npm run dev
 
 ## Entscheidungen und offene nächste Schritte
 
-- Wiederherstellung abgeschlossen. Sascha hat am 6. September 2026 die Veröffentlichung ausdrücklich beauftragt; Release 1.0.20 wird auf `public-v1` vorbereitet, mit identischen Assets und englischen/deutschen Changelogs auf GitHub/Forgejo.
+- Wiederherstellung und von Sascha beauftragter Release 1.0.20 abgeschlossen. Auf `public-v1` weiterarbeiten; beide Plattformen enthalten identische Assets und englische/deutsche Changelogs.
 - Die gewünschte Umbenennung zu `Twitch Downloader` ist lokal umgesetzt. Eine Umbenennung der Remotes und der Anwendung samt Update-Kompatibilität ist gesondert abzustimmen und zu prüfen.
 - Die Standardbranches wurden bei der Wiederherstellung nicht umgestellt oder mit älteren Entwicklungslinien zusammengeführt.
 - Nächste fachliche Änderung von Sascha entgegennehmen; vor Änderungen diese Memory, `README.md`, `CHANGELOG.md` und den Git-Status lesen.
@@ -96,4 +98,18 @@ Release-Vorbereitung 1.0.20 am 6. September 2026:
 
 - Versionsangaben in Paket, Lockfile, Oberfläche, README und Release-Vertrag auf 1.0.20 gesetzt; Changelog datiert.
 - CI-Race im Queue-UI-Test behoben: Die Hintergrundsynchronisierung erhält dieselben Offline-Fixtures wie der Renderer, damit sie die Testkarten auf langsameren Runnern nicht entfernt. Keine Änderung am produktiven Queue-Verhalten.
-- Vollständige lokale Release-Prüfung und Installer-Build laufen; Veröffentlichung erst nach erfolgreicher Validierung. Abschließende Release-Verifikation folgt hier.
+- Alle Stufen der lokalen Release-Prüfung erfolgreich; nach der korrigierten Versionsanzeige und Werkzeuginstallation wurden die betroffenen beziehungsweise noch ausstehenden Stufen erneut ausgeführt. Anschließend finalen Installer mit `electron-builder --win --publish never` gebaut.
+
+Abschließende Verifikation von Release 1.0.20 am 6. September 2026:
+
+- 83 Unit-Testdateien mit 633 Tests erfolgreich. Security-/Public-Manifest-Prüfung erfolgreich, Lint mit den bisherigen 15 Warnungen und ohne Fehler nach Entfernen eines ungenutzten Imports.
+- Reale Neuinstallation der gepinnten Werkzeuge im isolierten Videoformat-Test erfolgreich: Streamlink 8.4.0, FFmpeg/FFprobe 8.1.2. Der vollständige Cutter-, Format-, Workspace-, Queue-, Smoke-, Template-, Full- und Autosave-Testablauf ist erfolgreich.
+- Gepackte Anwendung gestartet, Version 1.0.20 und enthaltene Quellartefakte abgeglichen; das mitgelieferte SQLite-Modul separat ausschließlich im Arbeitsspeicher erfolgreich geprüft.
+- GitHub-Windows-CI für den Release-Commit vollständig erfolgreich: https://github.com/Sucukdeluxe/Twitch-VOD-Manager/actions/runs/34028803504. Einschließlich frischer Werkzeuginstallation/Reparatur, Paketstart, Installer-Build und Installer-Smoke auf dem isolierten Actions-Runner.
+- GitHub: https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/tag/v1.0.20 — Changelog Englisch.
+- Forgejo: https://git.24-music.de/Administrator/Twitch-VOD-Manager/releases/tag/v1.0.20 — inhaltlich gleichwertiges Changelog Deutsch.
+- Auf beiden Plattformen regulärer, veröffentlichter Latest-Release mit identischem Titel/Tag und drei Assets: `Twitch-VOD-Manager-Setup-1.0.20.exe`, zugehörige `.blockmap` und `latest.yml`.
+- Alle Assets von beiden Plattformen heruntergeladen und bytegenau per SHA-256/SHA-512 gegen den lokalen Build geprüft. Nach Veröffentlichung alle öffentlichen Download-URLs und den GitHub-Update-Kanal geprüft; beide öffentlichen Metadaten stimmen mit dem Build überein.
+- Installer: 110.441.712 Bytes, SHA-256 `5960c93bb4aa32c2fe698cf20c1580c5a3b2d6ad5b349d0b2f98377e0027ab77`. `latest.yml` enthält die passende Version, Dateigröße und SHA-512-Prüfsumme.
+- Keine produktiven Datenbankänderungen und keine vollständige Live-Update-Installation von einer alten Version in dieser Sitzung. Hot-Dev bleibt aktiv.
+- Ignorierte Release-Prüfdateien liegen in `tmp_release_1.0.20/`; optionale Entfernung der diagnostischen Entpackordner wurde durch die automatische Freigabeprüfung blockiert. Sie wurden nicht zu Git oder den Release-Assets hinzugefügt.
