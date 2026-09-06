@@ -417,6 +417,7 @@ describe('renderer streamer and VOD state regressions', () => {
             config: { streamers: ['nightbot'], streamer_display_names: { nightbot: 'NightBot' } },
             currentStreamer: 'nightbot',
             renderStreamers: vi.fn(),
+            renderQueue: vi.fn(),
             api: { getStreamerDisplayNames: () => new Promise<Record<string, string>>((resolve) => { resolveNames = resolve; }) },
             byId: (id: string) => elements.get(id) ?? element(),
             queryAll: () => [],
@@ -440,6 +441,7 @@ describe('renderer streamer and VOD state regressions', () => {
         expect(displayRuntime.exposed.getStreamerDisplayName('nightbot')).toBe('NightBot');
         expect((displayRuntime.window as Record<string, unknown>).getStreamerDisplayName).toBe(displayRuntime.exposed.getStreamerDisplayName);
         expect(displayRuntime.renderStreamers).toHaveBeenCalledOnce();
+        expect(displayRuntime.renderQueue).toHaveBeenCalledOnce();
 
         const tabRuntime = evaluate(
             fragment(rendererSource, 'function showTab', 'function parseDurationToSeconds'),

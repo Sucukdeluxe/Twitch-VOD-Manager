@@ -503,7 +503,7 @@ describe('renderer queue production paths', () => {
         const fingerprints = evaluate(
             fragment('function getQueueRenderFingerprint', 'function hasActiveQueueDuplicate'),
             'getQueueRenderFingerprint',
-            { currentLanguage: 'en', selectedQueueIds: [], expandedQueueIds: new Set<string>() }
+            { currentLanguage: 'en', selectedQueueIds: [], expandedQueueIds: new Set<string>(), getStreamerDisplayName: (login: string) => login }
         );
         const base = { id: 'live-1', status: 'downloading', progress: 1, isLive: true };
         const unknown = fingerprints.exposed.getQueueRenderFingerprint([{ ...base, recordingHealth: 'unknown' }]) as string;

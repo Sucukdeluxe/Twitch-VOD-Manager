@@ -24,7 +24,7 @@ async function main() {
       panel.dataset.vodsLayout = 'tabs';
       panel.dataset.vodsWorkspace = 'queue';
       queue = [
-        { id: 'pending', status: 'pending', title: 'Ein langer Streamtitel mit gut lesbaren Download-Details und einer zweiten Zeile', progress: 0, url: 'https://www.twitch.tv/videos/2863358704' },
+        { id: 'pending', status: 'pending', title: 'Ein langer Streamtitel mit gut lesbaren Download-Details und einer zweiten Zeile', progress: 0, url: 'https://www.twitch.tv/videos/2863358704', streamer: 'xrohat' },
         { id: 'running', status: 'downloading', title: 'Sommerstream am See – gemeinsam unterwegs', progress: 42, progressStatus: 'Video wird heruntergeladen', speed: '12.5 MB/s', eta: '08:24' },
         { id: 'paused', status: 'paused', title: 'Community-Abend mit Freunden', progress: 23 },
         { id: 'error', status: 'error', title: 'Ein weiterer langer Streamtitel mit einer Fehlermeldung', progress: 10, last_error: 'Die Verbindung wurde unterbrochen. Bitte erneut versuchen.' },
@@ -44,6 +44,10 @@ async function main() {
       queueSyncTimer = null;
     });
     assert.equal(await win.locator('#queueList .queue-item').count(), fixtures.length, 'Queue fixtures survive background synchronization');
+    assert.equal(await win.locator('[data-id="pending"] .queue-streamer-name').textContent(), 'xrohat', 'Unknown display names fall back to the login');
+    await win.evaluate(() => rememberStreamerDisplayName('XROHAT', 'xRohat'));
+    assert.equal(await win.locator('[data-id="pending"] .queue-streamer-name').textContent(), 'xRohat', 'Loaded display casing refreshes existing queue cards');
+    assert.equal(await win.evaluate(() => queue.find((item) => item.id === 'pending').streamer), 'xrohat', 'Display casing preserves the stored login');
     for (const theme of ['twitch', 'light']) {
       for (const language of ['de', 'en']) {
         await win.setViewportSize({ width: 1280, height: 900 });

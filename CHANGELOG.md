@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Show the Twitch display name with its original capitalization in queue details and refresh it when profile names load.
 - Put queue detail URLs on a separate single line; click or use the keyboard to copy the complete URL with confirmation.
 - Keep queue-card titles and content aligned when expanding or collapsing details by reserving scrollbar space.
 - Move the queue-card remove button slightly toward the top-right corner while retaining its 32-pixel click target.

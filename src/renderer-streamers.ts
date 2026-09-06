@@ -45,7 +45,10 @@ function rememberStreamerDisplayName(login: string, displayName: string): void {
         const setTitle = (window as unknown as { setPageTitle?: (text: string) => void }).setPageTitle;
         if (typeof setTitle === 'function') setTitle(normalizedDisplayName);
     }
-    if (changed) renderStreamers();
+    if (changed) {
+        renderStreamers();
+        renderQueue();
+    }
 }
 
 (window as unknown as { rememberStreamerDisplayName: typeof rememberStreamerDisplayName }).rememberStreamerDisplayName = rememberStreamerDisplayName;
@@ -56,6 +59,7 @@ function renderHydratedStreamerDisplayNames(): void {
         if (typeof setTitle === 'function') setTitle(getStreamerDisplayName(currentStreamer));
     }
     renderStreamers();
+    renderQueue();
 }
 
 async function hydrateStreamerDisplayNames(): Promise<void> {

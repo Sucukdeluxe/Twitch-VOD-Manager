@@ -193,6 +193,7 @@ function getQueueRenderFingerprint(items: QueueItem[]): string {
     const lang = typeof currentLanguage === 'string' ? currentLanguage : 'en';
     const pieces = items.map((item) => [
         item.id,
+        getStreamerDisplayName(item.streamer),
         item.status,
         Math.round((Number(item.progress) || 0) * 10),
         item.currentPart || 0,
@@ -732,7 +733,7 @@ function renderQueue(): void {
                     <div class="queue-details${expandedQueueIds.has(item.id) ? ' expanded' : ''}" id="${detailsId}"${expandedQueueIds.has(item.id) ? '' : ' inert'}>
                         <div class="queue-details-clip"><div class="queue-details-content">
                         <div class="queue-url-row"><span class="queue-detail-label">URL:</span><button class="queue-url-copy" type="button" data-queue-action="copy-url" aria-label="${escapeHtml(UI_TEXT.queue.ctxCopyUrl)}" title="${escapeHtml(UI_TEXT.queue.ctxCopyUrl)}: ${escapeHtml(item.url)}">${escapeHtml(item.url)}</button></div>
-                        <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailStreamer)}</span> ${escapeHtml(item.streamer)}</div>
+                        <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailStreamer)}</span> <span class="queue-streamer-name">${escapeHtml(getStreamerDisplayName(item.streamer))}</span></div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDuration)}</span> ${escapeHtml(item.duration_str)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDate)}</span> ${escapeHtml(formatUiDateTime(item.date))}</div>
                         ${renderQueueItemFileActions(item)}
