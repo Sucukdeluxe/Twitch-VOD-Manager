@@ -74,3 +74,6 @@ npm run dev
 - `npm run lint`: keine Fehler, weiterhin 15 bestehende Warnungen.
 - Tatsächlicher Start über `scripts/dev.mjs` mit der umbenannten Windows-EXE erfolgreich: Anwendungsfenster geöffnet, TypeScript-Watcher aktiv mit null Fehlern. Renderer-Dateien werden automatisch neu geladen; Änderungen am Main-Prozess lösen einen Neustart aus.
 - Hot-Dev läuft mit den isolierten Entwicklungsdatenverzeichnissen. Der Launcher kann im Hintergrund über Node gestartet werden; Konsolenprotokolle liegen bei diesem Start außerhalb des Repositories im Windows-Temp-Verzeichnis.
+- Streamlink 8.4.0 im Entwicklungsverzeichnis eingerichtet und per `--version` geprüft. Der vorhandene Managed-Tool-Installer hat Archiv- und EXE-Prüfsummen verifiziert; zum Entpacken wurde lokal PowerShell 7 mit `Expand-Archive -LiteralPath` und über Umgebungsvariablen übergebenen Pfaden verwendet.
+- Der automatische Installationsversuch mit Windows PowerShell meldete zuvor `required-executable-missing`. Die lokale Einrichtung ist behoben; die Ursache im allgemeinen Entpackablauf ist noch offen.
+- Anschließender Hot-Reload-Neustart tatsächlich ausgelöst und geprüft: Das neue Anwendungsfenster reagiert, und der reale Preflight meldet Internet, Streamlink, FFmpeg, FFprobe und beschreibbares Download-Verzeichnis als erfolgreich. Keine Live-Downloads gestartet.
