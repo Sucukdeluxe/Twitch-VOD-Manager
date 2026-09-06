@@ -956,8 +956,8 @@ textarea:disabled,
 }
 
 .context-sidebar .queue-item {
-    margin: 3px 0;
-    padding: 7px;
+    margin: 0 0 8px;
+    padding: 10px;
     background: var(--workspace-panel-raised);
     border: 1px solid var(--workspace-border);
     border-radius: var(--workspace-radius-small);

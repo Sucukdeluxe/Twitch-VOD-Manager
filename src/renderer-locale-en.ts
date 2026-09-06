@@ -378,6 +378,8 @@ const UI_TEXT_EN = {
         statusRunning: 'Running',
         statusPaused: 'Paused',
         statusWaiting: 'Waiting',
+        toggleDetails: 'Expand or collapse download details',
+        removeItem: 'Remove from queue',
         progressError: 'Error',
         progressReady: 'Ready',
         progressLoading: 'Loading...',

@@ -378,6 +378,8 @@ const UI_TEXT_DE = {
         statusRunning: 'Läuft',
         statusPaused: 'Pausiert',
         statusWaiting: 'Wartet',
+        toggleDetails: 'Download-Details ein-/ausklappen',
+        removeItem: 'Aus der Queue entfernen',
         progressError: 'Fehler',
         progressReady: 'Bereit',
         progressLoading: 'Lade...',

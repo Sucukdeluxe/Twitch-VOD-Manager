@@ -135,7 +135,16 @@ function initQueueActions(): void {
     list.addEventListener('click', (event: MouseEvent) => {
         const control = resolveQueueControl(event.target);
         if (!control || !list.contains(control)) return;
+        if (control.dataset.queueAction === 'details' && event.detail > 1) return;
         void activateQueueControl(control);
+    });
+    list.addEventListener('dblclick', (event: MouseEvent) => {
+        if (!(event.target instanceof Element)) return;
+        if (event.target.closest('button, a, input, select, textarea, [role="button"], [data-queue-action], [data-queue-file-action]')) return;
+        const item = event.target.closest<HTMLElement>('.queue-item');
+        if (!item?.dataset.id || !list.contains(item)) return;
+        event.preventDefault();
+        toggleQueueDetails(item.dataset.id);
     });
     list.addEventListener('keydown', (event: KeyboardEvent) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -457,7 +466,7 @@ function getQueueProgressStatusText(item: QueueItem): string {
 function getQueueProgressMetricsText(item: QueueItem): string {
     const parts: string[] = [];
     if (item.status === 'completed') parts.push('100%');
-    if (item.status === 'downloading' && item.progress > 0) {
+    if ((item.status === 'downloading' || item.status === 'paused') && item.progress > 0) {
         parts.push(`${Math.max(0, Math.min(100, item.progress)).toFixed(1)}%`);
     }
     if (item.status === 'downloading' && item.speed) parts.push(item.speed);
@@ -564,7 +573,10 @@ function toggleQueueDetails(id: string): void {
     } else {
         expandedQueueIds.add(id);
     }
-    renderQueue();
+    const item = Array.from(byId<HTMLElement>('queueList').querySelectorAll<HTMLElement>('.queue-item'))
+        .find((candidate) => candidate.dataset.id === id);
+    item?.querySelector('.queue-details')?.classList.toggle('expanded', expandedQueueIds.has(id));
+    item?.querySelector('[data-queue-action="details"]')?.setAttribute('aria-expanded', String(expandedQueueIds.has(id)));
 }
 
 function initQueueDragDrop(): void {
@@ -627,7 +639,7 @@ function renderQueue(): void {
 
     const list = byId('queueList');
     initQueueActions();
-    byId('queueCount').textContent = String(queue.length);
+    byId('queueCount').textContent = formatUiNumber(queue.length);
     const retryBtn = byId<HTMLButtonElement>('btnRetryFailed');
     const clearBtn = byId<HTMLButtonElement>('btnClear');
     const hasFailed = queue.some((item) => item.status === 'error' && !item.mergeRecoveryBlocked);
@@ -683,26 +695,32 @@ function renderQueue(): void {
             ? renderRecordingHealthBadge(item.recordingHealth)
             : '';
         const mergeMetaExtra = isMergeGroup
-            ? ` (${UI_TEXT.mergeGroup.metaLabel.replace('{count}', String(item.mergeGroup!.items.length))})`
+            ? escapeHtml(UI_TEXT.mergeGroup.metaLabel.replace('{count}', formatUiNumber(item.mergeGroup!.items.length)))
             : '';
         const detailsId = `queue-details-${itemIndex}`;
 
         return `
             <div class="queue-item${isMergeGroup ? ' merge-group' : ''}${isSelected ? ' merge-selected' : ''}" draggable="${item.status === 'pending' ? 'true' : 'false'}" data-id="${escapeHtml(item.id)}">
                 ${isSelected ? `<span class="queue-selection-order" title="${selectionTitle}" aria-label="${selectionTitle}">${selectionPosition}</span>` : ''}
-                <div class="status ${item.status}"></div>
                 <div class="queue-main">
                     <div class="queue-title-row">
-                        <div class="title" title="${safeTitle}" role="button" tabindex="0" aria-expanded="${expandedQueueIds.has(item.id) ? 'true' : 'false'}" aria-controls="${detailsId}" data-queue-action="details">${liveBadge}${healthBadge}${mergeIcon}${isClip}${safeTitle}</div>
-                        <div class="queue-status-label">${safeStatusLabel}</div>
-                        <span class="remove" role="button" tabindex="0" aria-label="${escapeHtml(UI_TEXT.streamers.removeAria)}" data-queue-action="remove">x</span>
+                        <div class="title" title="${safeTitle}">${liveBadge}${healthBadge}${mergeIcon}${isClip}${safeTitle}</div>
+                        ${item.status === 'error' && !item.mergeRecoveryBlocked ? `<button class="queue-retry-btn" type="button" title="${escapeHtml(UI_TEXT.queue.retryItem)}" aria-label="${escapeHtml(UI_TEXT.queue.retryItem)}" data-queue-action="retry">&#x21bb;</button>` : ''}
+                        <button class="remove" type="button" title="${escapeHtml(UI_TEXT.queue.removeItem)}" aria-label="${escapeHtml(UI_TEXT.queue.removeItem)}" data-queue-action="remove"><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"/></svg></button>
                     </div>
-                    <div class="queue-meta"><span class="queue-date">${safeDate}</span>${mergeMetaExtra}</div>
+                    ${mergeMetaExtra ? `<div class="queue-meta">${mergeMetaExtra}</div>` : ''}
                     <div class="queue-progress-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progressValue)}" aria-label="${escapeHtml(safeStatusLabel)}">
                         <div class="queue-progress-bar" style="width: ${progressValue}%;"></div>
                     </div>
-                    <div class="queue-progress-info">
-                        <span class="queue-progress-status${progressStatusClass}">${safeProgressStatus}</span>
+                    <div class="queue-footer">
+                        <div class="queue-summary">
+                            <button class="queue-details-toggle" type="button" aria-label="${escapeHtml(UI_TEXT.queue.toggleDetails)}" title="${escapeHtml(UI_TEXT.queue.toggleDetails)}" aria-expanded="${expandedQueueIds.has(item.id) ? 'true' : 'false'}" aria-controls="${detailsId}" data-queue-action="details"><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m7 10 5 5 5-5"/></svg></button>
+                            <span class="queue-status-badge" title="${safeProgressStatus}"><span class="status ${item.status}" aria-hidden="true"></span><span class="queue-status-label">${safeStatusLabel}</span></span>
+                        </div>
+                        <span class="queue-date">${safeDate}</span>
+                    </div>
+                    <div class="queue-progress-info${item.status === 'pending' || item.status === 'completed' ? ' is-hidden' : ''}">
+                        <span class="queue-progress-status${progressStatusClass}${item.status === 'paused' ? ' is-hidden' : ''}">${safeProgressStatus}</span>
                         <span class="queue-progress-metrics">${safeProgressMetrics}</span>
                     </div>
                     <div class="queue-details${expandedQueueIds.has(item.id) ? ' expanded' : ''}" id="${detailsId}">
@@ -713,7 +731,6 @@ function renderQueue(): void {
                         ${renderQueueItemFileActions(item)}
                     </div>
                 </div>
-                ${item.status === 'error' && !item.mergeRecoveryBlocked ? `<button class="queue-retry-btn" type="button" title="${escapeHtml(UI_TEXT.queue.retryItem)}" aria-label="${escapeHtml(UI_TEXT.queue.retryItem)}" data-queue-action="retry">&#x21bb;</button>` : ''}
             </div>
         `;
     }).join('');

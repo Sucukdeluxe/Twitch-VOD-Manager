@@ -408,7 +408,7 @@ describe('renderer queue production paths', () => {
 
         expect(metrics({ status: 'downloading', progress: 12.34, speed: '4 MB/s', eta: '2m' })).toBe('12.3% | 4 MB/s | 2m');
         expect(metrics({ status: 'pending', progress: 12.34, speed: '4 MB/s', eta: '2m' })).toBe('');
-        expect(metrics({ status: 'paused', progress: 12.34, speed: '4 MB/s', eta: '2m' })).toBe('');
+        expect(metrics({ status: 'paused', progress: 12.34, speed: '4 MB/s', eta: '2m' })).toBe('12.3%');
         expect(metrics({ status: 'error', progress: 12.34, speed: '4 MB/s', eta: '2m' })).toBe('');
         expect(metrics({ status: 'completed', progress: 100, speed: '4 MB/s', eta: '2m' })).toBe('100%');
     });

@@ -8,7 +8,8 @@ const SMOKE_FILES = [
   'scripts/smoke-test-template-guide.js',
   'scripts/smoke-test-full.js',
   'scripts/smoke-test-settings-autosave.js',
-  'scripts/smoke-test-workspace-ui.js'
+  'scripts/smoke-test-workspace-ui.js',
+  'scripts/smoke-test-queue-cards.js'
 ];
 
 function inspectSources() {

@@ -34,6 +34,7 @@
     "scripts/smoke-test-template-guide.js",
     "scripts/smoke-test-update-version-logic.js",
     "scripts/smoke-test-workspace-ui.js",
+    "scripts/smoke-test-queue-cards.js",
     "scripts/smoke-test.js",
     "src/index.html",
     "src/main/domain/app-state-store.test.ts",

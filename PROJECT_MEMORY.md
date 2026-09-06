@@ -18,6 +18,8 @@ Am 6. September 2026 nach einem Festplatten-Reset aus den vorhandenen Remote-Rep
 
 ## Letzte Änderungen
 
+- 6. September 2026: Queue-Cards überarbeitet. Titel mit bis zu zwei Zeilen in 13 px; Datum von 10 auf 12 px vergrößert und rechts unter den Fortschrittsbalken gesetzt. Status als beschriftetes Badge, Entfernen/Wiederholen mit 32 × 32 px Klickfläche, Details und Fortschritt in 12 px, keine Kartenschrift unter 10 px. Wartende Einträge ohne doppelte Statuszeile, pausierte Downloads mit erhaltenem Prozentstand, längere Fehler umbrechend.
+- Details lassen sich per Doppelklick auf die freie Kartenfläche einschließlich Titel, Datum und Balken umschalten. Ein eigener Pfeil unterstützt Einzelklick, Enter und Leertaste; Schaltflächen lösen keine zusätzliche Kartenaktion aus. Aufklappen aktualisiert die vorhandenen Elemente und erhält den Tastaturfokus.
 - 6. September 2026: Windows-Hot-Dev-Start repariert. Die umbenannte Electron-EXE meldet `app.isPackaged` auch im Entwicklungsbetrieb als wahr; die Symbolauflösung berücksichtigt nun ausdrücklich `TWITCH_VOD_MANAGER_DEV` und verwendet das vorhandene `build/icon.ico`.
 - 1.0.19: Streamlink und FFmpeg werden nach der Installation automatisch im Hintergrund eingerichtet; die Queue zeigt die Vorbereitung der Download-Werkzeuge an. Außerdem wurden instabile Electron-Smoke-Tests korrigiert.
 - 1.0.18: Reparaturen bei Werkzeuginstallation und Windows-Kurzpfaden, robustere Download- und Wiederherstellungsabläufe, Verbesserungen an Updates, Diagnosen, Queue, Streamer-Auswahl und Video-Cutter sowie zusätzliche isolierte Prüfungen.
@@ -43,6 +45,7 @@ npm run dev
 - `npm run dev`: Entwicklungsstart mit Hot Reload; `npm start`: einmaliger Entwicklungsstart.
 - Entwicklungsdaten liegen isoliert in `.dev-program-data/` und `.dev-user-data/`; beide Ordner sind ignoriert.
 - Basisprüfungen: `npm run build`, `npm run lint`, `npm run security:check`, `npm run test:unit`.
+- Queue-UI-Prüfung: `npm run test:e2e:queue-cards`; prüft sechs Zustände in Deutsch/Englisch und Hell/Dunkel sowie Doppelklick, Tastatur, Fortschrittsaktualisierung und Entfernen. Screenshots liegen ignoriert in `tmp_queue-card-artifacts/`. Auch in `test:e2e:focused` und dessen CI-Vertrag eingebunden.
 - Isolierter Anwendungstest: `npm run test:e2e`.
 - Umfassende Release-Prüfung: `npm run test:e2e:release`; Windows-Paket: `npm run dist:win`.
 - Relevante Struktur: `src/main.ts`, `src/main/`, `src/renderer-*.ts`, `src/index.html`, `src/styles*.css`, `src/workspace*.css`, `scripts/` und `build/`.
@@ -77,3 +80,11 @@ npm run dev
 - Streamlink 8.4.0 im Entwicklungsverzeichnis eingerichtet und per `--version` geprüft. Der vorhandene Managed-Tool-Installer hat Archiv- und EXE-Prüfsummen verifiziert; zum Entpacken wurde lokal PowerShell 7 mit `Expand-Archive -LiteralPath` und über Umgebungsvariablen übergebenen Pfaden verwendet.
 - Der automatische Installationsversuch mit Windows PowerShell meldete zuvor `required-executable-missing`. Die lokale Einrichtung ist behoben; die Ursache im allgemeinen Entpackablauf ist noch offen.
 - Anschließender Hot-Reload-Neustart tatsächlich ausgelöst und geprüft: Das neue Anwendungsfenster reagiert, und der reale Preflight meldet Internet, Streamlink, FFmpeg, FFprobe und beschreibbares Download-Verzeichnis als erfolgreich. Keine Live-Downloads gestartet.
+
+6. September 2026, Queue-Card-Rework (unveröffentlicht, Version weiterhin 1.0.19):
+
+- Build, alle 630 Unit-Tests, isolierte Queue-Card-Prüfung und umfassender Workspace-UI-Test erfolgreich; keine gemeldeten Laufzeitfehler.
+- Queue-Screenshots in Hell und Dunkel visuell geprüft; Datum rechts unter dem Balken, ausreichend große Aktionsflächen und keine horizontale Überläufe.
+- Lint ohne Fehler bei den bekannten 15 Warnungen. Lokale Entwicklungsdaten und installierte Drittanbieter-Werkzeuge sind nun ausdrücklich von ESLint ausgeschlossen; vier Lint-Konfigurationstests erfolgreich.
+- Security-/Public-Manifest-, CI- und E2E-Isolationsprüfungen erfolgreich. Der neue UI-Test steht in der öffentlichen Datei-Allowlist; Entwicklungsdaten und Screenshots bleiben außerhalb von Git.
+- Hot-Dev bleibt aktiv. Keine Veröffentlichung und kein Live-Download für diese UI-Änderung.

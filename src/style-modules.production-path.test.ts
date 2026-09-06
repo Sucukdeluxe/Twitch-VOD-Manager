@@ -20,7 +20,7 @@ describe('production style modules', () => {
             .replace(/\r\n/g, '\n'));
         const digest = createHash('sha256').update(content).digest('hex');
 
-        expect(digest).toBe('143fb0cc3e6c2ca3f04ded7e3b83175db424b34b6ca9ed4ef32e337b4a60a898');
+        expect(digest).toBe('2ed5d8cce6dca293fba4f83a0347950ee887c01cafb9febfb345842a6c569cd5');
     });
 
     test('derives the Windows hot-development executable version from package metadata', () => {
@@ -57,7 +57,7 @@ describe('production style modules', () => {
     test('animates queue progress only while downloading and visibly marks paused items', () => {
         const styles = readFileSync(join(__dirname, 'styles-workflows.css'), 'utf8');
         const baseShimmer = styles.match(/\.queue-progress-bar::after\s*\{([\s\S]*?)\}/)?.[1] ?? '';
-        const activeShimmer = styles.match(/\.status\.downloading\s*~\s*\.queue-main\s+\.queue-progress-bar::after\s*\{([\s\S]*?)\}/)?.[1] ?? '';
+        const activeShimmer = styles.match(/\.queue-item:has\(\.status\.downloading\)\s+\.queue-progress-bar::after\s*\{([\s\S]*?)\}/)?.[1] ?? '';
         const pausedStatus = styles.match(/\.queue-item\s+\.status\.paused\s*\{([\s\S]*?)\}/)?.[1] ?? '';
 
         expect(baseShimmer).toMatch(/display:\s*none/);

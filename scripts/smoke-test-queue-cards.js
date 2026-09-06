@@ -1,0 +1,108 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { _electron: electron } = require('playwright');
+const { createE2eEnvironment, getElectronLaunchOptions, verifyE2eIsolation, installOfflineFixtures, cleanupE2eEnvironment } = require('./e2e-test-environment');
+
+async function main() {
+  const environment = createE2eEnvironment('queue-cards');
+  const artifacts = path.resolve(__dirname, '../tmp_queue-card-artifacts');
+  fs.mkdirSync(artifacts, { recursive: true });
+  let app;
+  try {
+    app = await electron.launch(getElectronLaunchOptions(environment));
+    const win = await app.firstWindow();
+    await verifyE2eIsolation(app, win, environment);
+    await installOfflineFixtures(app);
+    const errors = [];
+    win.on('pageerror', (error) => errors.push(String(error)));
+    await win.waitForFunction(() => typeof window.showTab === 'function' && typeof window.changeLanguage === 'function');
+    await win.evaluate(() => {
+      showTab('vods');
+      const panel = document.querySelector('[data-context-for="vods"]');
+      panel.dataset.vodsLayout = 'tabs';
+      panel.dataset.vodsWorkspace = 'queue';
+      queue = [
+        { id: 'pending', status: 'pending', title: 'Ein langer Streamtitel mit gut lesbaren Download-Details und einer zweiten Zeile', progress: 0 },
+        { id: 'running', status: 'downloading', title: 'Sommerstream am See – gemeinsam unterwegs', progress: 42, progressStatus: 'Video wird heruntergeladen', speed: '12.5 MB/s', eta: '08:24' },
+        { id: 'paused', status: 'paused', title: 'Community-Abend mit Freunden', progress: 23 },
+        { id: 'error', status: 'error', title: 'Ein weiterer langer Streamtitel mit einer Fehlermeldung', progress: 10, last_error: 'Die Verbindung wurde unterbrochen. Bitte erneut versuchen.' },
+        { id: 'completed', status: 'completed', title: 'Highlights vom Wochenende', progress: 100, outputFiles: ['C:\\fixture\\highlights.mp4'] },
+        { id: 'live', status: 'downloading', title: 'Live aus dem Studio', progress: 0, isLive: true, recordingHealth: 'ok', progressStatus: 'Live-Aufnahme läuft' }
+      ].map((item) => ({ url: `https://example.invalid/${item.id}`, date: '2026-09-06T10:00:00Z', streamer: 'Beispielkanal', duration_str: '2h 34m', ...item }));
+      renderQueue();
+    });
+    for (const theme of ['twitch', 'light']) {
+      for (const language of ['de', 'en']) {
+        await win.setViewportSize({ width: 1280, height: 900 });
+        await win.evaluate(({ theme, language }) => {
+          document.body.className = `theme-${theme}`;
+          changeLanguage(language);
+        }, { theme, language });
+        const layout = await win.locator('#queueList').evaluate((list) => [...list.querySelectorAll('.queue-item')].map((item) => {
+          const rect = (selector) => item.querySelector(selector).getBoundingClientRect();
+          const date = rect('.queue-date');
+          const bar = rect('.queue-progress-wrap');
+          const remove = rect('.remove');
+          return {
+            id: item.dataset.id,
+            dateBelow: date.top >= bar.bottom,
+            dateRight: Math.abs(date.right - bar.right) <= 1,
+            dateSize: parseFloat(getComputedStyle(item.querySelector('.queue-date')).fontSize),
+            removeSize: Math.min(remove.width, remove.height),
+            overflow: item.scrollWidth - item.clientWidth,
+            tinyText: [...item.querySelectorAll('*')].filter((element) => element.textContent.trim() && element.getBoundingClientRect().height > 0 && parseFloat(getComputedStyle(element).fontSize) < 10).length,
+          };
+        }));
+        for (const card of layout) {
+          assert(card.dateBelow && card.dateRight, `Date placement: ${JSON.stringify(card)}`);
+          assert(card.dateSize >= 12 && card.removeSize >= 32 && card.tinyText === 0, `Readability: ${JSON.stringify(card)}`);
+          assert(card.overflow <= 1, `Card overflow: ${JSON.stringify(card)}`);
+        }
+        await win.locator('.queue-section').screenshot({ path: path.join(artifacts, `queue-${theme}-${language}.png`) });
+      }
+    }
+    const card = win.locator('.queue-item[data-id="pending"]');
+    const toggle = card.locator('[data-queue-action="details"]');
+    for (const selector of ['.title', '.queue-date', '.queue-progress-wrap', '.queue-status-label']) {
+      await card.locator(selector).dblclick();
+      assert.equal(await toggle.getAttribute('aria-expanded'), 'true', `${selector} expands`);
+      await card.locator(selector).dblclick();
+      assert.equal(await toggle.getAttribute('aria-expanded'), 'false', `${selector} collapses`);
+    }
+    await card.dblclick({ position: { x: 4, y: 4 } });
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true', 'Card padding expands');
+    await toggle.click();
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'false', 'Toggle collapses');
+    await toggle.dblclick();
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true', 'Double-clicking toggle changes state only once');
+    await toggle.focus();
+    await win.keyboard.press('Space');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'false', 'Space collapses');
+    await win.keyboard.press('Enter');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true', 'Enter expands');
+    assert(await toggle.evaluate((button) => document.activeElement === button), 'Toggle retains keyboard focus');
+    await win.evaluate(() => {
+      queue.find((item) => item.id === 'running').progress = 61;
+      renderQueue();
+    });
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true', 'Expansion survives queue rerender');
+    assert.equal(await win.locator('[data-id="running"] .queue-progress-wrap').getAttribute('aria-valuenow'), '61');
+    await app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('remove-from-queue');
+      ipcMain.handle('remove-from-queue', async (_event, id) => {
+        if (id !== 'pending') throw new Error('Unexpected removal target');
+        return [];
+      });
+    });
+    await card.locator('.remove svg path').click();
+    await win.waitForFunction(() => document.querySelectorAll('#queueList .queue-item').length === 0);
+    assert.deepEqual(errors, []);
+    console.log(JSON.stringify({ failures: [], themes: 2, languages: 2, states: 6, interactions: 'passed', artifacts }));
+  } finally {
+    if (app) await app.close();
+    cleanupE2eEnvironment(environment);
+  }
+}
+
+main().catch((error) => { console.error(error); process.exitCode = 1; });

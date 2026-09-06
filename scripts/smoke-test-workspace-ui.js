@@ -1265,7 +1265,8 @@ async function run() {
         progressInfoText: progressInfo?.textContent || '',
         progressInfoBelowBar: Boolean(progressWrap && progressInfo && progressInfo.getBoundingClientRect().top >= progressWrap.getBoundingClientRect().bottom),
         progressIsGreen,
-        statusRemoveCenterDelta: statusRect && removeRect ? Math.abs((statusRect.top + statusRect.bottom) / 2 - (removeRect.top + removeRect.bottom) / 2) : null,
+        statusBelowBar: Boolean(statusRect && progressWrap && statusRect.top >= progressWrap.getBoundingClientRect().bottom),
+        removeSize: removeRect ? Math.min(removeRect.width, removeRect.height) : 0,
         reservedSelectionControls: document.querySelectorAll('#queueList .queue-selector, #queueList .queue-selector-placeholder').length,
         mergeSelectActionVisible,
         selectionOrderText: selectionOrder?.textContent?.trim() || '',
@@ -1290,7 +1291,8 @@ async function run() {
     check(dynamicQueue.progressInfoText.includes('42.0%') && dynamicQueue.progressInfoText.includes('55.8 MB/s') && dynamicQueue.progressInfoText.includes('1/1'), `Queue progress details are incomplete: ${dynamicQueue.progressInfoText}`);
     check(dynamicQueue.progressInfoBelowBar, 'Queue progress details are not positioned below the progress bar');
     check(dynamicQueue.progressIsGreen, 'Running queue progress is not green');
-    check(dynamicQueue.statusRemoveCenterDelta !== null && dynamicQueue.statusRemoveCenterDelta <= 1, `Queue status and remove action are not vertically aligned: ${dynamicQueue.statusRemoveCenterDelta}`);
+    check(dynamicQueue.statusBelowBar, 'Queue status is not positioned below the progress bar');
+    check(dynamicQueue.removeSize >= 32, `Queue remove target is too small: ${dynamicQueue.removeSize}`);
     check(dynamicQueue.reservedSelectionControls === 0, `Queue still reserves ${dynamicQueue.reservedSelectionControls} in-flow selection controls`);
     check(dynamicQueue.mergeSelectActionVisible, 'Pending Queue item has no merge selection action in its context menu');
     check(dynamicQueue.selectionOrderText === '1' && dynamicQueue.selectionOrderPosition === 'absolute', `Merge selection order is not a floating badge: ${dynamicQueue.selectionOrderText}/${dynamicQueue.selectionOrderPosition}`);

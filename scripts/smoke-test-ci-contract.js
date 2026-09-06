@@ -553,7 +553,8 @@ const requiredScripts = {
   'test:live:twitch': 'node scripts/smoke-test-live-integration.js twitch',
   'test:live:updater-postpublish': 'node scripts/smoke-test-live-integration.js updater',
   'test:e2e:cutter-matrix': 'npm run build && node scripts/smoke-test-cutter-media-matrix.js',
-  'test:e2e:focused': 'npm run test:e2e:isolation && npm run test:e2e:workspace-ui',
+  'test:e2e:focused': 'npm run test:e2e:isolation && npm run test:e2e:workspace-ui && npm run test:e2e:queue-cards',
+  'test:e2e:queue-cards': 'npm run build && node scripts/smoke-test-queue-cards.js',
   'test:packaged-launch': 'node scripts/smoke-test-packaged-launch.js',
   'test:installer': 'node scripts/smoke-test-installer.js',
   'dist:ci': 'electron-builder --win nsis'

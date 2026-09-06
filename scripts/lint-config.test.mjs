@@ -7,6 +7,12 @@ import { ESLint } from 'eslint';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const eslint = new ESLint({ cwd: root, overrideConfigFile: path.join(root, 'eslint.config.mjs') });
 
+test('ignores local development data and bundled third-party tools', async () => {
+  for (const file of ['.dev-program-data/tools/worker.js', '.dev-user-data/cache/script.js']) {
+    assert.equal(await eslint.isPathIgnored(path.join(root, file)), true);
+  }
+});
+
 async function messagesFor(source, filePath) {
   const [result] = await eslint.lintText(source, { filePath: path.join(root, filePath) });
   return result.messages;
