@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { spawn, execSync, spawnSync } from 'child_process';
+import { extractZipArchive } from './main/infra/extract-zip';
+import { execSync, spawnSync } from 'child_process';
 import axios from 'axios';
 import { createManagedToolInstaller, type ManagedToolInstaller, type ManagedToolStatus } from './main/domain/managed-tools';
 import { APPLICATION_TOOL_MANIFEST } from './main/domain/tool-manifest';
@@ -358,31 +359,7 @@ async function extractZip(zipPath: string, destinationDir: string): Promise<bool
     try {
         fs.mkdirSync(destinationDir, { recursive: true });
 
-        const command = `Expand-Archive -Path '${zipPath.replace(/'/g, "''")}' -DestinationPath '${destinationDir.replace(/'/g, "''")}' -Force`;
-
-        await new Promise<void>((resolve, reject) => {
-            const proc = spawn('powershell', [
-                '-NoProfile',
-                '-ExecutionPolicy', 'Bypass',
-                '-Command',
-                command
-            ], { windowsHide: true });
-
-            let stderr = '';
-            proc.stderr?.on('data', (data) => {
-                stderr += data.toString();
-            });
-
-            proc.on('close', (code) => {
-                if (code === 0) {
-                    resolve();
-                } else {
-                    reject(new Error(`Expand-Archive exit code ${code}: ${stderr.trim()}`));
-                }
-            });
-
-            proc.on('error', (err) => reject(err));
-        });
+        await extractZipArchive(zipPath, destinationDir);
 
         return true;
     } catch (e) {

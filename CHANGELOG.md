@@ -2,6 +2,7 @@
 
 ## 1.0.20 - 2026-09-06
 
+- Fix automatic media-tool setup in long Windows paths by using the built-in archive extractor. Report extraction failures instead of accepting incomplete installations.
 - Make queue cards easier to read with two-line titles, larger dates below the progress bar on the right, and 32-pixel remove and retry buttons.
 - Show clearer download states, preserve the progress percentage while paused, and wrap long error messages. Keep the waiting status simple with a yellow dot and no badge background or outline.
 - Open and close download details by double-clicking the card surface or using the dedicated keyboard-accessible arrow.

@@ -112,6 +112,8 @@
     "src/main/infra/format-helpers.ts",
     "src/main/infra/fs-atomic.test.ts",
     "src/main/infra/fs-atomic.ts",
+    "src/main/infra/extract-zip.ts",
+    "src/main/infra/extract-zip.test.ts",
     "src/main/infra/loopback-server.test.ts",
     "src/main/infra/loopback-server.ts",
     "src/main/infra/schema-v5.ts",
