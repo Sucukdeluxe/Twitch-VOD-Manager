@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep queue-card titles and content aligned when expanding or collapsing details by reserving scrollbar space.
 - Move the queue-card remove button slightly toward the top-right corner while retaining its 32-pixel click target.
 - Show a yellow left border on waiting queue cards, matching their status dot.
 - Place the queue-card date on the left beside the details arrow and the download status on the right below the progress bar.

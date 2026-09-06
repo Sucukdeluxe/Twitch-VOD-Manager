@@ -33,6 +33,7 @@
 .queue-list {
     flex: 1;
     overflow-y: auto;
+    scrollbar-gutter: stable;
     min-height: 60px;
 }
 

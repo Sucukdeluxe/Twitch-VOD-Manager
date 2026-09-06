@@ -38,7 +38,11 @@ async function main() {
       ipcMain.removeHandler('get-queue');
       ipcMain.handle('get-queue', async () => items);
     }, fixtures);
-    await win.evaluate(() => syncQueueAndDownloadState());
+    await win.evaluate(async () => {
+      await syncQueueAndDownloadState();
+      clearTimeout(queueSyncTimer);
+      queueSyncTimer = null;
+    });
     assert.equal(await win.locator('#queueList .queue-item').count(), fixtures.length, 'Queue fixtures survive background synchronization');
     for (const theme of ['twitch', 'light']) {
       for (const language of ['de', 'en']) {
@@ -71,6 +75,48 @@ async function main() {
           assert(card.overflow <= 1, `Card overflow: ${JSON.stringify(card)}`);
         }
         await win.locator('.queue-section').screenshot({ path: path.join(artifacts, `queue-${theme}-${language}.png`) });
+        const expansionLayout = await win.locator('#queueList').evaluate(async (list) => {
+          const items = [...list.querySelectorAll('.queue-item')];
+          const originalStyles = [list, ...items].map((element) => element.getAttribute('style'));
+          const item = items[0];
+          const details = item.querySelector('.queue-details');
+          const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+          const measure = () => {
+            const title = item.querySelector('.title').getBoundingClientRect();
+            return { left: title.left, width: title.width, height: title.height, overflowing: list.scrollHeight > list.clientHeight };
+          };
+          try {
+            for (const other of items.slice(2)) other.style.display = 'none';
+            list.style.flex = '0 0 auto';
+            list.style.height = `${items.slice(0, 2).reduce((height, card) => height + card.getBoundingClientRect().height + parseFloat(getComputedStyle(card).marginBottom), 0) + 20}px`;
+            const before = measure();
+            const samples = [];
+            const animate = async () => {
+              toggleQueueDetails(item.dataset.id);
+              await frame();
+              await frame();
+              do {
+                samples.push(measure());
+                await frame();
+              } while (details.getAnimations().length);
+              return measure();
+            };
+            const expanded = await animate();
+            const collapsed = await animate();
+            return { before, expanded, collapsed, samples };
+          } finally {
+            [list, ...items].forEach((element, index) => {
+              if (originalStyles[index] === null) element.removeAttribute('style');
+              else element.setAttribute('style', originalStyles[index]);
+            });
+          }
+        });
+        assert(!expansionLayout.before.overflowing && expansionLayout.expanded.overflowing && !expansionLayout.collapsed.overflowing, `Expansion fixture crosses the scrollbar threshold (${theme}/${language}): ${JSON.stringify({ before: expansionLayout.before, expanded: expansionLayout.expanded, collapsed: expansionLayout.collapsed })}`);
+        for (const sample of [...expansionLayout.samples, expansionLayout.expanded, expansionLayout.collapsed]) {
+          for (const dimension of ['left', 'width', 'height']) {
+            assert(Math.abs(sample[dimension] - expansionLayout.before[dimension]) <= 0.5, `Title ${dimension} shifts during expansion (${theme}/${language})`);
+          }
+        }
       }
     }
     const card = win.locator('.queue-item[data-id="pending"]');
