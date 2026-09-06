@@ -365,7 +365,7 @@ async function run() {
     check(mergeAddToolbarActions.english.label === 'Add videos' && mergeAddToolbarActions.english.accessibleLabel === 'Add videos', `English Add videos toolbar label is "${mergeAddToolbarActions.english.accessibleLabel}"`);
     check(mergeAddToolbarActions.german.label === 'Videos hinzufügen' && mergeAddToolbarActions.german.accessibleLabel === 'Videos hinzufügen', `German Videos hinzufügen toolbar label is "${mergeAddToolbarActions.german.accessibleLabel}"`);
 
-    await app.evaluate(({ ipcMain }) => {
+    await app.evaluate(({ ipcMain }, avatarUrl) => {
       globalThis.__workspaceStreamerCacheCalls = { ids: 0, vods: 0, profiles: 0 };
       ipcMain.removeHandler('get-user-id');
       ipcMain.handle('get-user-id', (_, login) => {
@@ -382,15 +382,20 @@ async function run() {
       ipcMain.removeHandler('get-streamer-profile');
       ipcMain.handle('get-streamer-profile', (_, login) => {
         globalThis.__workspaceStreamerCacheCalls.profiles += 1;
-        return { login, displayName: login, avatarUrl: '', bannerUrl: '', description: '', broadcasterType: '', followerCount: 100, vodCount: 1, lastStreamAt: '2026-08-09T12:00:00Z', isLive: false, currentTitle: null, currentGame: null, currentStreamPreviewUrl: '', currentStreamViewers: null, twitchUrl: `https://twitch.tv/${login}`, fetchedAt: Date.now() };
+        return { login, displayName: login, avatarUrl: login === 'cache_alpha' ? avatarUrl : '', bannerUrl: '', description: '', broadcasterType: '', followerCount: 100, vodCount: 1, lastStreamAt: '2026-08-09T12:00:00Z', isLive: false, currentTitle: null, currentGame: null, currentStreamPreviewUrl: '', currentStreamViewers: null, twitchUrl: `https://twitch.tv/${login}`, fetchedAt: Date.now() };
       });
-    });
+    }, `data:image/png;base64,${fs.readFileSync(path.join(process.cwd(), 'build', 'icon.png')).toString('base64')}`);
     const streamerCacheBehavior = await win.evaluate(async () => {
       streamerVodCache.clear();
       streamerProfileCache.clear();
       isConnected = true;
       config.streamers = ['cache_alpha', 'cache_beta'];
+      renderStreamers();
+      const loadingRow = document.querySelector('[data-streamer-name="cache_alpha"]');
+      loadingRow.focus();
+      const fallbackBeforeLoading = loadingRow.querySelector('.streamer-avatar-fallback')?.textContent;
       await window.preloadConfiguredStreamerData(config.streamers);
+      const avatarLoadedInPlace = loadingRow === document.querySelector('[data-streamer-name="cache_alpha"]') && document.activeElement === loadingRow && Boolean(loadingRow.querySelector('img.streamer-avatar'));
       const selection = selectStreamer('cache_beta');
       const skeletonDuringCachedSelection = document.querySelectorAll('#vodGrid .vod-card-skeleton').length;
       await selection;
@@ -401,6 +406,8 @@ async function run() {
       await window.refreshConfiguredStreamersInBackground();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       return {
+        fallbackBeforeLoading,
+        avatarLoadedInPlace,
         cachedVodStreamers: streamerVodCache.size,
         cachedProfiles: streamerProfileCache.size,
         skeletonDuringCachedSelection,
@@ -411,12 +418,33 @@ async function run() {
     });
     const streamerCacheCalls = await app.evaluate(() => ({ ...globalThis.__workspaceStreamerCacheCalls }));
     checks.streamerCache = { ...streamerCacheBehavior, calls: streamerCacheCalls };
+    check(streamerCacheBehavior.fallbackBeforeLoading === 'C' && streamerCacheBehavior.avatarLoadedInPlace, 'Loading a streamer avatar must replace the initial without replacing the row or losing focus');
     check(streamerCacheBehavior.cachedVodStreamers === 2 && streamerCacheBehavior.cachedProfiles === 2, `Configured streamers were not fully preloaded: ${streamerCacheBehavior.cachedVodStreamers}/${streamerCacheBehavior.cachedProfiles}`);
     check(streamerCacheBehavior.skeletonDuringCachedSelection === 0, `Cached streamer selection still shows ${streamerCacheBehavior.skeletonDuringCachedSelection} skeleton cards`);
     check(streamerCacheBehavior.profileWidthDelta <= 1, `Streamer profile width changes by ${streamerCacheBehavior.profileWidthDelta}px between cached accounts`);
     check(streamerCacheBehavior.cardsAfterRefresh === 2, `Silent refresh did not add the new VOD: ${streamerCacheBehavior.cardsAfterRefresh}`);
     check(streamerCacheBehavior.activeAnimations > 0, 'Silent refresh does not animate the new VOD or grid reflow');
     check(streamerCacheCalls.ids === 4 && streamerCacheCalls.vods === 4, `Cached account switching triggered unexpected VOD requests: ${JSON.stringify(streamerCacheCalls)}`);
+    const originalStreamerTheme = await win.evaluate(() => document.body.className);
+    for (const theme of ['twitch', 'light']) {
+      await win.evaluate((theme) => { document.body.className = `theme-${theme}`; }, theme);
+      const avatars = await win.locator('#streamerList').evaluate(async (list) => {
+        await Promise.all([...list.querySelectorAll('img.streamer-avatar')].map((image) => image.decode()));
+        return [...list.querySelectorAll('.streamer-item')].map((row) => {
+          const avatar = row.querySelector('.streamer-avatar, .streamer-avatar-fallback');
+          const rect = avatar.getBoundingClientRect();
+          return { width: rect.width, height: rect.height, round: getComputedStyle(avatar).borderRadius, beforeName: rect.right <= row.querySelector('.streamer-name').getBoundingClientRect().left, overflow: row.scrollWidth - row.clientWidth };
+        });
+      });
+      check(avatars.length === 2 && avatars.every((avatar) => avatar.width === 24 && avatar.height === 24 && avatar.round === '50%' && avatar.beforeName && avatar.overflow <= 1), `Streamer avatar layout (${theme}): ${JSON.stringify(avatars)}`);
+      await win.locator('.streamer-section').screenshot({ path: path.join(artifactDir, `streamer-avatars-${theme}.png`) });
+    }
+    await win.evaluate((theme) => { document.body.className = theme; }, originalStreamerTheme);
+    await win.locator('[data-streamer-name="cache_alpha"] .streamer-avatar').click();
+    await win.waitForFunction(() => currentStreamer === 'cache_alpha');
+    await win.locator('[data-streamer-name="cache_alpha"] .streamer-avatar').dispatchEvent('error');
+    check(await win.locator('[data-streamer-name="cache_alpha"] .streamer-avatar-fallback').textContent() === 'C', 'Broken streamer avatars should show an initial');
+    await win.evaluate(() => updateStreamerAvatars('CACHE_ALPHA'));
 
     const cutterDropFixturePath = path.join(environment.mediaDir, 'electron-43-cutter-drop.mp4');
     fs.writeFileSync(cutterDropFixturePath, 'electron-43-cutter-drop-fixture', 'utf8');

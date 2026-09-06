@@ -590,6 +590,32 @@ function showStreamerContextMenu(event: MouseEvent, streamer: string): void {
     menu.querySelector<HTMLButtonElement>('button')?.focus();
 }
 
+function createStreamerAvatar(streamer: string): HTMLElement {
+    const fallback = document.createElement('span');
+    fallback.className = 'streamer-avatar-fallback';
+    fallback.textContent = Array.from(getStreamerDisplayName(streamer))[0]?.toUpperCase() || '?';
+    fallback.setAttribute('aria-hidden', 'true');
+    const profile = streamerProfileCache.get(streamer.trim().toLowerCase());
+    if (!profile?.avatarUrl) return fallback;
+    const image = document.createElement('img');
+    image.className = 'streamer-avatar';
+    image.alt = '';
+    image.draggable = false;
+    image.referrerPolicy = 'no-referrer';
+    image.decoding = 'async';
+    image.addEventListener('error', () => image.replaceWith(fallback), { once: true });
+    image.src = profile.avatarUrl;
+    return image;
+}
+
+function updateStreamerAvatars(login: string): void {
+    const key = login.trim().toLowerCase();
+    for (const item of Array.from(document.querySelectorAll<HTMLElement>('#streamerList .streamer-item'))) {
+        if (item.dataset.streamerName?.trim().toLowerCase() !== key) continue;
+        item.querySelector('.streamer-avatar, .streamer-avatar-fallback')?.replaceWith(createStreamerAvatar(login));
+    }
+}
+
 function renderStreamers(): void {
     const list = byId('streamerList');
     list.replaceChildren();
@@ -639,7 +665,8 @@ function renderStreamers(): void {
         // first, then AUTO / VOD / REC / remove in order.
         item.setAttribute('role', 'button');
         item.setAttribute('tabindex', '0');
-        item.setAttribute('aria-label', streamer);
+        item.setAttribute('aria-label', getStreamerDisplayName(streamer));
+        item.title = getStreamerDisplayName(streamer);
         if (currentStreamer === streamer) item.setAttribute('aria-current', 'true');
 
         // Live-dot — red pulsing dot when this streamer is currently
@@ -677,7 +704,7 @@ function renderStreamers(): void {
                 void removeStreamer(streamer);
             }
         });
-        item.append(nameSpan, removeSpan);
+        item.append(createStreamerAvatar(streamer), nameSpan, removeSpan);
 
         item.addEventListener('contextmenu', (contextEvent) => {
             showStreamerContextMenu(contextEvent, streamer);

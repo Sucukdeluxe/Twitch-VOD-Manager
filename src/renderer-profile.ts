@@ -222,7 +222,10 @@ async function fetchStreamerProfile(login: string, forceRefresh = false): Promis
     const pending = streamerProfileLoads.get(key);
     if (pending) return pending;
     const task = window.api.getStreamerProfile(login, forceRefresh).then((profile) => {
-        if (profile) streamerProfileCache.set(key, profile);
+        if (profile) {
+            streamerProfileCache.set(key, profile);
+            updateStreamerAvatars(login);
+        }
         return profile;
     });
     streamerProfileLoads.set(key, task);

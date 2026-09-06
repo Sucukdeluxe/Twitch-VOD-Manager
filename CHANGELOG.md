@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Show small round profile pictures beside streamer names in the sidebar, with an initial fallback when an image is unavailable.
+
 ## 1.0.21 - 2026-09-06
 
 - Show the Twitch display name with its original capitalization in queue details and refresh it when profile names load.

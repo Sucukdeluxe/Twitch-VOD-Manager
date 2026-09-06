@@ -859,6 +859,23 @@ textarea:disabled,
     width: 24px;
     height: 24px;
     flex: 0 0 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    object-fit: cover;
+    overflow: hidden;
+    background: var(--workspace-control);
+    color: var(--workspace-text-muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.context-sidebar .streamer-name {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .context-sidebar .queue-section {
