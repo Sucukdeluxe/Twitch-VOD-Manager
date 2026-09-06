@@ -94,6 +94,9 @@ async function invokeQueueItemAction(action: string, id: string): Promise<void> 
         await removeFromQueue(id);
     } else if (action === 'retry') {
         await retryQueueItem(id);
+    } else if (action === 'copy-url') {
+        const item = queue.find((candidate) => candidate.id === id);
+        if (item) await copyQueueUrl(item.url);
     }
 }
 
@@ -728,7 +731,7 @@ function renderQueue(): void {
                     </div>
                     <div class="queue-details${expandedQueueIds.has(item.id) ? ' expanded' : ''}" id="${detailsId}"${expandedQueueIds.has(item.id) ? '' : ' inert'}>
                         <div class="queue-details-clip"><div class="queue-details-content">
-                        <div><span class="queue-detail-label">URL:</span> ${escapeHtml(item.url)}</div>
+                        <div class="queue-url-row"><span class="queue-detail-label">URL:</span><button class="queue-url-copy" type="button" data-queue-action="copy-url" aria-label="${escapeHtml(UI_TEXT.queue.ctxCopyUrl)}" title="${escapeHtml(UI_TEXT.queue.ctxCopyUrl)}: ${escapeHtml(item.url)}">${escapeHtml(item.url)}</button></div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailStreamer)}</span> ${escapeHtml(item.streamer)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDuration)}</span> ${escapeHtml(item.duration_str)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDate)}</span> ${escapeHtml(formatUiDateTime(item.date))}</div>

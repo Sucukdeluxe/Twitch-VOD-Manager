@@ -24,7 +24,7 @@ async function main() {
       panel.dataset.vodsLayout = 'tabs';
       panel.dataset.vodsWorkspace = 'queue';
       queue = [
-        { id: 'pending', status: 'pending', title: 'Ein langer Streamtitel mit gut lesbaren Download-Details und einer zweiten Zeile', progress: 0 },
+        { id: 'pending', status: 'pending', title: 'Ein langer Streamtitel mit gut lesbaren Download-Details und einer zweiten Zeile', progress: 0, url: 'https://www.twitch.tv/videos/2863358704' },
         { id: 'running', status: 'downloading', title: 'Sommerstream am See – gemeinsam unterwegs', progress: 42, progressStatus: 'Video wird heruntergeladen', speed: '12.5 MB/s', eta: '08:24' },
         { id: 'paused', status: 'paused', title: 'Community-Abend mit Freunden', progress: 23 },
         { id: 'error', status: 'error', title: 'Ein weiterer langer Streamtitel mit einer Fehlermeldung', progress: 10, last_error: 'Die Verbindung wurde unterbrochen. Bitte erneut versuchen.' },
@@ -102,8 +102,15 @@ async function main() {
               return measure();
             };
             const expanded = await animate();
+            const url = item.querySelector('.queue-url-copy');
+            const urlLabel = item.querySelector('.queue-url-row .queue-detail-label');
+            const urlLayout = {
+              belowLabel: url.getBoundingClientRect().top >= urlLabel.getBoundingClientRect().bottom,
+              singleLine: getComputedStyle(url).whiteSpace === 'nowrap',
+              fullyVisible: url.scrollWidth <= url.clientWidth,
+            };
             const collapsed = await animate();
-            return { before, expanded, collapsed, samples };
+            return { before, expanded, collapsed, samples, urlLayout };
           } finally {
             [list, ...items].forEach((element, index) => {
               if (originalStyles[index] === null) element.removeAttribute('style');
@@ -112,6 +119,7 @@ async function main() {
           }
         });
         assert(!expansionLayout.before.overflowing && expansionLayout.expanded.overflowing && !expansionLayout.collapsed.overflowing, `Expansion fixture crosses the scrollbar threshold (${theme}/${language}): ${JSON.stringify({ before: expansionLayout.before, expanded: expansionLayout.expanded, collapsed: expansionLayout.collapsed })}`);
+        assert(Object.values(expansionLayout.urlLayout).every(Boolean), `URL stays fully visible below its label (${theme}/${language}): ${JSON.stringify(expansionLayout.urlLayout)}`);
         for (const sample of [...expansionLayout.samples, expansionLayout.expanded, expansionLayout.collapsed]) {
           for (const dimension of ['left', 'width', 'height']) {
             assert(Math.abs(sample[dimension] - expansionLayout.before[dimension]) <= 0.5, `Title ${dimension} shifts during expansion (${theme}/${language})`);
@@ -179,6 +187,24 @@ async function main() {
     });
     assert.equal(await toggle.getAttribute('aria-expanded'), 'true', 'Expansion survives queue rerender');
     assert.equal(await win.locator('[data-id="running"] .queue-progress-wrap').getAttribute('aria-valuenow'), '61');
+    await win.evaluate(() => {
+      window.queueCopiedUrls = [];
+      Object.defineProperty(navigator.clipboard, 'writeText', {
+        configurable: true,
+        value: async (url) => { window.queueCopiedUrls.push(url); },
+      });
+    });
+    const urlButton = card.locator('.queue-url-copy');
+    await urlButton.click();
+    await urlButton.press('Enter');
+    await urlButton.press('Space');
+    assert.deepEqual(await win.evaluate(() => window.queueCopiedUrls), Array(3).fill(fixtures[0].url));
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true', 'Copying the URL keeps details open');
+    assert(await win.evaluate(() => document.body.innerText.includes(UI_TEXT.queue.ctxCopiedUrl)), 'Copy confirmation is visible');
+    for (const theme of ['twitch', 'light']) {
+      await win.evaluate((theme) => { document.body.className = `theme-${theme}`; }, theme);
+      await card.screenshot({ path: path.join(artifacts, `queue-url-${theme}.png`) });
+    }
     await app.evaluate(({ ipcMain }) => {
       ipcMain.removeHandler('remove-from-queue');
       ipcMain.handle('remove-from-queue', async (_event, id) => {
