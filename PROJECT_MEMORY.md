@@ -6,9 +6,9 @@ Windows-Desktopanwendung auf Basis von Electron und TypeScript zum Durchsuchen, 
 
 Am 6. September 2026 nach einem Festplatten-Reset aus den vorhandenen Remote-Repositories wiederhergestellt. Der lokale Projektordner heißt `Twitch Downloader`. Die Anwendung, Paketkennung, Installer, Update-Adressen und Remote-Repositories heißen weiterhin `Twitch VOD Manager` beziehungsweise `Twitch-VOD-Manager`. Die vollständige Produktumbenennung ist noch offen.
 
-Aktueller veröffentlichter Stand: **1.0.22**, Tag `v1.0.22`, veröffentlicht am 6. September 2026 auf GitHub und Forgejo. Der Tag zeigt auf `a526bd3541fd1d909dae0060ba92d64347668099`; nachfolgende Memory-Commits gehören nicht zum Installer.
+Aktueller veröffentlichter Stand: **1.0.23**, Tag `v1.0.23`, veröffentlicht am 7. September 2026 auf GitHub und Forgejo. Der Tag zeigt auf `8d32994246256323eaaf161f7a9b9449c3f6ac15`; nachfolgende Memory-Commits gehören nicht zum Installer.
 
-Release 1.0.23 wird am 7. September 2026 vorbereitet: Queue startet wartende Downloads strikt in der sichtbaren Reihenfolge; kompakte, einzeilige Fortschrittsanzeige auch unter 1 GB. Versionen und Changelog sind gesetzt; vollständige Release-Prüfung, Paketbau und Veröffentlichung werden vor Abschluss separat verifiziert.
+Release 1.0.23 abgeschlossen: Queue startet wartende Downloads strikt in der sichtbaren Reihenfolge; kompakte, einzeilige Fortschrittsanzeige auch unter 1 GB. Vollständige lokale Release-Prüfung, Windows-CI, Paketbau und Veröffentlichung auf beiden Plattformen erfolgreich verifiziert.
 
 ## Git und maßgeblicher Stand
 
@@ -70,7 +70,7 @@ npm run dev
 
 ## Entscheidungen und offene nächste Schritte
 
-- Wiederherstellung und die von Sascha beauftragten Releases bis einschließlich 1.0.22 abgeschlossen. Auf `public-v1` weiterarbeiten; beide Plattformen enthalten identische Assets und englische/deutsche Changelogs.
+- Wiederherstellung und die von Sascha beauftragten Releases bis einschließlich 1.0.23 abgeschlossen. Auf `public-v1` weiterarbeiten; beide Plattformen enthalten identische Assets und englische/deutsche Changelogs.
 - Die gewünschte Umbenennung zu `Twitch Downloader` ist lokal umgesetzt. Eine Umbenennung der Remotes und der Anwendung samt Update-Kompatibilität ist gesondert abzustimmen und zu prüfen.
 - Die Standardbranches wurden bei der Wiederherstellung nicht umgestellt oder mit älteren Entwicklungslinien zusammengeführt.
 - Nächste fachliche Änderung von Sascha entgegennehmen; vor Änderungen diese Memory, `README.md`, `CHANGELOG.md` und den Git-Status lesen.
@@ -156,3 +156,14 @@ Abschließende Verifikation von Release 1.0.22 am 6. September 2026:
 - Queue-UI-Prüfung in Deutsch/Englisch und Hell/Dunkel einschließlich einzeiliger Mengen-/Tempo-/Restzeitanzeige erfolgreich; Screenshots visuell geprüft. Der Animationstest liest Transitions nun direkt nach dem Umschalten aus, damit langsame Frames die kurze Animation nicht vor der Messung beenden.
 - Vollständiger Workspace-UI-Test und isolierter Einstellungen-Autosave-Test erfolgreich, keine gemeldeten Laufzeitfehler. Die Checkbox-Layoutprüfung verwendet nach Entfernen der Scheduler-Option den vorhandenen Duplikatschutz.
 - Lint ohne Fehler bei 15 bestehenden Warnungen; Security-/Public-Manifest-Prüfung erfolgreich. Keine Live-Downloads oder produktiven Datenbankänderungen für die Tests. Release-Version bleibt 1.0.22; Änderungen auf public-v1 für die nächste Veröffentlichung vorbereitet.
+
+Abschließende Verifikation von Release 1.0.23 am 7. September 2026:
+
+- Vollständiger lokaler Durchlauf von `npm run test:e2e:release` erfolgreich: 83 Unit-Testdateien mit 635 Tests, Verträge, Workspace, Cutter, Medienformat-Matrix, Smoke-/Full-/Template-Test und Einstellungen-Autosave. Zusätzlich Queue-UI-Prüfung in beiden Sprachen und Themes sowie Security-/Public-Manifest-/CI-Prüfungen erfolgreich; Lint ohne Fehler bei 15 bestehenden Warnungen.
+- Windows-CI des exakten Release-Commits vollständig erfolgreich: https://github.com/Sucukdeluxe/Twitch-VOD-Manager/actions/runs/34071871330. Einschließlich Werkzeuginstallation/Reparatur, Paketstart, Installer-Build und Installer-Smoke auf dem isolierten Runner.
+- Lokaler Installer mit `electron-builder --win --publish never --config.npmRebuild=false` gebaut. Gepackte Version 1.0.23 und enthaltene Main-/Renderer-/CSS-/HTML-Dateien gegen den Quellstand abgeglichen; SQLite ausschließlich im Arbeitsspeicher und zusätzlicher isolierter Paketstart erfolgreich geprüft.
+- GitHub: https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/tag/v1.0.23 — Englisch. Forgejo: https://git.24-music.de/Administrator/Twitch-VOD-Manager/releases/tag/v1.0.23 — inhaltlich gleichwertiges Changelog Deutsch.
+- Beide Plattformen zeigen den regulären veröffentlichten Latest-Release mit Titel `Twitch VOD Manager 1.0.23`, identischem annotiertem Tag und drei Assets: `Twitch-VOD-Manager-Setup-1.0.23.exe`, zugehörige `.blockmap` und `latest.yml`.
+- Alle Assets von beiden Plattformen heruntergeladen und bytegenau per SHA-256/SHA-512 gegen den lokalen Build geprüft. Nach Veröffentlichung öffentliche Asset-URLs, Latest-Release und Update-Metadaten beider Plattformen einschließlich GitHubs Update-Kanal erfolgreich verifiziert.
+- Installer: 110.441.649 Bytes, SHA-256 `c23490f8060a1bd07efb9d9ffa072b2768f67756a5278251efe38f59163f9a15`. Blockmap: 117.258 Bytes. Update-Metadaten: 368 Bytes mit passender Version, Dateigröße und SHA-512-Prüfsumme.
+- Keine produktiven Datenbankänderungen und keine vollständige Live-Update-Installation einer alten Version auf diesem Rechner. Ignorierte Prüfdateien liegen in `tmp_release_1.0.23/`, Testprotokolle im Windows-Temp-Verzeichnis.
