@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.23 - 2026-09-07
 
 - Start pending downloads in the visible queue order, including manually reordered entries. Retire the automatic short-job prioritization, including for existing configurations.
 - Keep transfer size, percentage, speed and remaining time on one compact line below 1 GB as well. Preserve wrapping for error messages and full values in tooltips.

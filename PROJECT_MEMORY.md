@@ -8,7 +8,7 @@ Am 6. September 2026 nach einem Festplatten-Reset aus den vorhandenen Remote-Rep
 
 Aktueller veröffentlichter Stand: **1.0.22**, Tag `v1.0.22`, veröffentlicht am 6. September 2026 auf GitHub und Forgejo. Der Tag zeigt auf `a526bd3541fd1d909dae0060ba92d64347668099`; nachfolgende Memory-Commits gehören nicht zum Installer.
 
-Unveröffentlichte Änderungen vom 7. September 2026: Queue startet wartende Downloads strikt in der sichtbaren Reihenfolge; kompakte, einzeilige Fortschrittsanzeige auch unter 1 GB.
+Release 1.0.23 wird am 7. September 2026 vorbereitet: Queue startet wartende Downloads strikt in der sichtbaren Reihenfolge; kompakte, einzeilige Fortschrittsanzeige auch unter 1 GB. Versionen und Changelog sind gesetzt; vollständige Release-Prüfung, Paketbau und Veröffentlichung werden vor Abschluss separat verifiziert.
 
 ## Git und maßgeblicher Stand
 
