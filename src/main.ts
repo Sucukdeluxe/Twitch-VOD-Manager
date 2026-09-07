@@ -447,7 +447,7 @@ const defaultConfig: Config = {
     filename_template_vod: DEFAULT_FILENAME_TEMPLATE_VOD,
     filename_template_parts: DEFAULT_FILENAME_TEMPLATE_PARTS,
     filename_template_clip: DEFAULT_FILENAME_TEMPLATE_CLIP,
-    smart_queue_scheduler: true,
+    smart_queue_scheduler: false,
     performance_mode: DEFAULT_PERFORMANCE_MODE,
     prevent_duplicate_downloads: true,
     persist_queue_on_restart: true,
@@ -521,7 +521,7 @@ function normalizeConfigTemplates(input: Config): Config {
         filename_template_parts: normalizeFilenameTemplate(input.filename_template_parts, DEFAULT_FILENAME_TEMPLATE_PARTS),
         filename_template_clip: normalizeFilenameTemplate(input.filename_template_clip, DEFAULT_FILENAME_TEMPLATE_CLIP),
         sidebar_split_view: input.sidebar_split_view !== false,
-        smart_queue_scheduler: input.smart_queue_scheduler !== false,
+        smart_queue_scheduler: false,
         performance_mode: normalizePerformanceMode(input.performance_mode),
         prevent_duplicate_downloads: input.prevent_duplicate_downloads !== false,
         persist_queue_on_restart: input.persist_queue_on_restart !== false,
@@ -1786,7 +1786,7 @@ function getRuntimeMetricsSnapshot(): RuntimeMetricsSnapshot {
         },
         config: {
             performanceMode: normalizePerformanceMode(config.performance_mode),
-            smartScheduler: config.smart_queue_scheduler !== false,
+            smartScheduler: false,
             metadataCacheMinutes: normalizeMetadataCacheMinutes(config.metadata_cache_minutes),
             duplicatePrevention: config.prevent_duplicate_downloads !== false
         }
@@ -1810,39 +1810,8 @@ function hasActiveDuplicate(candidate: Pick<QueueItem, 'url' | 'streamer' | 'dat
     });
 }
 
-function getQueuePriorityScore(item: QueueItem): number {
-    const now = Date.now();
-    const createdMs = getQueueCreatedAtMs(item, now);
-    const waitSeconds = Math.max(0, Math.floor((now - createdMs) / 1000));
-    const durationSeconds = Math.max(0, parseDuration(item.duration_str || '0s'));
-    const clipBoost = item.customClip ? 1500 : 0;
-    const shortJobBoost = Math.max(0, 7200 - Math.min(7200, durationSeconds)) / 5;
-    const ageBoost = Math.min(waitSeconds, 1800) / 2;
-
-    return clipBoost + shortJobBoost + ageBoost;
-}
-
 function pickNextPendingQueueItem(): QueueItem | null {
-    const pendingItems = downloadQueue.filter((item) => item.status === 'pending');
-    if (!pendingItems.length) return null;
-
-    if (!config.smart_queue_scheduler) {
-        return pendingItems[0];
-    }
-
-    let best = pendingItems[0];
-    let bestScore = getQueuePriorityScore(best);
-
-    for (let i = 1; i < pendingItems.length; i += 1) {
-        const candidate = pendingItems[i];
-        const score = getQueuePriorityScore(candidate);
-        if (score > bestScore) {
-            best = candidate;
-            bestScore = score;
-        }
-    }
-
-    return best;
+    return downloadQueue.find((item) => item.status === 'pending') || null;
 }
 
 function parseClockDurationSeconds(duration: string | null): number | null {
@@ -6824,8 +6793,7 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
     appendDebugLog('queue-item-start', {
         itemId: item.id,
         title: item.title,
-        url: item.url,
-        smartScore: config.smart_queue_scheduler ? getQueuePriorityScore(item) : 0
+        url: item.url
     });
 
     runtimeMetrics.downloadsStarted += 1;
@@ -7107,7 +7075,7 @@ async function processQueue(manualOverride = false): Promise<void> {
 
     appendDebugLog('queue-start', {
         items: downloadQueue.length,
-        smartScheduler: config.smart_queue_scheduler,
+        scheduling: 'queue-order',
         performanceMode: config.performance_mode,
         parallelDownloads: config.parallel_downloads || 1
     });

@@ -88,8 +88,6 @@ const UI_TEXT_DE = {
         performanceModeStability: 'Max Stabilität',
         performanceModeBalanced: 'Ausgewogen',
         performanceModeSpeed: 'Max Geschwindigkeit',
-        smartSchedulerLabel: 'Smart Queue Scheduler aktivieren',
-        smartSchedulerHint: 'Bevorzugt kürzere VODs und ältere Queue-Einträge zuerst, damit der Durchsatz gleichmäßig bleibt. Deaktivieren = strikte Einfügereihenfolge.',
         sidebarSplitViewLabel: 'Streamer und Queue gleichzeitig anzeigen',
         sidebarSplitViewHint: 'Teilt die linke Seitenleiste gleichmäßig auf. Deaktiviert erscheinen wieder die Umschaltflächen.',
         streamerInvalid: 'Twitch-Username ungültig (4-25 Zeichen, Buchstaben/Zahlen/Unterstrich).',

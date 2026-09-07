@@ -79,6 +79,29 @@ async function main() {
           assert(card.overflow <= 1, `Card overflow: ${JSON.stringify(card)}`);
         }
         await win.locator('.queue-section').screenshot({ path: path.join(artifacts, `queue-${theme}-${language}.png`) });
+        for (const size of ['500.0 MB', '1003.0 MB', '1.35 GB']) {
+          const transfer = await win.evaluate(({ size, language }) => {
+            const item = queue.find((candidate) => candidate.id === 'running');
+            item.progress = 32.2;
+            item.progressStatus = `${size} ${language === 'de' ? 'heruntergeladen' : 'downloaded'}`;
+            item.speed = '23.1 MB/s';
+            item.eta = '12m 34s';
+            updateQueueItemProgress({ id: item.id });
+            const row = document.querySelector('[data-id="running"] .queue-progress-info');
+            const status = row.querySelector('.queue-progress-status');
+            const metrics = row.querySelector('.queue-progress-metrics');
+            return {
+              height: row.getBoundingClientRect().height,
+              sameLine: status.getBoundingClientRect().top === metrics.getBoundingClientRect().top,
+              statusVisible: status.scrollWidth <= status.clientWidth,
+              metricsVisible: metrics.scrollWidth <= metrics.clientWidth,
+              status: status.textContent,
+              tooltip: status.title,
+            };
+          }, { size, language });
+          assert(transfer.height <= 18 && transfer.sameLine && transfer.statusVisible && transfer.metricsVisible && transfer.status === size && transfer.tooltip.includes(size), `Transfer line (${theme}/${language}): ${JSON.stringify(transfer)}`);
+        }
+        await win.locator('[data-id="running"]').screenshot({ path: path.join(artifacts, `transfer-${theme}-${language}.png`) });
         const expansionLayout = await win.locator('#queueList').evaluate(async (list) => {
           const items = [...list.querySelectorAll('.queue-item')];
           const originalStyles = [list, ...items].map((element) => element.getAttribute('style'));
@@ -139,8 +162,6 @@ async function main() {
         const details = item.querySelector('.queue-details');
         const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
         const sample = async () => {
-          await frame();
-          await frame();
           const animations = details.getAnimations();
           const slide = animations.find((animation) => animation.transitionProperty === 'grid-template-rows');
           if (!slide) throw new Error('Queue details have no height transition');

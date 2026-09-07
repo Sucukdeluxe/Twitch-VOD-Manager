@@ -269,9 +269,6 @@ function applyLanguageToStaticUI(): void {
     setText('performanceModeStability', UI_TEXT.static.performanceModeStability);
     setText('performanceModeBalanced', UI_TEXT.static.performanceModeBalanced);
     setText('performanceModeSpeed', UI_TEXT.static.performanceModeSpeed);
-    setText('smartSchedulerLabel', UI_TEXT.static.smartSchedulerLabel);
-    setTitle('smartSchedulerLabel', UI_TEXT.static.smartSchedulerHint);
-    setTitle('smartSchedulerToggle', UI_TEXT.static.smartSchedulerHint);
     setText('duplicatePreventionLabel', UI_TEXT.static.duplicatePreventionLabel);
     setText('persistQueueLabel', UI_TEXT.static.persistQueueLabel);
     setText('autoResumeQueueLabel', UI_TEXT.static.autoResumeQueueLabel);

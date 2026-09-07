@@ -413,6 +413,17 @@ describe('renderer queue production paths', () => {
         expect(metrics({ status: 'completed', progress: 100, speed: '4 MB/s', eta: '2m' })).toBe('100%');
     });
 
+    it('keeps transfer sizes compact while preserving non-transfer status messages', () => {
+        const runtime = evaluate(fragment('function getQueueProgressStatusText', 'function getQueueProgressMetricsText'), 'getQueueProgressStatusText', { UI_TEXT: { queue: queueText } });
+        for (const size of ['500.0 MB', '1003.0 MB', '1.35 GB']) {
+            for (const suffix of ['downloaded', 'heruntergeladen']) {
+                expect(runtime.exposed.getQueueProgressStatusText({ status: 'downloading', progressStatus: `${size} ${suffix}` })).toBe(size);
+            }
+        }
+        expect(runtime.exposed.getQueueProgressStatusText({ status: 'downloading', progressStatus: 'Preparing download tools' })).toBe('Preparing download tools');
+        expect(runtime.exposed.getQueueProgressStatusText({ status: 'error', last_error: 'Connection failed. Please retry.' })).toBe('Connection failed. Please retry.');
+    });
+
     it('keeps monotonic progress while treating explicit empty telemetry as an authoritative reset', () => {
         const mergePath = rendererSource.slice(
             rendererSource.indexOf('function mergeQueueState'),

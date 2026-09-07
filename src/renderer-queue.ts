@@ -458,7 +458,10 @@ function getQueueProgressStatusText(item: QueueItem): string {
     if (item.status === 'paused') return UI_TEXT.queue.statusPaused;
     if (item.status === 'completed') return UI_TEXT.queue.done;
     if (item.status === 'error') return UI_TEXT.queue.failed;
-    if (item.status === 'downloading' && item.progressStatus) return item.progressStatus;
+    if (item.status === 'downloading' && item.progressStatus) {
+        const downloadedSize = item.progressStatus.match(/^([\d.,]+\s(?:B|KB|MB|GB|TB)) (?:downloaded|heruntergeladen)$/);
+        return downloadedSize ? downloadedSize[1] : item.progressStatus;
+    }
     if (item.currentPart && item.totalParts) {
         return `${UI_TEXT.queue.part} ${item.currentPart}/${item.totalParts}`;
     }
@@ -565,8 +568,14 @@ function updateQueueItemProgress(progress: DownloadProgress): void {
         bar.className = 'queue-progress-bar';
         if (wrap) wrap.setAttribute('aria-valuenow', String(Math.round(pct)));
     }
-    if (status) status.textContent = getQueueProgressStatusText(item);
-    if (metrics) metrics.textContent = getQueueProgressMetricsText(item);
+    if (status) {
+        status.textContent = getQueueProgressStatusText(item);
+        status.title = item.progressStatus || status.textContent;
+    }
+    if (metrics) {
+        metrics.textContent = getQueueProgressMetricsText(item);
+        metrics.title = metrics.textContent;
+    }
     syncQueueRecordingHealth(el, item);
 }
 
@@ -727,8 +736,8 @@ function renderQueue(): void {
                         <span class="queue-status-badge" title="${safeProgressStatus}"><span class="status ${item.status}" aria-hidden="true"></span><span class="queue-status-label">${safeStatusLabel}</span></span>
                     </div>
                     <div class="queue-progress-info${item.status === 'pending' || item.status === 'completed' ? ' is-hidden' : ''}">
-                        <span class="queue-progress-status${progressStatusClass}${item.status === 'paused' ? ' is-hidden' : ''}">${safeProgressStatus}</span>
-                        <span class="queue-progress-metrics">${safeProgressMetrics}</span>
+                        <span class="queue-progress-status${progressStatusClass}${item.status === 'paused' ? ' is-hidden' : ''}" title="${escapeHtml(item.progressStatus || getQueueProgressStatusText(item))}">${safeProgressStatus}</span>
+                        <span class="queue-progress-metrics" title="${safeProgressMetrics}">${safeProgressMetrics}</span>
                     </div>
                     <div class="queue-details${expandedQueueIds.has(item.id) ? ' expanded' : ''}" id="${detailsId}"${expandedQueueIds.has(item.id) ? '' : ' inert'}>
                         <div class="queue-details-clip"><div class="queue-details-content">

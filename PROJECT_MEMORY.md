@@ -8,6 +8,8 @@ Am 6. September 2026 nach einem Festplatten-Reset aus den vorhandenen Remote-Rep
 
 Aktueller veröffentlichter Stand: **1.0.22**, Tag `v1.0.22`, veröffentlicht am 6. September 2026 auf GitHub und Forgejo. Der Tag zeigt auf `a526bd3541fd1d909dae0060ba92d64347668099`; nachfolgende Memory-Commits gehören nicht zum Installer.
 
+Unveröffentlichte Änderungen vom 7. September 2026: Queue startet wartende Downloads strikt in der sichtbaren Reihenfolge; kompakte, einzeilige Fortschrittsanzeige auch unter 1 GB.
+
 ## Git und maßgeblicher Stand
 
 - Arbeitsbranch: `public-v1`, Tracking: `origin/public-v1`.
@@ -21,6 +23,8 @@ Aktueller veröffentlichter Stand: **1.0.22**, Tag `v1.0.22`, veröffentlicht am
 ## Letzte Änderungen
 
 - Release 1.0.22 abgeschlossen: runde Profilbilder in der Streamerliste; auf GitHub und Forgejo mit identischen Assets sowie englischem/deutschem Changelog veröffentlicht und geprüft.
+- 7. September 2026: Automatische Bevorzugung kurzer Downloads/Clips entfernt, damit die Queue von oben nach unten startet und manuelles Umsortieren respektiert. Die frühere Scheduler-Einstellung ist aus der Oberfläche entfernt; vorhandene Konfigurationen werden auf deaktiviert normalisiert, das alte Feld bleibt kompatibel lesbar. Parallele Downloads werden weiterhin in sichtbarer Reihenfolge gestartet.
+- 7. September 2026: Transferzeile zeigt die Datenmenge ohne redundantes „heruntergeladen“, daneben Prozent, Tempo und Restzeit in 11 px ohne Zeilenumbruch. Vollständige Angaben bleiben im Tooltip, Fehlermeldungen weiterhin mehrzeilig in 12 px. 500 MB, 1003 MB und 1,35 GB in beiden Sprachen und Themes ohne abgeschnittene Werte gemessen.
 - Linke Streamerliste zeigt runde Profilbilder in 24 × 24 px direkt vor dem Namen. Verwendet den bestehenden Profil-Cache und dessen Vorladen/Hintergrundaktualisierung ohne zusätzliche Profilanfragen. Bilder werden in der vorhandenen Zeile nachgeladen und erhalten den Tastaturfokus; fehlende oder defekte Bilder zeigen den Anfangsbuchstaben. Bildklick wählt den Streamer, lange Namen werden einzeilig gekürzt und bleiben im Tooltip lesbar. Build, 37 gezielte Tests und vollständige Workspace-UI-Prüfung inklusive Laden, Fallback, Auswahl und Hell/Dunkel erfolgreich; Lint ohne Fehler bei 15 bestehenden Warnungen. Screenshots unter `tmp_streamer-avatar-artifacts/`. Mit 1.0.22 veröffentlicht, auch im Hot-Dev aktiv.
 - Release 1.0.21 abgeschlossen: alle Queue-Nachbesserungen seit 1.0.20 enthalten; auf GitHub und Forgejo mit identischen Assets sowie englischem/deutschem Changelog veröffentlicht und geprüft.
 - Streamer in Queue-Details verwendet jetzt den aufgelösten Twitch-Anzeigenamen mit originaler Groß-/Kleinschreibung, etwa `xRohat` statt `xrohat`. Gespeicherter Login bleibt unverändert; noch unbekannte Anzeigenamen fallen auf den Login zurück. Nachgeladene Profilnamen aktualisieren vorhandene Queue-Cards sofort und werden bei der Render-Erkennung berücksichtigt. Build, 43 gezielte Tests, Queue-UI-Test einschließlich nachgeladener Groß-/Kleinschreibung und Lint erfolgreich (15 bestehende Warnungen). Mit 1.0.21 veröffentlicht.
@@ -145,3 +149,10 @@ Abschließende Verifikation von Release 1.0.22 am 6. September 2026:
 - Alle Assets von beiden Plattformen heruntergeladen und bytegenau per SHA-256/SHA-512 gegen den lokalen Build geprüft. Nach Veröffentlichung öffentliche Asset-URLs, Latest-Release und Update-Metadaten beider Plattformen einschließlich GitHubs Update-Kanal erfolgreich verifiziert.
 - Installer: 110.441.936 Bytes, SHA-256 `bbfc1ab5ac2e7e7d0d5b5e86c7c757ab2c3e03e854a4e0a830156283af2131ba`. Blockmap: 117.025 Bytes. Update-Metadaten: 368 Bytes mit passender Version, Dateigröße und SHA-512-Prüfsumme.
 - Keine produktiven Datenbankänderungen und keine vollständige Live-Update-Installation einer alten Version auf diesem Rechner. Hot-Dev bleibt aktiv. Ignorierte Prüfdateien liegen in `tmp_release_1.0.22/`, Testprotokolle im Windows-Temp-Verzeichnis.
+
+7. September 2026, Queue-Reihenfolge und Transferzeile (noch nicht veröffentlicht):
+
+- Build und alle 635 Unit-Tests in 83 Testdateien erfolgreich. Neuer Produktionstest prüft die sichtbare Startreihenfolge trotz früher aktivierter Priorisierung, manuelles Umsortieren und das Überspringen nicht wartender Einträge.
+- Queue-UI-Prüfung in Deutsch/Englisch und Hell/Dunkel einschließlich einzeiliger Mengen-/Tempo-/Restzeitanzeige erfolgreich; Screenshots visuell geprüft. Der Animationstest liest Transitions nun direkt nach dem Umschalten aus, damit langsame Frames die kurze Animation nicht vor der Messung beenden.
+- Vollständiger Workspace-UI-Test und isolierter Einstellungen-Autosave-Test erfolgreich, keine gemeldeten Laufzeitfehler. Die Checkbox-Layoutprüfung verwendet nach Entfernen der Scheduler-Option den vorhandenen Duplikatschutz.
+- Lint ohne Fehler bei 15 bestehenden Warnungen; Security-/Public-Manifest-Prüfung erfolgreich. Keine Live-Downloads oder produktiven Datenbankänderungen für die Tests. Release-Version bleibt 1.0.22; Änderungen auf public-v1 für die nächste Veröffentlichung vorbereitet.

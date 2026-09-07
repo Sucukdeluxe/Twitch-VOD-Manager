@@ -900,7 +900,6 @@ function collectDownloadSettingsPayload(): Partial<AppConfig> {
         part_minutes: parseInt(byId<HTMLInputElement>('partMinutes').value, 10) || 120,
         parallel_downloads: parseInt(byId<HTMLSelectElement>('parallelDownloads').value, 10) || 1,
         performance_mode: byId<HTMLSelectElement>('performanceMode').value as 'stability' | 'balanced' | 'speed',
-        smart_queue_scheduler: byId<HTMLInputElement>('smartSchedulerToggle').checked,
         prevent_duplicate_downloads: byId<HTMLInputElement>('duplicatePreventionToggle').checked,
         persist_queue_on_restart: byId<HTMLInputElement>('persistQueueToggle').checked,
         auto_resume_queue_on_startup: byId<HTMLInputElement>('autoResumeQueueToggle').checked,
@@ -965,7 +964,6 @@ function getSettingsFingerprint(payload: Partial<AppConfig>): string {
         effective.part_minutes ?? 120,
         effective.parallel_downloads ?? 1,
         effective.performance_mode ?? 'balanced',
-        effective.smart_queue_scheduler !== false,
         effective.prevent_duplicate_downloads !== false,
         effective.persist_queue_on_restart !== false,
         effective.auto_resume_queue_on_startup === true,
@@ -1007,7 +1005,6 @@ function syncSettingsFormFromConfig(syncSecrets = true): void {
     byId<HTMLInputElement>('partMinutes').value = String((config.part_minutes as number) || 120);
     byId<HTMLSelectElement>('parallelDownloads').value = String((config.parallel_downloads as number) || 1);
     byId<HTMLSelectElement>('performanceMode').value = (config.performance_mode as string) || 'balanced';
-    byId<HTMLInputElement>('smartSchedulerToggle').checked = (config.smart_queue_scheduler as boolean) !== false;
     byId<HTMLInputElement>('duplicatePreventionToggle').checked = (config.prevent_duplicate_downloads as boolean) !== false;
     byId<HTMLInputElement>('persistQueueToggle').checked = (config.persist_queue_on_restart as boolean) !== false;
     byId<HTMLInputElement>('autoResumeQueueToggle').checked = (config.auto_resume_queue_on_startup as boolean) === true;
@@ -1151,7 +1148,6 @@ function initSettingsAutoSave(): void {
         'sidebarSplitViewToggle',
         'parallelDownloads',
         'performanceMode',
-        'smartSchedulerToggle',
         'duplicatePreventionToggle',
         'persistQueueToggle',
         'autoResumeQueueToggle',

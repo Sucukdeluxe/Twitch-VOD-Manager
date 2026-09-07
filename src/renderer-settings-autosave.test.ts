@@ -11,7 +11,7 @@ type Input = {
 
 const inputIds = [
     'clientId', 'clientSecret', 'sidebarSplitViewToggle', 'downloadMode', 'partMinutes', 'parallelDownloads',
-    'performanceMode', 'smartSchedulerToggle', 'duplicatePreventionToggle', 'persistQueueToggle',
+    'performanceMode', 'duplicatePreventionToggle', 'persistQueueToggle',
     'autoResumeQueueToggle', 'notifyEachCompletionToggle', 'streamlinkDisableAdsToggle', 'downloadChatReplayToggle',
     'captureLiveChatToggle', 'logStreamEventsToggle', 'autoResumeLiveRecordingToggle', 'autoMergeResumedPartsToggle',
     'deletePartsAfterMergeToggle', 'discordWebhookUrl', 'discordNotifyLiveStartToggle', 'discordNotifyLiveEndToggle',

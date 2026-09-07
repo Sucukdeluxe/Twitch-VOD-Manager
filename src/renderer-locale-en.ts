@@ -88,8 +88,6 @@ const UI_TEXT_EN = {
         performanceModeStability: 'Max Stability',
         performanceModeBalanced: 'Balanced',
         performanceModeSpeed: 'Max Speed',
-        smartSchedulerLabel: 'Enable smart queue scheduler',
-        smartSchedulerHint: 'Prefers shorter VODs and older queue entries first so the queue throughput stays steady. Disable to drain in strict insertion order.',
         sidebarSplitViewLabel: 'Show streamers and queue together',
         sidebarSplitViewHint: 'Splits the left sidebar evenly. Disable it to restore the Streamer and Queue switches.',
         streamerInvalid: 'Invalid Twitch username (4-25 chars, letters/digits/underscore).',

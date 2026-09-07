@@ -35,7 +35,6 @@ async function init(): Promise<void> {
     byId<HTMLSelectElement>('downloadMode').value = config.download_mode ?? 'full';
     byId<HTMLInputElement>('partMinutes').value = String(config.part_minutes ?? 120);
     byId<HTMLSelectElement>('performanceMode').value = (config.performance_mode as string) || 'balanced';
-    byId<HTMLInputElement>('smartSchedulerToggle').checked = (config.smart_queue_scheduler as boolean) !== false;
     byId<HTMLInputElement>('duplicatePreventionToggle').checked = (config.prevent_duplicate_downloads as boolean) !== false;
     byId<HTMLInputElement>('metadataCacheMinutes').value = String((config.metadata_cache_minutes as number) || 10);
     byId<HTMLInputElement>('vodFilenameTemplate').value = (config.filename_template_vod as string) || DEFAULT_VOD_TEMPLATE;

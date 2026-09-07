@@ -979,14 +979,14 @@ async function run() {
       window.setSettingsPane('downloads');
       window.changeLanguage('de');
       updateStatus(UI_TEXT.status.noLogin, false, 'public');
-      document.getElementById('smartSchedulerToggle').checked = true;
+      document.getElementById('duplicatePreventionToggle').checked = true;
     });
     await win.waitForTimeout(240);
     const downloadSettingsWide = await win.evaluate(() => {
       const tab = document.getElementById('settingsTab');
       const card = tab?.querySelector('.settings-card[data-settings-pane="downloads"]');
       const layout = card?.querySelector('.download-settings-layout');
-      const checkbox = card?.querySelector('#smartSchedulerToggle');
+      const checkbox = card?.querySelector('#duplicatePreventionToggle');
       const label = checkbox?.closest('.toggle-row')?.querySelector('span');
       const dot = document.getElementById('statusDot');
       const text = document.getElementById('statusText');

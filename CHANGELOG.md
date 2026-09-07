@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Start pending downloads in the visible queue order, including manually reordered entries. Retire the automatic short-job prioritization, including for existing configurations.
+- Keep transfer size, percentage, speed and remaining time on one compact line below 1 GB as well. Preserve wrapping for error messages and full values in tooltips.
+
 ## 1.0.22 - 2026-09-06
 
 - Show small round profile pictures beside streamer names in the sidebar, with an initial fallback when an image is unavailable.
