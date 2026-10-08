@@ -558,7 +558,7 @@ const UI_TEXT_EN = {
         dialogStartTime: 'Start time',
         dialogEnd: 'End:',
         dialogEndTime: 'End time',
-        dialogDuration: 'Duration: ',
+        dialogDuration: 'Selection duration',
         dialogPartLabel: 'Start part number (optional, for continuation):',
         dialogPartHint: 'Leave empty = part 1',
         dialogFormatLabel: 'Filename format:',
