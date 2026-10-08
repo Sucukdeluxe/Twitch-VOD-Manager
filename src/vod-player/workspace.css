@@ -27,13 +27,14 @@
 .vod-cut-fields .clip-modal-field { margin: 0; min-width: 0; width: 100%; max-width: 320px; }
 .vod-cut-fields > .clip-modal-field:last-child { justify-self: end; }
 .vod-cut-fields .clip-modal-time-row { display: flex; flex-direction: column; align-items: stretch; gap: 7px; margin: 0; }
-.vod-time-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 26px; }
+.vod-time-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; min-height: 32px; }
 .vod-time-heading label { display: inline-flex; align-items: center; gap: 7px; }
 .vod-time-heading label::before { display: inline-grid; place-items: center; width: 19px; height: 19px; border: 1px solid var(--border-soft); border-radius: 4px; font-size: 11px; font-weight: 600; color: var(--text); }
 #clipDialogStartTimeLabel::before { content: 'I'; }
 #clipDialogEndTimeLabel::before { content: 'O'; }
-.vod-set-boundary { padding: 3px 0; border: 0; background: transparent; color: var(--text-secondary); font-size: 12px; user-select: none; }
-.vod-set-boundary:hover { color: var(--text); text-decoration: underline; }
+.vod-set-boundary { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 6px 12px; border: 1px solid color-mix(in srgb, var(--text-secondary) 45%, var(--border-soft)); border-radius: 6px; background: var(--bg-elevated); color: var(--text); font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; user-select: none; }
+.vod-set-boundary:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--text); }
+.vod-set-boundary:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
 .vod-time-entry { display: flex; align-items: stretch; min-width: 0; height: 44px; border: 1px solid var(--border-soft); border-radius: 7px; background: var(--bg-elevated); }
 .vod-time-entry:focus-within { border-color: var(--text-secondary); box-shadow: 0 0 0 1px var(--text-secondary); }
 .vod-time-entry:has([aria-invalid="true"]) { border-color: var(--error); }
