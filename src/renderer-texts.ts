@@ -491,8 +491,6 @@ function applyLanguageToStaticUI(): void {
     if (typeof workspaceSync === 'function') {
         workspaceSync(activeTabId.replace(/Tab$/, ''));
     }
-    if (typeof updateCutterPlayUi === 'function') updateCutterPlayUi();
-    if (typeof updateCutterMuteUi === 'function') updateCutterMuteUi();
     if (typeof refreshCutterLocalizedUi === 'function') refreshCutterLocalizedUi();
     if (typeof renderCutterEditor === 'function') renderCutterEditor();
 }

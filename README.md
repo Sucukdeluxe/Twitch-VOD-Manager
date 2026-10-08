@@ -87,6 +87,8 @@ Public mode does not require a Twitch login. It supports public VOD discovery an
 
 The application checks GitHub Releases for newer versions. The Update control only appears when an update is actually available. Every release includes `latest.yml`, the Windows installer and its blockmap for the desktop updater.
 
+Local **Video Cutter** uses the same playback controls as VOD trimming, with exact seeking, playback speed, volume, frame stepping, cinema mode, picture-in-picture and fullscreen. Its single timeline combines thumbnails, audio waveform, purple excerpt boundaries and red excluded ranges. Add or edit exclusions, then confirm or cancel them; export and project saving remain unavailable while an exclusion is being edited. The compact editing panel keeps start time, output length and end time together, with export options beside the player.
+
 ## Development
 
 ### Requirements

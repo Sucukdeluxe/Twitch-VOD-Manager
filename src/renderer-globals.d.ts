@@ -542,6 +542,12 @@ interface ApiBridge {
 }
 
 interface Window {
+    LocalCutterPlayer: {
+        mount(element: HTMLElement, options: {
+            video: HTMLVideoElement; state: { language: string; active: boolean; enabled: boolean; duration: number };
+            play(): void; seek(time: number): void; frame(direction: number): void; format(time: number): string;
+        }): { update(state: { language: string; active: boolean; enabled: boolean; duration: number }): void; destroy(): void };
+    };
     VodPlayer: {
         planEditedVod: typeof import('./main/domain/vod-edit-plan').planEditedVod;
         mount(element: HTMLElement, options: {
