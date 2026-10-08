@@ -1442,7 +1442,7 @@ function getFreeDiskBytes(targetPath: string): number | null {
 
 function estimateRequiredDownloadBytes(item: QueueItem): number {
     const durationSeconds = item.customClip?.omissions
-        ? planEditedVod(item.customClip.durationSec, item.customClip.omissions.partDurationSec, item.customClip.omissions.ranges, item.customClip.startPart).duration
+        ? planEditedVod(item.customClip.durationSec, item.customClip.omissions.partDurationSec, item.customClip.omissions.ranges, item.customClip.startPart, item.customClip.omissions.selection).duration
         : Math.max(1, item.customClip?.durationSec || parseDuration(item.duration_str || '0s'));
 
     const bytesPerSecondByMode: Record<PerformanceMode, number> = {
@@ -6319,7 +6319,7 @@ async function downloadVOD(
         const clip = item.customClip;
         const omissions = clip.omissions!;
         if (!(await ensureFfmpegInstalled())) return { success: false, error: tBackend('ffmpegAutoInstallFailed') };
-        const plan = planEditedVod(clip.durationSec, omissions.partDurationSec, omissions.ranges, clip.startPart);
+        const plan = planEditedVod(clip.durationSec, omissions.partDurationSec, omissions.ranges, clip.startPart, omissions.selection);
         const editRegistration = queueProcessRegistry.register(item.id, 'post-processing', {});
         if (!editRegistration.accepted) return { success: false, error: tBackend('downloadCancelled') };
         const wait = async (): Promise<boolean> => !appShutdownStarted && isDownloading && downloadQueue.some(candidate => candidate.id === item.id)

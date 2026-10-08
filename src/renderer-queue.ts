@@ -10,10 +10,12 @@ function renderQueueOmissions(item: QueueItem): string {
     const clip = item.customClip;
     if (!clip?.omissions) return '';
     try {
-        const plan = window.VodPlayer.planEditedVod(clip.durationSec, clip.omissions.partDurationSec, clip.omissions.ranges, clip.startPart);
+        const plan = window.VodPlayer.planEditedVod(clip.durationSec, clip.omissions.partDurationSec, clip.omissions.ranges, clip.startPart, clip.omissions.selection);
         const label = currentLanguage === 'de' ? 'Auslassungen' : 'Exclusions';
+        const selection = clip.omissions.selection;
+        const selected = selection ? `<div>${currentLanguage === 'de' ? 'Ausschnitt' : 'Excerpt'}: ${escapeHtml(formatClipTime(selection.start))}–${escapeHtml(formatClipTime(selection.end))}</div>` : '';
         const summary = formatUiNumber(plan.parts.length) + (currentLanguage === 'de' ? ' Dateien · ' : ' files · ') + formatUiNumber(clip.omissions.partDurationSec / 60) + (currentLanguage === 'de' ? ' Minuten pro Part · ' : ' minutes per part · ') + formatClipTime(plan.duration);
-        return `<div class="queue-omissions"><strong>${escapeHtml(label)}: ${formatUiNumber(plan.omitted.length)}</strong><div>${escapeHtml(summary)}</div><div>${escapeHtml(plan.omitted.map(range => formatClipTime(range.start) + "–" + formatClipTime(range.end)).join(" · "))}</div></div>`;
+        return `<div class="queue-omissions">${selected}<strong>${escapeHtml(label)}: ${formatUiNumber(plan.omitted.length)}</strong><div>${escapeHtml(summary)}</div><div>${escapeHtml(plan.omitted.map(range => formatClipTime(range.start) + "–" + formatClipTime(range.end)).join(" · "))}</div></div>`;
     } catch { return ''; }
 }
 

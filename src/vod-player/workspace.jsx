@@ -34,12 +34,14 @@ function Workspace({ options, bind }) {
   const [undo, setUndo] = useState([]), [redo, setRedo] = useState([]), [previewing, setPreviewing] = useState(false);
   const previewPlayback = useRef(false), previewPlan = useRef(null);
   const outputSettings = options.outputSettings?.() || { startPart: 1 };
+  const selection = omitting ? modeRanges.current.excerpt : range;
+  const combined = omitting || omissions.length > 0 || editing !== null;
   const editedPlan = useMemo(() => {
-    try { return Number.isInteger(Number(partMinutes)) && Number(partMinutes) >= 1 && Number(partMinutes) <= 1440 ? planEditedVod(duration, Number(partMinutes) * 60, omissions, outputSettings.startPart) : null; }
+    try { return Number.isInteger(Number(partMinutes)) && Number(partMinutes) >= 1 && Number(partMinutes) <= 1440 ? planEditedVod(duration, Number(partMinutes) * 60, omissions, outputSettings.startPart, selection) : null; }
     catch { return null; }
-  }, [duration, partMinutes, omissions, outputRevision, outputSettings.startPart]);
-  const visibleOmissions = useMemo(() => { try { return omitting ? normalizeOmissions(omissions.filter((_, index) => index !== editing), duration) : []; } catch { return []; } }, [omitting, omissions, duration, editing]);
-  useEffect(() => { options.onOmissions?.(omitting ? { editing: editing !== null, config: editedPlan ? { version: 1, partDurationSec: Number(partMinutes) * 60, ranges: editedPlan.omitted } : null, plan: editedPlan } : null); }, [omitting, editedPlan, partMinutes, editing, options]);
+  }, [duration, partMinutes, omissions, outputRevision, outputSettings.startPart, selection.start, selection.end]);
+  const visibleOmissions = useMemo(() => { try { return normalizeOmissions(omissions.filter((_, index) => !omitting || index !== editing), duration).map(value => ({ start:Math.max(selection.start, value.start), end:Math.min(selection.end, value.end) })).filter(value => value.end > value.start); } catch { return []; } }, [omitting, omissions, duration, editing, selection.start, selection.end]);
+  useEffect(() => { options.onOmissions?.(combined ? { editing: editing !== null, config: editedPlan ? { version: 1, partDurationSec: Number(partMinutes) * 60, ranges: editedPlan.omitted, ...(selection.start > 0 || selection.end < duration ? { selection:{ ...selection } } : {}) } : null, plan: editedPlan } : null); }, [combined, editedPlan, partMinutes, editing, options, selection.start, selection.end, duration]);
   useEffect(() => {
     const modal = document.getElementById('clipModal');
     modal.classList.toggle('is-omitting', omitting);
@@ -72,8 +74,8 @@ function Workspace({ options, bind }) {
   function beginRange(index = -1, value) {
     if (editing !== null || (index === -1 && omissions.length >= 256)) return;
     stopPreview();
-    const start = Math.max(0, Math.min(Math.round(position * 1000) / 1000, duration - Math.min(60, duration)));
-    const next = value || (index === -1 ? { start, end:Math.min(duration, start + 60) } : omissions[index]);
+    const start = Math.max(selection.start, Math.min(Math.round(position * 1000) / 1000, selection.end - Math.min(60, selection.end - selection.start)));
+    const next = value || (index === -1 ? { start, end:Math.min(selection.end, start + 60) } : omissions[index]);
     setEditing(index); changeRange(next.start, next.end); setSeekRequest({ seconds:next.start, playing:false });
   }
   function preview() {
@@ -94,12 +96,13 @@ function Workspace({ options, bind }) {
     setChapterPreview(hoveredChapter || focusedChapter ? { recordingId: options.url, chapterId: hoveredChapter || focusedChapter } : null);
   }, [hoveredChapter, focusedChapter, options.url]);
   const changeRange = useCallback((start, end, interaction) => {
+    stopPreview();
     selectedPlayback.current = false; setSelectionPlaying(false);
     setRange({ start, end }); options.onRange(start, end);
     if (interaction?.source === 'pointer' && interaction.boundary === 'start') setSeekRequest({ seconds: start });
   }, [options]);
   const seek = useCallback(seconds => { setSeekRequest({ seconds }); }, []);
-  bind.current = { updateRange(start, end) { setRange({ start, end }); selectedPlayback.current = false; setSelectionPlaying(false); }, seek, refreshOutput() { setOutputRevision(value => value + 1); }, setInputValid };
+  bind.current = { updateRange(start, end) { stopPreview(); setRange({ start, end }); selectedPlayback.current = false; setSelectionPlaying(false); }, seek, refreshOutput() { setOutputRevision(value => value + 1); }, setInputValid };
   useEffect(() => {
     const id = requestId;
     let closed = false;
@@ -142,9 +145,11 @@ function Workspace({ options, bind }) {
     setPosition(seconds);
     if (previewPlayback.current) {
       const plan = previewPlan.current;
-      const last = plan?.ranges.at(-1);
-      if (!last || seconds >= last.end - .02) {
+      const first = plan?.ranges[0], last = plan?.ranges.at(-1);
+      if (!first || !last || seconds >= last.end - .02) {
         previewPlayback.current = false; setPreviewing(false); setSeekRequest({ playing:false });
+      } else if (seconds < first.start) {
+        setSeekRequest({ seconds:first.start });
       } else {
         const excluded = plan.omitted.find(item => seconds >= item.start && seconds < item.end);
         if (excluded) setSeekRequest({ seconds:excluded.end });
@@ -162,6 +167,7 @@ function Workspace({ options, bind }) {
       which === 'end' ? Math.max(value, range.start + .001) : range.end);
   }
   function playRange() {
+    if (omissions.length) { preview(); return; }
     if (selectionPlaying) { selectedPlayback.current = false; setSelectionPlaying(false); setSeekRequest({ playing:false }); return; }
     selectedPlayback.current = true; setSelectionPlaying(true);
     setSeekRequest({ seconds:range.start, playing:true });
@@ -190,18 +196,18 @@ function Workspace({ options, bind }) {
         {metadata.chaptersStatus === 'unavailable' && <p className="vod-history-status">{t('historyNoChapterSource')}</p>}
       </>}
     </div>, document.getElementById('clipHistory'))}
-    {createPortal(<OmissionModes active={omitting} onChange={changeMode} language={language}/>, document.getElementById('clipEditMode'))}
-    {createPortal(<OmissionEditor active={omitting} ranges={omissions} plan={editedPlan} range={omitting ? range : modeRanges.current.omission} duration={duration} language={language} editing={editing}
+    {createPortal(<OmissionModes active={omitting} onChange={changeMode} language={language} count={omissions.length}/>, document.getElementById('clipEditMode'))}
+    {createPortal(<OmissionEditor active={omitting} selection={selection} onSelection={() => changeMode(false)} ranges={omissions} plan={editedPlan} range={omitting ? range : modeRanges.current.omission} duration={duration} language={language} editing={editing}
       onNew={() => beginRange()} onEdit={beginRange} onRange={changeRange} onCancel={() => setEditing(null)}
       onApply={value => commitRanges(editing === -1 ? [...omissions, value] : omissions.map((item, index) => index === editing ? value : item))}
       onRemove={index => commitRanges(omissions.filter((_, at) => at !== index))} onUndo={() => restoreRanges('undo')} onRedo={() => restoreRanges('redo')}
       canUndo={undo.length > 0} canRedo={redo.length > 0} previewing={previewing} onPreview={preview} canPreview={Boolean(session)} root={host}
       filename={part => options.filename?.(part) || ''}/>, document.getElementById('clipOmissionPanel'))}
     {['start', 'end'].map(which => createPortal(<button type="button" className="vod-set-boundary" disabled={!session} aria-label={which === 'start' ? text.markStart : text.markEnd} title={which === 'start' ? text.markStart : text.markEnd} onClick={() => mark(which)}>{text.setHere}</button>, document.getElementById(which === 'start' ? 'clipMarkStart' : 'clipMarkEnd'), which))}
-    {!omitting && createPortal(<><CutTimeline chapters={chapters} duration={Math.max(.1, duration)} range={range} position={position} onChange={changeRange} onSeek={seek} text={text}
+    {!omitting && createPortal(<><CutTimeline omissions={visibleOmissions} chapters={chapters} duration={Math.max(.1, duration)} range={range} position={position} onChange={changeRange} onSeek={seek} text={text}
       finePreview={{root:host, parts, broadcastStarted:started, chapters, titleHistory:metadata?.titleHistory || [], vodTitle:metadata?.title || options.title, t}}/>
     <div className="vod-mark-actions" title={text.keyboard}>
-      <button type="button" className="btn-secondary" disabled={!session} onClick={playRange}>{selectionPlaying ? text.stopRange : text.playRange}</button>
+      <button type="button" className="btn-secondary" disabled={!session} onClick={playRange}>{selectionPlaying || previewing ? text.stopRange : text.playRange}</button>
       <button type="button" className="btn-secondary" onClick={() => changeRange(0, duration)}>{text.full}</button>
     </div>
 </>, document.getElementById('clipSelectionTools'))}

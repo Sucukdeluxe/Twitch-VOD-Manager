@@ -105,7 +105,7 @@ async function finalSplitTime(inputs: Array<{ name: string; duration: number }>,
 }
 
 export async function downloadEditedVod(options: EditedVodOptions): Promise<string[]> {
-    const plan = planEditedVod(options.duration, options.omissions.partDurationSec, options.omissions.ranges, options.startPart);
+    const plan = planEditedVod(options.duration, options.omissions.partDurationSec, options.omissions.ranges, options.startPart, options.omissions.selection);
     if (!plan.parts.length) throw new Error('No remaining VOD content');
     const workspace = editedVodWorkspace(options.folder, options.id);
     await fs.mkdir(workspace, { recursive: true });

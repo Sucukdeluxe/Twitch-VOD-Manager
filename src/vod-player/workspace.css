@@ -284,3 +284,6 @@
   #clipModal.is-omitting .vod-omission-list { height:146px; flex:auto; }
   .vod-filename-options { margin-top:12px; }
 }
+
+.vod-mode-count { min-width:18px; padding:1px 5px; border-radius:4px; background:var(--bg-hover); font-variant-numeric:tabular-nums; }
+.vod-omission-scope { font-variant-numeric:tabular-nums; }

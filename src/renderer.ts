@@ -1678,16 +1678,22 @@ function getClipStartPart(): number {
 function updateClipOmissionState(): void {
     const isEditing = clipOmissionState !== null;
     const plan = clipOmissionState?.plan;
-    byId('clipDialogDurationLabel').textContent = isEditing ? (currentLanguage === 'de' ? 'Markierter Bereich' : 'Selected range') : UI_TEXT.clips.dialogDuration;
+    byId('clipDialogDurationLabel').textContent = UI_TEXT.clips.dialogDuration;
     byId('clipQueueHint').textContent = isEditing
         ? plan && plan.parts.length ? (currentLanguage === 'de' ? `${formatUiNumber(plan.parts.length)} ${plan.parts.length === 1 ? 'Datei' : 'Dateien'} · ${formatClipTime(plan.duration)} · Auslassungen angewendet` : `${formatUiNumber(plan.parts.length)} ${plan.parts.length === 1 ? 'file' : 'files'} · ${formatClipTime(plan.duration)} · Exclusions applied`)
             : (currentLanguage === 'de' ? 'Keine gültige Ausgabe geplant.' : 'No valid output planned.')
         : UI_TEXT.clips.queueHint;
     const start = parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value), end = parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
+    const validRange = Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start && end <= clipTotalSeconds;
+    if (plan && validRange) {
+        const milliseconds = Math.round(plan.duration * 1000);
+        byId('clipDurationTime').textContent = formatSecondsToTime(Math.floor(milliseconds / 1000));
+        byId('clipDurationFraction').textContent = '.' + String(milliseconds % 1000).padStart(3, '0');
+    }
     const invalidPart = !Number.isInteger(getClipStartPart());
     byId('clipStartPart').setAttribute('aria-invalid', String(invalidPart));
     byId<HTMLButtonElement>('clipDialogConfirmBtn').disabled = clipQueueInFlight || invalidPart || Boolean(clipOmissionState?.editing)
-        || (isEditing ? !plan?.parts.length : !(Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start && end <= clipTotalSeconds));
+        || !validRange || (isEditing && !plan?.parts.length);
     if (invalidPart) byId('clipQueueHint').textContent = currentLanguage === 'de' ? 'Startnummer: eine ganze Zahl von 1 bis 100.000 eingeben.' : 'Starting number: enter a whole number from 1 to 100,000.';
     else if (clipOmissionState?.editing) byId('clipQueueHint').textContent = currentLanguage === 'de' ? 'Bereich zuerst bestätigen oder die Bearbeitung abbrechen.' : 'Confirm the range or cancel editing first.';
     else if (clipQueueError) byId('clipQueueHint').textContent = clipQueueError;
@@ -1732,9 +1738,11 @@ function openClipDialog(url: string, title: string, date: string, streamer: stri
         partMinutes: config.part_minutes || 60,
         outputSettings: () => ({ startPart: getClipStartPart() }),
         filename: previewEditedFilename,
-        onOmissions(state) { clipOmissionState = state; updateClipOmissionState(); },
-        onMode(active) {
-            if (active) {
+        onOmissions(state) {
+            const changed = Boolean(state) !== Boolean(clipOmissionState);
+            clipOmissionState = state;
+            if (!changed) { updateClipOmissionState(); return; }
+            if (state) {
                 clipSavedNaming = { format: getSelectedFilenameFormat(), template: byId<HTMLInputElement>('clipFilenameTemplate').value };
                 query<HTMLInputElement>('input[name="filenameFormat"][value="template"]').checked = true;
                 byId<HTMLInputElement>('clipFilenameTemplate').value = config.filename_template_parts || DEFAULT_PARTS_TEMPLATE;
