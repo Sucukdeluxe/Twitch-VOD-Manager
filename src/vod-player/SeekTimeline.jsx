@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { CategoryColors } from "./CategoryColors.jsx";
 import { RangeMarkers } from "./CutTimeline.jsx";
 import { FineSeekPreview } from "./FineSeekPreview.jsx";
 import { ChapterRangePreview } from "./ChapterRangePreview.jsx";
-import { chapterAt, chapterColor, chapterGradient } from "./chapters.js";
+import { chapterAt, chapterGradient } from "./chapters.js";
 import { timeLabel, remapTimelineTime } from "./timeline.js";
 import { beginFineSeek, alignFineSeek, moveFineSeek, finishFineSeek, pointerTime, fineWindow, clampTime } from "./fine-seek.js";
 import "./fine-seek.css";
@@ -76,14 +77,7 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
   const currentViewerGap = viewerGapAt(viewerGaps, streamTimestamp(previewParts, broadcastStarted, value));
   return <div className="archive-timeline-track" style={{"--category-track-height":`${Math.round(6 * pixelRatio) / pixelRatio}px`}}>
     <ViewerHistory curves={drag.current?.viewerCurves ?? viewerCurves}/>
-    {gradient&&<svg className="category-track" viewBox="0 0 1000 6" preserveAspectRatio="none" shapeRendering="crispEdges" aria-hidden="true">
-      <rect width="1000" height="6" fill="#777e8a"/>
-      {chapters.map(chapter=>{
-        const ending=chapter===chapters.at(-1) && Number.isFinite(endpoint) ? endpoint : chapter.end;
-        const start=Math.max(0,Math.min(1000,chapter.start/total*1000)),end=Math.max(start,Math.min(1000,ending/total*1000));
-        return <rect key={chapter.id} x={start} y="0" width={end-start} height="6" fill={chapterColor(chapter,chapters)}/>;
-      })}
-    </svg>}
+    {gradient && <CategoryColors className="category-track" height={6} chapters={chapters} to={total} endpoint={endpoint} fallback="#777e8a"/>}
     <span className="timeline-title-markers" aria-hidden="true">{titleMarkers(titleEvents,total,trackWidth).map(marker=><i key={marker.id} className={marker.count>1?'is-grouped':undefined} style={{left:`${marker.fraction*100}%`}}/>)}</span>
     <ChapterRangePreview range={highlightedRange} suppressed={Boolean(preview)} chapters={chapters} fallback={t("categoryUnavailable")}/>
     {cutRange && <RangeMarkers compact trackWidth={trackWidth - 14} duration={total} range={cutRange} onChange={onCutRange} text={cutText} onInteraction={cancel} onPreviewChange={setRangePreviewOpen}

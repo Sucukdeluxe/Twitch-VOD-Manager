@@ -122,6 +122,7 @@
     "src/vod-player/FineSeekPreview.jsx",
     "src/vod-player/PlayerControls.jsx",
     "src/vod-player/SeekTimeline.jsx",
+    "src/vod-player/CategoryColors.jsx",
     "src/vod-player/TitleHistory.jsx",
     "src/vod-player/ViewerEye.jsx",
     "src/vod-player/ViewerHistory.jsx",

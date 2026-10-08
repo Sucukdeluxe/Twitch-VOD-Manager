@@ -6,7 +6,7 @@
 .fine-seek-heading .archive-seek-preview.chapter-preview.has-cover { position:absolute; inset:0; left:0!important; transform:none; width:100%!important; max-width:100%; height:80px; background:none; border:0; box-shadow:none; animation:none; }
 .fine-seek-heading .chapter-preview-layer { padding:8px 0; }
 .fine-seek-ruler { position:relative; height:38px; border-top:1px solid #7b8495; background:linear-gradient(#ffffff0a,#ffffff00); }
-.fine-seek-segment { position:absolute; top:0; height:5px; }
+.fine-seek-colors { position:absolute; inset:0 0 auto; width:100%; height:5px; pointer-events:none; }
 .fine-seek-tick { position:absolute; top:7px; width:1px; height:6px; background:#7d8798; }
 .fine-seek-tick.is-major { height:10px; background:#c2c9d5; }
 .fine-seek-tick small { position:absolute; top:13px; left:0; transform:translateX(-50%); color:#c2c9d5; font-size:12px; white-space:nowrap; }

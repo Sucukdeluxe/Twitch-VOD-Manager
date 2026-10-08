@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useFloating, offset, flip, shift, size, autoUpdate, FloatingPortal, useTransitionStyles } from "@floating-ui/react";
+import { CategoryColors } from "./CategoryColors.jsx";
 import { ChapterPreview } from "./ChapterPreview.jsx";
 import { chapterAt, chapterColor } from "./chapters.js";
 import { timeLabel } from "./timeline.js";
@@ -52,10 +53,7 @@ export function FineSeekPreview({ preview, anchorRef, root, total, parts = [], b
           <div className="fine-seek-heading"><ChapterPreview fraction={.5} chapter={shownChapter} time={time} timestamp={timestamp} viewer={shownViewerGap ? <span className="viewer-count">{t("viewerMeasurementMissing")}</span> : viewerSample ? <ViewerCount sample={viewerSample} t={t}/> : null} fallback={t("categoryUnavailable")} color={chapterColor(shownChapter,chapters)}/></div>
           {(titleHistory.length>0 || vodTitle)&&<div className="fine-seek-title"><span>{shownTitle ? shownTitle.title || t('historyEmptyTitle') : vodTitle ? `${t('vodTitle')}: ${vodTitle}` : t('historyTitleUnknown')}</span></div>}
           <div ref={ruler} className="fine-seek-ruler">
-            {chapters.filter(c=>c.end>shown.window.start&&c.start<shown.window.end).map(c=>{
-              const start=Math.max(0,c.start,shown.window.start),end=Math.min(total,c.end,shown.window.end);
-              return <span key={c.id} className="fine-seek-segment" style={{left:`${(start-shown.window.start)/shown.window.span*100}%`,width:`${(end-start)/shown.window.span*100}%`,background:chapterColor(c,chapters)}}/>;
-            })}
+            <CategoryColors className="fine-seek-colors" height={5} chapters={chapters} from={shown.window.start} to={shown.window.end} endpoint={endpoint}/>
             {boundaries.filter(b=>b>=shown.window.start&&b<=shown.window.end).map(b=><i key={b} className="fine-seek-boundary" style={{left:`${(b-shown.window.start)/shown.window.span*100}%`}}/>)}
             {titleEvents.filter(event=>event.kind==='changed'&&event.status==='ready'&&event.seconds>=shown.window.start&&event.seconds<=shown.window.end).map(event=><i key={event.id} className="fine-seek-title-marker" style={{left:`${(event.seconds-shown.window.start)/shown.window.span*100}%`}}/>)}
             {fineTicks(shown.window,panelWidth).filter(tick=>tick.time>=0&&tick.time<=total).map(tick=><span key={tick.time} className={`fine-seek-tick${tick.major?" is-major":""}`} style={{left:`${tick.fraction*100}%`}}>{tick.major&&tick.fraction>.07&&tick.fraction<.93&&<small>{timeLabel(tick.time)}</small>}</span>)}

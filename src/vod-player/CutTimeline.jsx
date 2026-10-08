@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, ZoomIn } from 'lucide-react';
-import { chapterColor } from './chapters.js';
+import { CategoryColors } from './CategoryColors.jsx';
 import { timeLabel } from './timeline.js';
 import { beginFineSeek, alignFineSeek, moveFineSeek, fineWindow } from './fine-seek.js';
 import { FineSeekPreview } from './FineSeekPreview.jsx';
@@ -133,15 +133,11 @@ export function CutTimeline({ duration, range, position, chapters, onChange, onS
     </div>, document.getElementById('clipTimelineView'))}
     <div ref={track} className="vod-selection-track" onClick={seekAt}>
       <div className="vod-selection-chapters" aria-hidden="true">
-        <svg className="vod-selection-colors" viewBox="0 0 1000 38" preserveAspectRatio="none" shapeRendering="crispEdges">
-          {visibleChapters.map(({ chapter, start, end }) => <g key={chapter.id} fill={chapterColor(chapter, chapters)}>
-            <rect x={start * 1000} width={(end - start) * 1000} height="38" fillOpacity=".12"/>
-            <rect x={start * 1000} width={(end - start) * 1000} height="3"/>
-          </g>)}
-        </svg>
+        <CategoryColors className="vod-selection-colors" chapters={chapters} from={from} to={to} opacity={.12}/>
         {visibleChapters.map(({ chapter, start, end }) => <span key={chapter.id} style={{ left: `${start * 100}%`, width: `${(end - start) * 100}%` }}
           title={`${chapter.name} · ${cutTime(chapter.start)} – ${cutTime(chapter.end)}`}><span>{chapter.name}</span></span>)}
       </div>
+      <CategoryColors className="vod-selection-stripe" height={3} chapters={chapters} from={from} to={to}/>
       <RangeMarkers duration={duration} range={range} onChange={onChange} text={text} from={from} to={to} finePreview={finePreview}/>
       {position >= from && position <= to && <i className="vod-selection-playhead" title={cutTime(position)} style={{ left: `${(position - from) / span * 100}%` }}/>} 
     </div>
