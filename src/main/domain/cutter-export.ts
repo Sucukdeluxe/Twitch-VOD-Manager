@@ -180,7 +180,8 @@ function createFfmpegArgs(inputFile: string, outputFile: string, filterComplex: 
 }
 
 export function parseCutterHardwareEncoders(ffmpegEncodersOutput: string): CutterHardwareEncoder[] {
-    return hardwareEncoders.filter((encoder) => new RegExp(`\\b${encoder}\\b`, 'i').test(ffmpegEncodersOutput));
+    const available = new Set(ffmpegEncodersOutput.toLowerCase().match(/\bh264_(?:nvenc|qsv|amf)\b/g) || []);
+    return hardwareEncoders.filter(encoder => available.has(encoder));
 }
 
 export function getCutterHardwareProbeArguments(encoder: CutterHardwareEncoder): string[] {

@@ -157,6 +157,6 @@
     "src/workspace-refinements.css",
     "src/workspace.css",
     "tsconfig.json",
-    "vitest.config.ts"
+    "vitest.config.mjs"
   ]
 }

@@ -42,7 +42,15 @@ export function normalizeRendererQueueInput(value: unknown): RendererQueueInput 
     const date = normalizedString(raw.date, 100);
     const streamer = normalizedString(raw.streamer, 25);
     const duration = normalizedString(raw.duration_str, 64);
-    if (!url || !/^https:\/\/(?:www\.)?twitch\.tv\/videos\/\d+(?:[/?#].*)?$/i.test(url)) return null;
+    if (!url) return null;
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port) return null;
+        if (parsed.hostname !== 'twitch.tv' && parsed.hostname !== 'www.twitch.tv') return null;
+        if (!/^\/videos\/\d+(?:\/|$)/i.test(parsed.pathname)) return null;
+    } catch {
+        return null;
+    }
     if (!title || !date || !streamer || !/^[a-z0-9_]+$/i.test(streamer) || !duration) return null;
     const customClip = raw.customClip === undefined ? undefined : normalizeCustomClip(raw.customClip);
     if (raw.customClip !== undefined && !customClip) return null;

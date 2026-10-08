@@ -89,7 +89,15 @@ export function resolveMergeArtifactRoot(item: QueueItem, currentDownloadRoot: s
 }
 
 function isInternalMergeArtifact(filePath: string): boolean {
-    return /^(?:(?:merge_tmp_\d+_\d+|merged_\d+|\.merge_output_\d+_\d+)(?:_\d+)?|\.merge_split_[A-Za-z0-9_-]+)\.mp4$/i.test(path.basename(filePath));
+    const name = path.basename(filePath).toLowerCase();
+    if (/^\.merge_split_[a-z0-9_-]+\.mp4$/.test(name)) return true;
+    if (!name.endsWith('.mp4')) return false;
+    const prefix = ['merge_tmp_', 'merged_', '.merge_output_'].find(value => name.startsWith(value));
+    if (!prefix) return false;
+    const identifiers = name.slice(prefix.length, -4).split('_');
+    const minimum = prefix === 'merged_' ? 1 : 2;
+    return identifiers.length >= minimum && identifiers.length <= minimum + 1
+        && identifiers.every(value => /^\d+$/.test(value));
 }
 
 function removeArtifact(filePath: string, downloadRoot: string, kind: ArtifactKind): RemovalResult {

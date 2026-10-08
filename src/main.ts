@@ -51,7 +51,6 @@ import {
     normalizeMetadataCacheMinutes,
     normalizePerformanceMode,
     isPlainObject,
-    VALID_STREAMLINK_QUALITIES,
     DEFAULT_METADATA_CACHE_MINUTES,
     DEFAULT_PERFORMANCE_MODE,
     type PerformanceMode,
@@ -133,10 +132,10 @@ import {
     getStreamlinkCommand, getFFmpegPath, getFFprobePath,
     refreshBundledToolPaths, ensureStreamlinkInstalled, ensureFfmpegInstalled,
     getManagedToolStatuses, repairManagedTools, resetManagedTools,
-    canExecute, canExecuteCommand,
+    canExecuteCommand,
     cacheVerifiedStreamlinkCommand,
-    cacheVerifiedFfmpegCommands, isVerifiedFfmpegCommands,
-    invalidateVerifiedToolCaches, setManagedToolExecutionObserver
+    cacheVerifiedFfmpegCommands,
+    setManagedToolExecutionObserver
 } from './tools';
 
 // ==========================================
@@ -175,7 +174,6 @@ const DEFAULT_FILENAME_TEMPLATE_CLIP = '{date}_{part}.mp4';
 // DEFAULT_METADATA_CACHE_MINUTES + DEFAULT_PERFORMANCE_MODE kommen aus
 // ./main/domain/config-normalize (Single-Source-Of-Truth, vermeidet
 // Drift wenn man eine der Defaults aendert).
-const QUEUE_SAVE_DEBOUNCE_MS = 250;
 const STARTUP_TOOLS_PROVISION_DELAY_MS = 15 * 1000;
 const MIN_FREE_DISK_BYTES = 128 * 1024 * 1024;
 const DEBUG_LOG_FLUSH_INTERVAL_MS = 1000;
@@ -918,7 +916,6 @@ const currentCutterFrameFiles = new Set<string>();
 // started iterating activeDownloads and adding each item to that Set; it
 // was removed in the 4.5.27 cleanup.
 let activeQueueItemId: string | null = null;
-let downloadStartTime = 0;
 let downloadedBytes = 0;
 // Per-item tracking for parallel downloads
 interface ActiveDownloadTracking {
@@ -1314,23 +1311,11 @@ function isLikelyVodUrl(url: string): boolean {
 
 function parseFrameRate(rawFrameRate: string | undefined): number {
     const fallback = 30;
-    const value = (rawFrameRate || '').trim();
-    if (!value) return fallback;
-
-    if (/^\d+(\.\d+)?$/.test(value)) {
-        const numeric = Number(value);
-        return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
-    }
-
-    const ratio = value.match(/^(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/);
-    if (!ratio) return fallback;
-
-    const numerator = Number(ratio[1]);
-    const denominator = Number(ratio[2]);
-    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
-        return fallback;
-    }
-
+    const parts = (rawFrameRate || '').trim().split('/');
+    if (parts.length > 2 || parts.some(part => !/^\d+$/.test(part) && !/^\d+\.\d+$/.test(part))) return fallback;
+    const numerator = Number(parts[0]);
+    const denominator = parts.length === 2 ? Number(parts[1]) : 1;
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return fallback;
     const fps = numerator / denominator;
     return Number.isFinite(fps) && fps > 0 ? fps : fallback;
 }
@@ -2525,7 +2510,7 @@ async function getStreamerProfile(login: string, forceRefresh = false): Promise<
                     currentTitle = live.title || null;
                     currentGame = live.gameName || null;
                 }
-            } catch (_) { /* best-effort */ }
+            } catch { /* best-effort */ }
         }
 
         // Embed the avatar AND banner bytes as data URLs in parallel.
@@ -4102,7 +4087,6 @@ async function downloadVODPart(
         activeDownloads.set(itemId, itemTracking);
         if (queuePaused) output.pause();
 
-        downloadStartTime = itemTracking.startTime;
         downloadedBytes = 0;
         let lastBytes = 0;
         let lastTime = Date.now();
@@ -4553,7 +4537,7 @@ async function runAutoVodPoll(): Promise<number> {
                                 { name: 'URL', value: vod.url, inline: false }
                             ]
                         });
-                    } catch (_) { /* ignore webhook errors */ }
+                    } catch { /* ignore webhook errors */ }
                 }
             }
         }
@@ -5332,7 +5316,6 @@ function searchArchive(filter: ArchiveSearchFilter): ArchiveSearchResult {
         const streamerFolder = entry.name;
         const streamerRoot = path.join(root, streamerFolder);
         const filesInTree: Array<{ fullPath: string; rel: string; name: string; size: number; mtimeMs: number; type: ArchiveFileType }> = [];
-        const accum: { files: ArchiveFileRecord[] } = { files: [] };
         // We re-walk here instead of reusing walkForArchiveStats because
         // we need the full path + rel path on each file, not just the
         // type/size aggregates. The cost is one redundant tree walk per
@@ -5547,9 +5530,17 @@ const DISCORD_EMBED_COLORS: Record<DiscordEmbedColor, number> = {
 };
 
 function isAcceptableDiscordWebhook(url: string): boolean {
-    const trimmed = (url || '').trim();
-    if (!trimmed) return false;
-    return /^https:\/\/(?:[a-z]+\.)?discord(?:app)?\.com\/api\/webhooks\//i.test(trimmed);
+    try {
+        const parsed = new URL((url || '').trim());
+        if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port) return false;
+        const labels = parsed.hostname.split('.');
+        const domain = labels.slice(-2).join('.');
+        if (domain !== 'discord.com' && domain !== 'discordapp.com') return false;
+        if (labels.length !== 2 && (labels.length !== 3 || !/^[a-z]+$/.test(labels[0]))) return false;
+        return parsed.pathname.toLowerCase().startsWith('/api/webhooks/');
+    } catch {
+        return false;
+    }
 }
 
 async function sendDiscordWebhook(payload: {
