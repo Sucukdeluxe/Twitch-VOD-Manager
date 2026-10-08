@@ -216,7 +216,7 @@
 #clipModal.is-omitting .vod-cut-fields, #clipModal.is-omitting .vod-mark-actions, #clipModal.is-omitting .vod-boundary-actions, #clipModal.is-omitting #clipTimeHint { display:none; }
 #clipModal.is-omitting .vod-cut-heading { align-items:center; gap:12px; margin-bottom:10px; }
 #clipModal.is-omitting .vod-cut-heading h3 { font-size:14px; }
-#clipModal.is-omitting .vod-cut-controls { margin-top:12px; }
+#clipModal.is-omitting .vod-cut-controls, #clipModal.is-omitting #clipTimelineView { display:none; }
 #clipModal.is-omitting .vod-range-band { background:#f13e6233; border-color:#ed6982; }
 #clipModal.is-omitting .vod-range-handle { background:#b32d45; border-color:#f391a4; }
 #clipModal.is-omitting .vod-range-handle:hover { background:#d43b55; }
