@@ -62,6 +62,9 @@
             <div class="vod-cut-layout">
                 <section class="vod-cut-stage"><div id="clipPlayer"></div><p id="clipSourceQualityHint" class="clip-preview-hint"></p></section>
                 <aside class="vod-cut-sidebar">
+                    <div id="clipSidebarTabs"></div>
+                    <section id="clipHistoryPanel" role="tabpanel" aria-labelledby="clipHistoryTab"><div id="clipHistory"></div></section>
+                    <section id="clipCutPanel" role="tabpanel" aria-labelledby="clipCutTab" hidden>
                     <h3 id="clipSelectionTitle">Schnittbereich</h3>
             <div class="clip-modal-field">
                 <label class="clip-modal-label" hidden id="clipDialogStartLabel" for="clipStartSlider">Start:</label>
@@ -123,6 +126,7 @@
             </div>
 
                     </details>
+                    </section>
                 </aside>
             </div>
             <footer class="vod-cut-footer"><span id="clipQueueHint">Der gewählte Ausschnitt wird zur Download-Queue hinzugefügt.</span><button type="button" class="btn-secondary" id="clipCancelBtn" onclick="closeClipDialog()">Schließen</button><button type="button" class="btn-pill success" id="clipDialogConfirmBtn" onclick="confirmClipDialog()">Zur Queue hinzufügen</button></footer>

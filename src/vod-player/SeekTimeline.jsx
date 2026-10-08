@@ -13,7 +13,7 @@ import { ViewerHistory, ViewerCount } from "./ViewerHistory.jsx";
 import { projectTitles, titleAt, titleMarkers } from "./title-history.js";
 import "./title-history.css";
 
-export function SeekTimeline({ total:availableTotal, position, parts, broadcastStarted, viewerHistory, viewerGaps, titleHistory:availableTitles = [], viewerCurves = [], chapters:availableChapters, endpoint:availableEndpoint, highlightedRange, root, onCommit, onScrub, onPreview, t }) {
+export function SeekTimeline({ total:availableTotal, position, parts, broadcastStarted, viewerHistory, viewerGaps, titleHistory:availableTitles = [], vodTitle, viewerCurves = [], chapters:availableChapters, endpoint:availableEndpoint, highlightedRange, root, onCommit, onScrub, onPreview, t }) {
   const locale = t("locale");
   const streamClock = useMemo(() => createStreamClock(locale), [locale]);
   const input = useRef(null), ruler = useRef(null), drag = useRef(null), lastPreview = useRef(null), callbacks = useRef(null);
@@ -140,7 +140,7 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
       <div ref={refs.setFloating} className="fine-seek-position" style={floatingStyles} aria-hidden="true">
         <div className={`fine-seek-preview${shown.fine?" is-fine":""}${shown.snapped?" is-snapped":""}`} style={styles}>
           <div className="fine-seek-heading"><ChapterPreview fraction={.5} chapter={shownChapter} time={time} timestamp={timestamp} viewer={shownViewerGap ? <span className="viewer-count">{t("viewerMeasurementMissing")}</span> : viewerSample ? <ViewerCount sample={viewerSample} t={t}/> : null} fallback={t("categoryUnavailable")} color={chapterColor(shownChapter,chapters)}/></div>
-          {titleHistory.length>0&&<div className="fine-seek-title"><span>{shownTitle ? shownTitle.title || t('historyEmptyTitle') : t('historyTitleUnknown')}</span></div>}
+          {(titleHistory.length>0 || vodTitle)&&<div className="fine-seek-title"><span>{shownTitle ? shownTitle.title || t('historyEmptyTitle') : vodTitle ? `${t('vodTitle')}: ${vodTitle}` : t('historyTitleUnknown')}</span></div>}
           <div ref={ruler} className="fine-seek-ruler">
             {chapters.filter(c=>c.end>shown.window.start&&c.start<shown.window.end).map(c=>{
               const start=Math.max(0,c.start,shown.window.start),end=Math.min(total,c.end,shown.window.end);

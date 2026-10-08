@@ -112,6 +112,7 @@ contextBridge.exposeInMainWorld('api', {
     getUserId: (username: string) => ipcRenderer.invoke('get-user-id', username),
     getVODs: (userId: string, forceRefresh: boolean = false) => ipcRenderer.invoke('get-vods', userId, forceRefresh),
     openVodPlayback: (request: { id: string; url: string }) => ipcRenderer.invoke('open-vod-playback', request),
+    getVodTimeline: (request: { id: string; url: string }) => ipcRenderer.invoke('get-vod-timeline', request),
     closeVodPlayback: (id: string) => ipcRenderer.invoke('close-vod-playback', id),
 
     // Queue

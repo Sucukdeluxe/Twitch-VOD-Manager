@@ -469,6 +469,7 @@ interface ApiBridge {
     getStreamerDisplayNames(logins: string[]): Promise<Record<string, string>>;
     getVodStoryboard(vodId: string): Promise<VodStoryboard | null>;
     openVodPlayback(request: { id: string; url: string }): Promise<{ id: string; sourceUrl: string; quality: string } | null>;
+    getVodTimeline(request: { id: string; url: string }): Promise<import('./main/domain/vod-timeline').VodTimeline | null>;
     closeVodPlayback(id: string): Promise<void>;
     getLiveStatusSnapshot(): Promise<Record<string, boolean>>;
     onLiveStatusBatchUpdate(callback: (info: { changes: Array<{ login: string; isLive: boolean }> }) => void): void;

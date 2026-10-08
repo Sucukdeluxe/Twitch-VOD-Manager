@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { ArchivePlayer } from './ArchivePlayer.jsx';
+import { TitleHistory } from './TitleHistory.jsx';
+import { ListVideo, Scissors } from 'lucide-react';
 import { playerTexts } from './texts.js';
 import { timeLabel } from './timeline.js';
 import './player.css';
@@ -50,13 +52,27 @@ function Workspace({ options, bind }) {
   const language = options.language === 'en' ? 'en' : 'de';
   const text = labels[language];
   const t = useCallback(key => playerTexts[language][key] || key, [language]);
+  const [metadata, setMetadata] = useState(null), [metadataState, setMetadataState] = useState('loading'), [historyAttempt, setHistoryAttempt] = useState(0);
+  const [sidebarTab, setSidebarTab] = useState('history'), [chapterPreview, setChapterPreview] = useState(null);
+  const [hoveredChapter, setHoveredChapter] = useState(null), [focusedChapter, setFocusedChapter] = useState(null);
   const [session, setSession] = useState(null), [error, setError] = useState(false), [attempt, setAttempt] = useState(0);
   const [duration, setDuration] = useState(options.duration), [position, setPosition] = useState(0);
   const [range, setRange] = useState({ start: options.start, end: options.end });
   const [seekRequest, setSeekRequest] = useState(null), [selectionPlaying, setSelectionPlaying] = useState(false);
   const host = useRef(null), rangeRef = useRef(range), selectedPlayback = useRef(false);
   rangeRef.current = range;
-  const parts = useMemo(() => session ? [{ id: options.url, url: session.sourceUrl, duration, started_at: options.date }] : [], [session, duration, options.url, options.date]);
+  const requestId = useMemo(() => crypto.randomUUID(), [options.url, attempt]);
+  const started = metadata?.started ?? Date.parse(options.date);
+  const parts = useMemo(() => [{ id: options.url, url: session?.sourceUrl, duration, started }], [session, duration, options.url, started]);
+  const chapters = useMemo(() => (metadata?.chapters || []).map(chapter => ({ ...chapter, end: Math.min(duration, chapter.end) })).filter(chapter => chapter.end > chapter.start), [metadata, duration]);
+  useEffect(() => {
+    document.getElementById('clipHistoryPanel').hidden = sidebarTab !== 'history';
+    document.getElementById('clipCutPanel').hidden = sidebarTab !== 'cut';
+    setHoveredChapter(null); setFocusedChapter(null);
+  }, [sidebarTab]);
+  useEffect(() => {
+    setChapterPreview(sidebarTab === 'history' && (hoveredChapter || focusedChapter) ? { recordingId: options.url, chapterId: hoveredChapter || focusedChapter } : null);
+  }, [sidebarTab, hoveredChapter, focusedChapter, options.url]);
   const changeRange = useCallback((start, end) => {
     selectedPlayback.current = false; setSelectionPlaying(false);
     setRange({ start, end }); options.onRange(start, end);
@@ -64,7 +80,7 @@ function Workspace({ options, bind }) {
   const seek = useCallback(seconds => { setSeekRequest({ seconds }); }, []);
   bind.current = { updateRange(start, end) { setRange({ start, end }); selectedPlayback.current = false; setSelectionPlaying(false); }, seek };
   useEffect(() => {
-    const id = crypto.randomUUID();
+    const id = requestId;
     let closed = false;
     setSession(null); setError(false);
     window.api.openVodPlayback({ id, url: options.url }).then(result => {
@@ -73,7 +89,16 @@ function Workspace({ options, bind }) {
       else setError(true);
     }).catch(() => { if (!closed) setError(true); });
     return () => { closed = true; void window.api.closeVodPlayback(id).catch(() => undefined); };
-  }, [options.url, attempt]);
+  }, [options.url, requestId]);
+  useEffect(() => {
+    let closed = false;
+    setMetadataState('loading');
+    window.api.getVodTimeline({ id: requestId, url: options.url }).then(result => {
+      if (closed) return;
+      setMetadata(result); setMetadataState(result ? 'ready' : 'error');
+    }).catch(() => { if (!closed) setMetadataState('error'); });
+    return () => { closed = true; };
+  }, [options.url, requestId, historyAttempt]);
   const onTimeline = useCallback(timeline => {
     const total = timeline.reduce((sum, part) => sum + part.duration, 0);
     if (total > 0 && Math.abs(total - duration) > .05) {
@@ -107,11 +132,32 @@ function Workspace({ options, bind }) {
     if (event.key.toLowerCase() === 'i' || event.key.toLowerCase() === 'o') { event.preventDefault(); mark(event.key.toLowerCase() === 'i' ? 'start' : 'end'); }
   }}>
     {session ? <ArchivePlayer key={session.id} id={options.url} userId="tvm-local" parts={parts} seconds={range.start}
-      broadcastStarted={options.date} started t={t} onProgress={() => {}} onError={() => setError(true)}
+      broadcastStarted={started} started t={t} chapters={chapters} titleHistory={metadata?.titleHistory || []} vodTitle={metadata?.title || options.title} chapterPreview={chapterPreview} onProgress={() => {}} onError={() => setError(true)}
       onPosition={onPosition} onTimeline={onTimeline} seekRequest={seekRequest}/>
       : !error && <div className="vod-player-loading" role="status"><span className="vod-loading-symbol"/>{text.loading}</div>}
     {error && <div className="vod-player-error" role="status"><span>{text.failed}</span><button type="button" className="btn-secondary" onClick={() => setAttempt(value => value + 1)}>{text.retry}</button></div>}
     <div className="vod-player-source"><span>{text.source}: {session?.quality === 'best' ? text.sourceBest : session?.quality || '…'}</span>{selectionPlaying && <span>{text.active}</span>}</div>
+    {createPortal(<div className="vod-sidebar-tabs" role="tablist" aria-label={t('vodWorkspaceTools')} onKeyDown={event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 'history' : event.key === 'End' ? 'cut' : sidebarTab === 'history' ? 'cut' : 'history';
+      setSidebarTab(next); document.getElementById(next === 'history' ? 'clipHistoryTab' : 'clipCutTab').focus();
+    }}>
+      <button id="clipHistoryTab" role="tab" aria-selected={sidebarTab === 'history'} aria-controls="clipHistoryPanel" tabIndex={sidebarTab === 'history' ? 0 : -1} onClick={() => setSidebarTab('history')}><ListVideo size={17}/>{t('streamHistory')}</button>
+      <button id="clipCutTab" role="tab" aria-selected={sidebarTab === 'cut'} aria-controls="clipCutPanel" tabIndex={sidebarTab === 'cut' ? 0 : -1} onClick={() => setSidebarTab('cut')}><Scissors size={17}/>{text.range}</button>
+    </div>, document.getElementById('clipSidebarTabs'))}
+    {createPortal(<div className="vod-history">
+      <div className="vod-history-heading"><span>{t('vodTitle')}</span><strong>{metadata?.title || options.title}</strong></div>
+      {metadataState === 'loading' && <p className="vod-history-status" role="status">{t('historyLoading')}</p>}
+      {metadataState === 'error' && <div className="vod-history-status" role="status"><span>{t('historyUnavailable')}</span><button type="button" className="btn-secondary" onClick={() => setHistoryAttempt(value => value + 1)}>{text.retry}</button></div>}
+      {metadataState === 'ready' && <>
+        <TitleHistory id={options.url} chapters={chapters} history={metadata.titleHistory} parts={parts} started={started} seconds={position}
+          onSeek={seek} onTitleSeek={title => seek(title.seconds)} onHover={setHoveredChapter} onFocus={setFocusedChapter}
+          onSelectRange={chapter => { changeRange(chapter.start, chapter.end); seek(chapter.start); setSidebarTab('cut'); }} t={t}/>
+        <p className="vod-history-status">{t(metadata.titlesStatus === 'local' ? 'historyLocalTitles' : 'historyNoTitleSource')}</p>
+        {metadata.chaptersStatus === 'unavailable' && <p className="vod-history-status">{t('historyNoChapterSource')}</p>}
+      </>}
+    </div>, document.getElementById('clipHistory'))}
     {createPortal(<><SelectionTimeline duration={Math.max(.1, duration)} range={range} position={position} onChange={changeRange} onSeek={seek} text={text}/>
     <div className="vod-mark-actions">
       <button type="button" className="btn-secondary" disabled={!session} onClick={() => mark('start')}>{text.markStart} <kbd>I</kbd></button>

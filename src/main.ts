@@ -9,6 +9,7 @@ import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
 import { remuxMp4 } from './main/domain/mp4-remux';
 import { VodPlaybackService } from './main/domain/vod-playback-service';
+import { VodTimelineService } from './main/domain/vod-timeline';
 import { compareUpdateVersions, createUpdateCheckCoordinator, normalizeUpdateVersion, UpdateLifecycle } from './main/updates';
 import { writeFileAtomicSync } from './main/infra/fs-atomic';
 import { parseDuration, formatDuration, formatDurationDashed } from './main/infra/duration';
@@ -902,6 +903,7 @@ const currentCutterInfoProcesses = new Set<ChildProcess>();
 const currentCutterExportProcesses = new Set<ChildProcess>();
 const currentCutterPreviewProcesses = new Set<ChildProcess>();
 const vodPlaybackService = new VodPlaybackService();
+const vodTimelineService = new VodTimelineService();
 const currentCutterFrameProcesses = new Set<ChildProcess>();
 const currentCutterFrameFiles = new Set<string>();
 // Per-item cancellation lives in `cancelledItemIds`. The previous global
@@ -8490,8 +8492,14 @@ registerTrustedIpcHandler(ipcMain, 'open-vod-playback', isTrustedRendererEvent, 
     }
 });
 
+registerTrustedIpcHandler(ipcMain, 'get-vod-timeline', isTrustedRendererEvent, () => Promise.resolve(null), async (_, request: unknown) => {
+    if (appShutdownStarted) return null;
+    try { return await vodTimelineService.load(request, config.download_path); }
+    catch { return null; }
+});
+
 registerTrustedIpcHandler(ipcMain, 'close-vod-playback', isTrustedRendererEvent, () => Promise.resolve(), async (_, id: unknown) => {
-    if (typeof id === 'string') await vodPlaybackService.close(id);
+    if (typeof id === 'string') { vodTimelineService.close(id); await vodPlaybackService.close(id); }
 });
 
 ipcMain.handle('get-managed-tool-status', async (event) => {
@@ -9148,6 +9156,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
 
     await runResilientSteps([
         ['vod-playback', () => vodPlaybackService.close()],
+        ['vod-timeline', () => vodTimelineService.close()],
         ['metadata-cache-timer', () => stopMetadataCacheCleanup()],
         ['metadata-cache-files', () => cleanupMetadataCaches('shutdown')],
         ['auto-update-poller', () => stopAutoUpdatePolling()],

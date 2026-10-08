@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add the Streamrecorder history sidebar with Twitch game chapters, covers, category filters, direct seeking and one-click selection of a category for trimming. Show VOD time, original date/time, category and available title history when hovering over the player timeline.
+- Read matching title-change events from local live-recording logs. Keep the stored VOD title separate when a historical title timeline is unavailable.
+
 - Rebuild VOD trimming around the full Streamrecorder video player, including continuous HLS playback, seeking across the complete VOD, fine seeking, exact timestamps, speed, volume, keyboard controls, cinema mode, fullscreen and picture-in-picture.
 - Add draggable start/end markers, I/O shortcuts, selection playback and precise cut-time inputs in a responsive workspace. Keep filename and continuation settings together in the sidebar.
 - Fetch only the VOD segments needed for playback through a restricted local media endpoint and stop pending requests when the dialog closes.
