@@ -21,13 +21,14 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
   const chapters = drag.current?.chapters ?? availableChapters;
   const titleHistory = drag.current?.titleHistory ?? availableTitles;
   const titleEvents = useMemo(()=>projectTitles(titleHistory,previewParts,broadcastStarted),[titleHistory,previewParts,broadcastStarted]);
-  const [trackWidth,setTrackWidth] = useState(1000);
+  const [trackWidth,setTrackWidth] = useState(1000), [pixelRatio,setPixelRatio] = useState(() => window.devicePixelRatio || 1);
   useLayoutEffect(()=>{
-    const measure = ()=>setTrackWidth(input.current?.getBoundingClientRect().width || 1000);
+    const measure = ()=>{ setTrackWidth(input.current?.getBoundingClientRect().width || 1000); setPixelRatio(window.devicePixelRatio || 1); };
     measure();
     const observer = new ResizeObserver(measure);
     if(input.current)observer.observe(input.current);
-    return ()=>observer.disconnect();
+    window.addEventListener("resize",measure);
+    return ()=>{ observer.disconnect(); window.removeEventListener("resize",measure); };
   },[]);
   const endpoint = drag.current ? drag.current.endpoint : availableEndpoint;
   const [preview, setPreview] = useState(null), [panelWidth, setPanelWidth] = useState(480);
@@ -73,7 +74,7 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
   const currentTitle = titleAt(titleHistory,streamTimestamp(previewParts,broadcastStarted,value));
   const currentViewerSample = viewerSampleAt(viewerHistory, streamTimestamp(previewParts, broadcastStarted, value));
   const currentViewerGap = viewerGapAt(viewerGaps, streamTimestamp(previewParts, broadcastStarted, value));
-  return <div className="archive-timeline-track">
+  return <div className="archive-timeline-track" style={{"--category-track-height":`${Math.round(6 * pixelRatio) / pixelRatio}px`}}>
     <ViewerHistory curves={drag.current?.viewerCurves ?? viewerCurves}/>
     {gradient&&<svg className="category-track" viewBox="0 0 1000 6" preserveAspectRatio="none" shapeRendering="crispEdges" aria-hidden="true">
       <rect width="1000" height="6" fill="#777e8a"/>

@@ -1,7 +1,7 @@
 .archive-controls input.archive-timeline { position:relative; z-index:1; touch-action:none; }
 .fine-seek-instructions { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .fine-seek-position { z-index:1500; width:480px; max-width:calc(100vw - 24px); pointer-events:none; }
-.fine-seek-preview { background:#171c24f7; border:1px solid #ffffff38; border-radius:10px; padding:0 15px 10px; box-shadow:0 10px 32px #0007; color:#eef2f8; font-variant-numeric:tabular-nums; user-select:none; transition:border-color 140ms ease; }
+.fine-seek-preview { background:#171c24f7; border:1px solid #ffffff38; border-radius:10px; padding:0 15px 10px; box-shadow:0 3px 10px #0007; color:#eef2f8; font-variant-numeric:tabular-nums; user-select:none; transition:border-color 140ms ease; }
 .fine-seek-heading { position:relative; height:80px; margin:0 -4px; }
 .fine-seek-heading .archive-seek-preview.chapter-preview.has-cover { position:absolute; inset:0; left:0!important; transform:none; width:100%!important; max-width:100%; height:80px; background:none; border:0; box-shadow:none; animation:none; }
 .fine-seek-heading .chapter-preview-layer { padding:8px 0; }
