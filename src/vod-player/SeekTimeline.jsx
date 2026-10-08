@@ -14,7 +14,7 @@ import { ViewerHistory } from "./ViewerHistory.jsx";
 import { projectTitles, titleAt, titleMarkers } from "./title-history.js";
 import "./title-history.css";
 
-export function SeekTimeline({ total:availableTotal, position, parts, broadcastStarted, viewerHistory, viewerGaps, titleHistory:availableTitles = [], vodTitle, viewerCurves = [], chapters:availableChapters, endpoint:availableEndpoint, highlightedRange, root, onCommit, onScrub, onPreview, t, excerptRange, cutRange, onCutRange, cutText, omissions = [] }) {
+export function SeekTimeline({ total:availableTotal, position, parts, broadcastStarted, viewerHistory, viewerGaps, titleHistory:availableTitles = [], vodTitle, viewerCurves = [], chapters:availableChapters, endpoint:availableEndpoint, highlightedRange, root, onCommit, onScrub, onPreview, t, excerptRange, onExcerptRange, cutRange, onCutRange, cutText, omissions = [] }) {
   const locale = t("locale");
   const streamClock = useMemo(() => createStreamClock(locale), [locale]);
   const input = useRef(null), drag = useRef(null), callbacks = useRef(null);
@@ -36,13 +36,13 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
   const [preview, setPreview] = useState(null), [panelWidth, setPanelWidth] = useState(480);
   callbacks.current = { onCommit, onScrub };
   const hintId = useId();
-  const [rangePreviewOpen, setRangePreviewOpen] = useState(false);
+  const [rangePreviewOpen, setRangePreviewOpen] = useState(false), [omissionPreviewOpen, setOmissionPreviewOpen] = useState(false);
   const alignPreview = useCallback(bounds => {
     if (!drag.current?.fine) return;
     const aligned = alignFineSeek(drag.current,bounds);
     if (aligned !== drag.current) { drag.current = aligned; setPreview(aligned); }
   }, []);
-  useEffect(() => { onPreview(Boolean(preview) || rangePreviewOpen); }, [preview, rangePreviewOpen, onPreview]);
+  useEffect(() => { onPreview(Boolean(preview) || rangePreviewOpen || omissionPreviewOpen); }, [preview, rangePreviewOpen, omissionPreviewOpen, onPreview]);
   function cancel() {
     if (drag.current) { drag.current=null; callbacks.current.onScrub(false); }
     setPreview(null);
@@ -82,12 +82,15 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
     {excerptRange && total > 0 && <span className="vod-excerpt-scope" role="img" aria-label={cutText.excerpt + ": " + cutTime(excerptRange.start) + " – " + cutTime(excerptRange.end)}>
       <i className="vod-excerpt-dim is-before" style={{ width:Math.max(0, Math.min(100, excerptRange.start / total * 100)) + "%" }}/>
       <i className="vod-excerpt-dim is-after" style={{ width:Math.max(0, Math.min(100, (total - excerptRange.end) / total * 100)) + "%" }}/>
-      <span className="vod-excerpt-band" style={{ left:excerptRange.start / total * 100 + "%", width:(excerptRange.end - excerptRange.start) / total * 100 + "%" }}/>
     </span>}
     <OmissionBands ranges={omissions} to={total} compact/>
     <span className="timeline-title-markers" aria-hidden="true">{titleMarkers(titleEvents,total,trackWidth).map(marker=><i key={marker.id} className={marker.count>1?'is-grouped':undefined} style={{left:`${marker.fraction*100}%`}}/>)}</span>
     <ChapterRangePreview range={highlightedRange} suppressed={Boolean(preview)} chapters={chapters} fallback={t("categoryUnavailable")}/>
-    {cutRange && <RangeMarkers limits={excerptRange} compact trackWidth={trackWidth - 14} duration={total} range={cutRange} onChange={onCutRange} text={cutText} onInteraction={cancel} onPreviewChange={setRangePreviewOpen}
+    {(excerptRange || cutRange) && <RangeMarkers compact trackWidth={trackWidth - 14} duration={total} range={excerptRange || cutRange} onChange={excerptRange ? onExcerptRange : onCutRange}
+      text={{ ...cutText, start:`${cutText.excerpt}: ${cutText.start}`, end:`${cutText.excerpt}: ${cutText.end}` }} onInteraction={cancel} onPreviewChange={setRangePreviewOpen}
+      finePreview={{root, parts:previewParts, broadcastStarted, chapters, endpoint, titleHistory, vodTitle, viewerHistory, viewerGaps, t}}/>}
+    {excerptRange && cutRange && <RangeMarkers variant="omission" limits={excerptRange} compact trackWidth={trackWidth - 14} duration={total} range={cutRange} onChange={onCutRange}
+      text={{ ...cutText, start:`${cutText.omission}: ${cutText.start}`, end:`${cutText.omission}: ${cutText.end}` }} onInteraction={cancel} onPreviewChange={setOmissionPreviewOpen}
       finePreview={{root, parts:previewParts, broadcastStarted, chapters, endpoint, titleHistory, vodTitle, viewerHistory, viewerGaps, t}}/>}
     <span id={hintId} className="fine-seek-instructions">{t("fineSeekInstructions")}</span>
     <input ref={input} className={`archive-timeline${gradient?" has-chapters":""}`} type="range" aria-label={t("playbackPosition")} aria-describedby={hintId}

@@ -12,7 +12,7 @@ export function cutTime(seconds) {
   return `${timeLabel(Math.floor(value / 1000))}.${String(value % 1000).padStart(3, '0')}`;
 }
 
-export function RangeMarkers({ duration, range, onChange, text, from = 0, to = duration, compact = false, onInteraction, trackWidth = 1000, finePreview, onPreviewChange, limits }) {
+export function RangeMarkers({ duration, range, onChange, text, from = 0, to = duration, compact = false, onInteraction, trackWidth = 1000, finePreview, onPreviewChange, limits, variant = 'excerpt' }) {
   const track = useRef(null), drag = useRef(null);
   const [preview, setPreview] = useState(null), [dragging, setDragging] = useState(false);
   const alignPreview = useCallback(bounds => {
@@ -54,9 +54,9 @@ export function RangeMarkers({ duration, range, onChange, text, from = 0, to = d
     if (start === range.start && end === range.end) return;
     onChange(start, end, { source, boundary: which });
   }
-  return <div ref={track} className={`vod-range-markers${compact ? ' is-compact' : ''}`} data-dragging={dragging || undefined}>
-    {compact && <svg className="vod-range-connectors" viewBox="0 0 1000 60" preserveAspectRatio="none" aria-hidden="true">
-      {['start', 'end'].map(which => <path key={which} d={`M ${grip[which] * 1000} 24 L ${boundary[which] * 1000} 34 V 54`}/>)}
+  return <div ref={track} className={`vod-range-markers is-${variant}${compact ? ' is-compact' : ''}`} data-dragging={dragging || undefined}>
+    {compact && <svg className="vod-range-connectors" viewBox={`0 0 1000 ${variant === 'omission' ? 88 : 60}`} preserveAspectRatio="none" aria-hidden="true">
+      {['start', 'end'].map(which => <path key={which} d={variant === 'omission' ? `M ${grip[which] * 1000} 64 L ${boundary[which] * 1000} 56 V 36` : `M ${grip[which] * 1000} 24 L ${boundary[which] * 1000} 34 V 54`}/>)}
     </svg>}
     <span className="vod-range-band" style={{ left: `${(range.start - from) / span * 100}%`, width: `${(range.end - range.start) / span * 100}%` }}/>
     {['start', 'end'].map(which => <button key={which} type="button" role="slider" className={`vod-range-handle is-${which}`}

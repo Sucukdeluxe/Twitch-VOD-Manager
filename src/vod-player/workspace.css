@@ -104,8 +104,8 @@
 .vod-player-error button { flex: none; }
 .vod-player-source { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 10px 2px 0; color: var(--text-secondary); font-size: 12px; }
 #clipModal .clip-preview-hint { margin: 8px 2px 0; font-size: 12px; line-height: 1.5; }
-#clipPlayer .archive-timeline-track { margin-top: 32px; margin-bottom: 3px; }
-#clipPlayer .archive-timeline-row > .archive-clock { align-self: end; display: flex; align-items: center; height: 28px; margin-bottom: 3px; }
+#clipPlayer .archive-timeline-track { margin-top: 32px; margin-bottom: 31px; }
+#clipPlayer .archive-timeline-row > .archive-clock { align-self: end; display: flex; align-items: center; height: 28px; margin-bottom: 31px; }
 #clipPlayer .archive-timeline-row > .archive-duration { justify-content: flex-end; }
 .vod-range-markers.is-compact { inset: -32px 7px auto; height: 60px; }
 .vod-range-connectors { position: absolute; inset: 0; width: 100%; height: 60px; overflow: visible; pointer-events: none; z-index: 0; }
@@ -216,11 +216,14 @@
 .vod-omission-bands.is-compact { inset:5px 7px; }
 #clipModal.is-omitting .vod-cut-fields, #clipModal.is-omitting .vod-mark-actions, #clipModal.is-omitting .vod-boundary-actions, #clipModal.is-omitting #clipTimeHint { display:none; }
 #clipModal.is-omitting .vod-cut-controls, #clipModal.is-omitting #clipTimelineView { display:none; }
-#clipModal.is-omitting .vod-range-band { background:#f13e6233; border-color:#ed6982; }
-#clipModal.is-omitting .vod-range-handle { background:#b32d45; border-color:#f391a4; }
-#clipModal.is-omitting .vod-range-handle:hover { background:#d43b55; }
-#clipModal.is-omitting .vod-range-connectors path { stroke:#f391a4; }
-#clipModal.is-omitting .vod-range-markers { z-index:4; }
+.vod-range-markers.is-omission .vod-range-band { background:#f13e6233; border-color:#ed6982; }
+.vod-range-markers.is-omission .vod-range-handle { background:#b32d45; border-color:#f391a4; }
+.vod-range-markers.is-omission .vod-range-handle:hover { background:#d43b55; }
+.vod-range-markers.is-omission .vod-range-connectors path { stroke:#f391a4; }
+.vod-range-markers.is-compact.is-omission { height:88px; z-index:4; }
+.is-compact.is-omission .vod-range-connectors { height:88px; }
+.is-compact.is-omission .vod-range-handle { top:64px; }
+.is-compact.is-omission .vod-range-band { bottom:32px; border-top:0; }
 #clipOmissionPanel { display:none; }
 #clipModal.is-omitting #clipOmissionPanel { flex:1; min-height:0; display:flex; margin-bottom:8px; }
 #clipModal.is-omitting .vod-omission-editor { display:flex; flex-direction:column; flex:1; min-height:0; }
@@ -292,6 +295,5 @@
 .vod-excerpt-dim { position:absolute; inset-block:0; background:#0e1116b8; }
 .vod-excerpt-dim.is-before { left:0; }
 .vod-excerpt-dim.is-after { right:0; }
-.vod-excerpt-band { position:absolute; top:4px; bottom:0; border:2px solid #bda5ef; border-top:0; border-radius:0 0 2px 2px; }
 .vod-omission-actions .vod-omission-scope { border-color:#aa8cea; }
 .vod-omission-scope svg { color:#bda5ef; }

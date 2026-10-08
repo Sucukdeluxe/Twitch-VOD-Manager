@@ -13,8 +13,8 @@ import './chapters.css';
 import './workspace.css';
 
 const labels = {
-  de: { loading: 'VOD wird geöffnet …', failed: 'Das VOD konnte nicht geladen werden. Schnittzeiten können weiterhin eingegeben werden.', retry: 'Erneut laden', range: 'Schnittbereich', excerpt: 'Download-Ausschnitt', timeline: 'Schnittzeitleiste', timelineView: 'Ansicht der Schnittzeitleiste', overview: 'Gesamtes VOD', zoomSelection: 'Auswahl vergrößern', start: 'Start', end: 'Ende', setHere: 'Hier setzen', markStart: 'Start hier setzen', markEnd: 'Ende hier setzen', playRange: 'Auswahl abspielen', stopRange: 'Auswahl anhalten', full: 'Gesamtes VOD wählen', source: 'Streamqualität', keyboard: 'Leertaste / K: Wiedergabe · ← / →: 10 Sekunden · I / O: Schnittmarken · F: Vollbild', active: 'Auswahl wird abgespielt', sourceBest: 'Beste verfügbare Qualität' },
-  en: { loading: 'Opening VOD …', failed: 'Could not load the VOD. You can still enter cut times.', retry: 'Retry', range: 'Selected range', excerpt: 'Download excerpt', timeline: 'Cut timeline', timelineView: 'Cut timeline view', overview: 'Entire VOD', zoomSelection: 'Zoom to selection', start: 'Start', end: 'End', setHere: 'Set here', markStart: 'Set start here', markEnd: 'Set end here', playRange: 'Play selection', stopRange: 'Pause selection', full: 'Select entire VOD', source: 'Stream quality', keyboard: 'Space / K: playback · ← / →: 10 seconds · I / O: cut markers · F: fullscreen', active: 'Playing selection', sourceBest: 'Best available quality' },
+  de: { loading: 'VOD wird geöffnet …', failed: 'Das VOD konnte nicht geladen werden. Schnittzeiten können weiterhin eingegeben werden.', retry: 'Erneut laden', range: 'Schnittbereich', excerpt: 'Download-Ausschnitt', omission: 'Auslassung', timeline: 'Schnittzeitleiste', timelineView: 'Ansicht der Schnittzeitleiste', overview: 'Gesamtes VOD', zoomSelection: 'Auswahl vergrößern', start: 'Start', end: 'Ende', setHere: 'Hier setzen', markStart: 'Start hier setzen', markEnd: 'Ende hier setzen', playRange: 'Auswahl abspielen', stopRange: 'Auswahl anhalten', full: 'Gesamtes VOD wählen', source: 'Streamqualität', keyboard: 'Leertaste / K: Wiedergabe · ← / →: 10 Sekunden · I / O: Schnittmarken · F: Vollbild', active: 'Auswahl wird abgespielt', sourceBest: 'Beste verfügbare Qualität' },
+  en: { loading: 'Opening VOD …', failed: 'Could not load the VOD. You can still enter cut times.', retry: 'Retry', range: 'Selected range', excerpt: 'Download excerpt', omission: 'Omission', timeline: 'Cut timeline', timelineView: 'Cut timeline view', overview: 'Entire VOD', zoomSelection: 'Zoom to selection', start: 'Start', end: 'End', setHere: 'Set here', markStart: 'Set start here', markEnd: 'Set end here', playRange: 'Play selection', stopRange: 'Pause selection', full: 'Select entire VOD', source: 'Stream quality', keyboard: 'Space / K: playback · ← / →: 10 seconds · I / O: cut markers · F: fullscreen', active: 'Playing selection', sourceBest: 'Best available quality' },
 };
 
 function boundedOmission(value, selection) {
@@ -110,6 +110,16 @@ function Workspace({ options, bind }) {
     setRange({ start, end }); options.onRange(start, end);
     if (interaction?.source === 'pointer' && interaction.boundary === 'start') setSeekRequest({ seconds: start });
   }, [options, omitting, selection.start, selection.end]);
+  function changeExcerpt(start, end, interaction) {
+    stopPreview();
+    selectedPlayback.current = false; setSelectionPlaying(false);
+    const next = { start:Math.round(start * 1000) / 1000, end:Math.round(end * 1000) / 1000 };
+    const draft = boundedOmission(range, next);
+    modeRanges.current.excerpt = next;
+    modeRanges.current.omission = draft;
+    setRange(draft); options.onRange(draft.start, draft.end);
+    if (interaction?.source === 'pointer' && interaction.boundary === 'start') setSeekRequest({ seconds:next.start });
+  }
   const seek = useCallback(seconds => { setSeekRequest({ seconds }); }, []);
   bind.current = { updateRange(start, end) { stopPreview(); setRange({ start, end }); selectedPlayback.current = false; setSelectionPlaying(false); }, seek, refreshOutput() { setOutputRevision(value => value + 1); }, setInputValid };
   useEffect(() => {
@@ -187,7 +197,7 @@ function Workspace({ options, bind }) {
   }}>
     {session ? <ArchivePlayer key={session.id} id={options.url} userId="tvm-local" parts={parts} seconds={range.start}
       broadcastStarted={started} started t={t} chapters={chapters} titleHistory={metadata?.titleHistory || []} vodTitle={metadata?.title || options.title} chapterPreview={chapterPreview} onProgress={() => {}} onError={() => setError(true)}
-      onPosition={onPosition} onTimeline={onTimeline} seekRequest={seekRequest} excerptRange={omitting ? selection : null} cutRange={omitting && editing === null ? null : range} onCutRange={changeRange} cutText={text} omissions={visibleOmissions}/>
+      onPosition={onPosition} onTimeline={onTimeline} seekRequest={seekRequest} excerptRange={omitting ? selection : null} onExcerptRange={changeExcerpt} cutRange={omitting && editing === null ? null : range} onCutRange={changeRange} cutText={text} omissions={visibleOmissions}/>
       : !error && <div className="vod-player-loading" role="status"><span className="vod-loading-symbol"/>{text.loading}</div>}
     {error && <div className="vod-player-error" role="status"><span>{text.failed}</span><button type="button" className="btn-secondary" onClick={() => setAttempt(value => value + 1)}>{text.retry}</button></div>}
     <div className="vod-player-source"><span>{text.source}: {session?.quality === 'best' ? text.sourceBest : session?.quality || '…'}</span>{selectionPlaying && <span>{text.active}</span>}</div>
