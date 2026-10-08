@@ -88,10 +88,10 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
     <ChapterRangePreview range={highlightedRange} suppressed={Boolean(preview)} chapters={chapters} fallback={t("categoryUnavailable")}/>
     {(excerptRange || cutRange) && <RangeMarkers compact trackWidth={trackWidth - 14} duration={total} range={excerptRange || cutRange} onChange={excerptRange ? onExcerptRange : onCutRange}
       text={{ ...cutText, start:`${cutText.excerpt}: ${cutText.start}`, end:`${cutText.excerpt}: ${cutText.end}` }} onInteraction={cancel} onPreviewChange={setRangePreviewOpen}
-      finePreview={{root, parts:previewParts, broadcastStarted, chapters, endpoint, titleHistory, vodTitle, viewerHistory, viewerGaps, t}}/>}
+      finePreview={{root, parts:previewParts, broadcastStarted, chapters, endpoint, titleHistory, vodTitle, viewerHistory, viewerGaps, omissions, t}}/>}
     {excerptRange && cutRange && <RangeMarkers variant="omission" limits={cutLimits || excerptRange} compact trackWidth={trackWidth - 14} duration={total} range={cutRange} onChange={onCutRange}
       text={{ ...cutText, start:`${cutText.omission}: ${cutText.start}`, end:`${cutText.omission}: ${cutText.end}` }} onInteraction={cancel} onPreviewChange={setOmissionPreviewOpen}
-      finePreview={{root, parts:previewParts, broadcastStarted, chapters, endpoint, titleHistory, vodTitle, viewerHistory, viewerGaps, t}}/>}
+      finePreview={{root, parts:previewParts, broadcastStarted, chapters, endpoint, titleHistory, vodTitle, viewerHistory, viewerGaps, omissions, t}}/>}
     <span id={hintId} className="fine-seek-instructions">{t("fineSeekInstructions")}</span>
     <input ref={input} className={`archive-timeline${gradient?" has-chapters":""}`} type="range" aria-label={t("playbackPosition")} aria-describedby={hintId}
       aria-valuetext={`${timeLabel(value)} / ${timeLabel(total)}${currentTimestamp ? ` · ${currentTimestamp.label}` : ""} - ${chapterAt(chapters,value,endpoint)?.name || t("categoryUnavailable")}${currentTitle ? ` · ${currentTitle.title || t('historyEmptyTitle')}` : ''}${currentViewerGap ? ` · ${t("viewerMeasurementMissing")}` : currentViewerSample ? ` · ${currentViewerSample.viewers.toLocaleString(locale)} ${t("viewerCount")}` : ""}`} min="0" max={total||1} step="0.1" value={Math.min(value,total)} disabled={total<=0}
@@ -119,7 +119,7 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
         }
       }}/>
     <FineSeekPreview preview={preview} anchorRef={input} root={root} total={total} parts={previewParts} broadcastStarted={broadcastStarted}
-      chapters={chapters} endpoint={endpoint} titleHistory={titleHistory} vodTitle={vodTitle} viewerHistory={viewerHistory} viewerGaps={viewerGaps}
+      chapters={chapters} endpoint={endpoint} titleHistory={titleHistory} vodTitle={vodTitle} viewerHistory={viewerHistory} viewerGaps={viewerGaps} omissions={omissions}
       t={t} onAlign={alignPreview} onWidth={setPanelWidth}/>
   </div>;
 }

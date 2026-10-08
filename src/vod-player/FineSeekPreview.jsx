@@ -12,7 +12,7 @@ import { ViewerCount } from "./ViewerHistory.jsx";
 import { projectTitles, titleAt } from "./title-history.js";
 import "./fine-seek.css";
 
-export function FineSeekPreview({ preview, anchorRef, root, total, parts = [], broadcastStarted, chapters = [], endpoint, titleHistory = [], vodTitle, viewerHistory, viewerGaps, t, onAlign, onWidth, kind }) {
+export function FineSeekPreview({ preview, anchorRef, root, total, parts = [], broadcastStarted, chapters = [], endpoint, titleHistory = [], vodTitle, viewerHistory, viewerGaps, omissions = [], t, onAlign, onWidth, kind }) {
   const lastPreview = useRef(null), ruler = useRef(null);
   const [panelWidth, setPanelWidth] = useState(480);
   const streamClock = useMemo(() => createStreamClock(t("locale")), [t("locale")]);
@@ -55,6 +55,7 @@ export function FineSeekPreview({ preview, anchorRef, root, total, parts = [], b
           {(titleHistory.length>0 || vodTitle)&&<div className="fine-seek-title"><span>{shownTitle ? shownTitle.title || t('historyEmptyTitle') : vodTitle ? `${t('vodTitle')}: ${vodTitle}` : t('historyTitleUnknown')}</span></div>}
           <div ref={ruler} className="fine-seek-ruler">
             <CategoryColors className="fine-seek-colors" height={5} chapters={chapters} from={shown.window.start} to={shown.window.end} endpoint={endpoint}/>
+            {omissions.filter(item => item.end > shown.window.start && item.start < shown.window.end).map((item,index)=><i key={'omission-'+index} className='fine-seek-omission' style={{left:((Math.max(item.start,shown.window.start)-shown.window.start)/shown.window.span*100)+'%',width:((Math.min(item.end,shown.window.end)-Math.max(item.start,shown.window.start))/shown.window.span*100)+'%'}} title={t('omission') || 'Ausgelassener Bereich'}/>)}
             {boundaries.filter(b=>b>=shown.window.start&&b<=shown.window.end).map(b=><i key={b} className="fine-seek-boundary" style={{left:`${(b-shown.window.start)/shown.window.span*100}%`}}/>)}
             {titleEvents.filter(event=>event.kind==='changed'&&event.status==='ready'&&event.seconds>=shown.window.start&&event.seconds<=shown.window.end).map(event=><i key={event.id} className="fine-seek-title-marker" style={{left:`${(event.seconds-shown.window.start)/shown.window.span*100}%`}}/>)}
             {fineTicks(shown.window,panelWidth).filter(tick=>tick.time>=0&&tick.time<=total).map(tick=><span key={tick.time} className={`fine-seek-tick${tick.major?" is-major":""}`} style={{left:`${tick.fraction*100}%`}}>{tick.major&&tick.fraction>.07&&tick.fraction<.93&&<small>{timeLabel(tick.time)}</small>}</span>)}

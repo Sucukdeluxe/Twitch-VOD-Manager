@@ -3080,7 +3080,7 @@ async function prepareVideoEditorWaveform(filePath: string, jobId: number): Prom
         const tempDir = fs.mkdtempSync(path.join(app.getPath('temp'), `tvm-editor-waveform-${process.pid}-`));
         const waveformFile = path.join(tempDir, 'waveform.png');
         const channels = Math.max(1, Math.min(8, job.info.audioStreams[0]?.channels || 1));
-        const pixelHeight = Math.max(128, channels * 64);
+        const pixelHeight = Math.max(192, channels * 96);
         try {
             const success = await runEditorWaveformProcess([
                 '-i', filePath,

@@ -381,8 +381,8 @@ export function ArchivePlayer({ id, userId, parts, live = false, seconds, poster
         <ViewerCount sample={viewerSample} t={t} overlay/>
         {[0, 1].map(which => <video key={which} ref={element => { if (element) videos.current[which] = element; }}
           className={slot === which ? "active" : "standby"} aria-hidden={slot !== which} tabIndex={-1} playsInline crossOrigin="anonymous" preload="auto" poster={!hasFrame ? poster : undefined}
-          onClick={() => { root.current.focus({ preventScroll: true }); clearTimeout(clickTimer.current); clickTimer.current = setTimeout(toggle, 220); }}
-          onDoubleClick={() => { clearTimeout(clickTimer.current); toggleFullscreen(); }}
+          onClick={event => { root.current.focus({ preventScroll: true }); clearTimeout(clickTimer.current); if (event.detail !== 2) toggle(); }}
+          onDoubleClick={() => { clearTimeout(clickTimer.current); toggle(); toggleFullscreen(); }}
           onLoadedMetadata={() => {
             const element = videos.current[which], part = latest.current.parts[slots.current[which]];
             if (part && Number.isFinite(element.duration)) { measured.current[part.id] = element.duration; setRevision(value => value + 1); }

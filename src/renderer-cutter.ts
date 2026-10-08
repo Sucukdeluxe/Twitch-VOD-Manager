@@ -1019,6 +1019,7 @@ function drawCutterWaveform(): void {
     canvas.style.width = `${cssWidth}px`;
     const context = canvas.getContext('2d');
     if (!context) return;
+    context.imageSmoothingEnabled = false;
     const laneHeight = canvas.height / cutterWaveformPeaks.length;
     cutterWaveformPeaks.forEach((peaks, channel) => {
         const center = (channel + .5) * laneHeight;
@@ -1906,8 +1907,8 @@ function updateCutterEditActions(): void {
     byId('cutterTrimMode').setAttribute('aria-label', UI_TEXT.cutter.excerpt);
     byId('cutterOmitMode').setAttribute('aria-label', UI_TEXT.cutter.omit);
     byId('cutterCutCount').setAttribute('aria-label', UI_TEXT.cutter.cutsLabel);
-    byId('cutterTrimMode').textContent = UI_TEXT.cutter.excerpt;
-    byId('cutterOmitMode').textContent = UI_TEXT.cutter.omit;
+    (byId('cutterTrimMode').querySelector('.cutter-mode-label') as HTMLElement).textContent = UI_TEXT.cutter.excerpt;
+    (byId('cutterOmitMode').querySelector('.cutter-mode-label') as HTMLElement).textContent = UI_TEXT.cutter.omit;
     byId('cutterFullRange').textContent = UI_TEXT.cutter.fullVideo;
     byId('cutterMarkStart').textContent = UI_TEXT.cutter.setHere;
     byId('cutterMarkEnd').textContent = UI_TEXT.cutter.setHere;
