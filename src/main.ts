@@ -7330,6 +7330,11 @@ function createWindow(): void {
     mainWindow.webContents.on('will-navigate', (event, url) => {
         if (url.split(/[?#]/, 1)[0] !== rendererUrl) event.preventDefault();
     });
+    mainWindow.webContents.on('console-message', (details) => {
+        if (details.level === 'error' && (details.sourceId.includes('renderer-vod-player') || details.message.startsWith('vod-workspace-render-failed'))) {
+            appendDebugLog('vod-player-renderer-error', { message: details.message.slice(0, 12000), source: details.sourceId, line: details.lineNumber });
+        }
+    });
     mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     mainWindow.loadFile(rendererFile);
 

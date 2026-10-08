@@ -13,9 +13,22 @@ import './chapters.css';
 import './workspace.css';
 
 const labels = {
-  de: { loading: 'VOD wird geöffnet …', failed: 'Das VOD konnte nicht geladen werden. Schnittzeiten können weiterhin eingegeben werden.', retry: 'Erneut laden', range: 'Schnittbereich', excerpt: 'Download-Ausschnitt', omission: 'Auslassung', timeline: 'Schnittzeitleiste', timelineView: 'Ansicht der Schnittzeitleiste', overview: 'Gesamtes VOD', zoomSelection: 'Auswahl vergrößern', start: 'Start', end: 'Ende', setHere: 'Hier setzen', markStart: 'Start hier setzen', markEnd: 'Ende hier setzen', playRange: 'Auswahl abspielen', stopRange: 'Auswahl anhalten', full: 'Gesamtes VOD wählen', source: 'Streamqualität', keyboard: 'Leertaste / K: Wiedergabe · ← / →: 10 Sekunden · I / O: Schnittmarken · F: Vollbild', active: 'Auswahl wird abgespielt', sourceBest: 'Beste verfügbare Qualität' },
-  en: { loading: 'Opening VOD …', failed: 'Could not load the VOD. You can still enter cut times.', retry: 'Retry', range: 'Selected range', excerpt: 'Download excerpt', omission: 'Omission', timeline: 'Cut timeline', timelineView: 'Cut timeline view', overview: 'Entire VOD', zoomSelection: 'Zoom to selection', start: 'Start', end: 'End', setHere: 'Set here', markStart: 'Set start here', markEnd: 'Set end here', playRange: 'Play selection', stopRange: 'Pause selection', full: 'Select entire VOD', source: 'Stream quality', keyboard: 'Space / K: playback · ← / →: 10 seconds · I / O: cut markers · F: fullscreen', active: 'Playing selection', sourceBest: 'Best available quality' },
+  de: { loading: 'VOD wird geöffnet …', failed: 'Das VOD konnte nicht geladen werden. Schnittzeiten können weiterhin eingegeben werden.', retry: 'Erneut laden', recover: 'Player wiederherstellen', renderFailed: 'Die Player-Oberfläche konnte nicht angezeigt werden. Ausschnitt und Auslassungen bleiben erhalten.', range: 'Schnittbereich', excerpt: 'Download-Ausschnitt', omission: 'Auslassung', timeline: 'Schnittzeitleiste', timelineView: 'Ansicht der Schnittzeitleiste', overview: 'Gesamtes VOD', zoomSelection: 'Auswahl vergrößern', start: 'Start', end: 'Ende', setHere: 'Hier setzen', markStart: 'Start hier setzen', markEnd: 'Ende hier setzen', playRange: 'Auswahl abspielen', stopRange: 'Auswahl anhalten', full: 'Gesamtes VOD wählen', source: 'Streamqualität', keyboard: 'Leertaste / K: Wiedergabe · ← / →: 10 Sekunden · I / O: Schnittmarken · F: Vollbild', active: 'Auswahl wird abgespielt', sourceBest: 'Beste verfügbare Qualität' },
+  en: { loading: 'Opening VOD …', failed: 'Could not load the VOD. You can still enter cut times.', retry: 'Retry', recover: 'Restore player', renderFailed: 'The player interface could not be displayed. Your excerpt and exclusions are preserved.', range: 'Selected range', excerpt: 'Download excerpt', omission: 'Omission', timeline: 'Cut timeline', timelineView: 'Cut timeline view', overview: 'Entire VOD', zoomSelection: 'Zoom to selection', start: 'Start', end: 'End', setHere: 'Set here', markStart: 'Set start here', markEnd: 'Set end here', playRange: 'Play selection', stopRange: 'Pause selection', full: 'Select entire VOD', source: 'Stream quality', keyboard: 'Space / K: playback · ← / →: 10 seconds · I / O: cut markers · F: fullscreen', active: 'Playing selection', sourceBest: 'Best available quality' },
 };
+
+class WorkspaceBoundary extends React.Component {
+  state = { failed:false };
+  static getDerivedStateFromError() { return { failed:true }; }
+  componentDidCatch(error, info) {
+    console.error('vod-workspace-render-failed', JSON.stringify({ name:error?.name || 'Error', message:String(error?.message ?? error), stack:error?.stack, componentStack:info.componentStack }));
+    this.props.onFailure();
+  }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return <div className="vod-player-error" role="alert"><span>{this.props.text.renderFailed}</span><button type="button" className="btn-secondary" data-action="restore-player" onClick={() => this.setState({ failed:false })}>{this.props.text.recover}</button></div>;
+  }
+}
 
 function boundedOmission(value, selection) {
   const from = Math.round(selection.start * 1000), to = Math.round(selection.end * 1000);
@@ -195,6 +208,7 @@ function Workspace({ options, bind }) {
     if (event.ctrlKey || event.altKey || event.metaKey || event.target.closest('input, textarea, button, [contenteditable="true"]')) return;
     if (event.key.toLowerCase() === 'i' || event.key.toLowerCase() === 'o') { event.preventDefault(); mark(event.key.toLowerCase() === 'i' ? 'start' : 'end'); }
   }}>
+    <WorkspaceBoundary text={text} onFailure={() => { stopPreview(); selectedPlayback.current = false; setSelectionPlaying(false); setSeekRequest({ seconds:position, playing:false }); }}>
     {session ? <ArchivePlayer key={session.id} id={options.url} userId="tvm-local" parts={parts} seconds={range.start}
       broadcastStarted={started} started t={t} chapters={chapters} titleHistory={metadata?.titleHistory || []} vodTitle={metadata?.title || options.title} chapterPreview={chapterPreview} onProgress={() => {}} onError={() => setError(true)}
       onPosition={onPosition} onTimeline={onTimeline} seekRequest={seekRequest} excerptRange={omitting ? selection : null} onExcerptRange={changeExcerpt} cutRange={omitting && editing === null ? null : range} onCutRange={changeRange} cutText={text} omissions={visibleOmissions}/>
@@ -230,6 +244,7 @@ function Workspace({ options, bind }) {
       <button type="button" className="btn-secondary" onClick={() => changeRange(0, duration)}>{text.full}</button>
     </div>
 </>, document.getElementById('clipSelectionTools'))}
+    </WorkspaceBoundary>
   </div>;
 }
 
