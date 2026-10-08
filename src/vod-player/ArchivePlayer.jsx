@@ -17,7 +17,7 @@ import { playerKeyAction } from "./player-keyboard.js";
 import { createPlaybackCheckpoint, checkpointPosition, checkpointSnapshot } from "./playback-checkpoint.js";
 import { clearMediaSource, setMediaSource } from './media-source.js';
 
-export function ArchivePlayer({ id, userId, parts, live = false, seconds, poster, started = true, broadcastStarted, viewerHistory, viewerGaps, titleHistory = [], vodTitle, requestedAt = 0, prepareMilliseconds, onStart, onProgress, onPosition, onTimeline, onError, t, chapters = [], seekRequest, chapterPreview, cutRange, onCutRange, cutText }) {
+export function ArchivePlayer({ id, userId, parts, live = false, seconds, poster, started = true, broadcastStarted, viewerHistory, viewerGaps, titleHistory = [], vodTitle, requestedAt = 0, prepareMilliseconds, onStart, onProgress, onPosition, onTimeline, onError, t, chapters = [], seekRequest, chapterPreview, cutRange, onCutRange, cutText, omissions = [] }) {
   const [checkpointStore] = useState(() => createPlaybackCheckpoint(userId, id));
   const [savedCheckpoint] = useState(() => checkpointStore.read());
   const initialized = useRef(false), lastCheckpoint = useRef(0), autoplayBlockedRef = useRef(false), wasStarted = useRef(started);
@@ -419,7 +419,7 @@ export function ArchivePlayer({ id, userId, parts, live = false, seconds, poster
         <div className="archive-timeline-row"><PlayerPanel key={`time-${id}`} label={t("exactTime")} className="archive-clock player-time-button" trigger={timeLabel(position)} root={root} onOpenChange={panelChanged}>
           {close=><ExactTimeForm position={position} total={total} t={t} onClose={close} onCommit={value=>{requestSeek(value);navigation.current.flush();revealControls();}}/>}
         </PlayerPanel>
-          <SeekTimeline cutRange={cutRange} onCutRange={onCutRange} cutText={cutText} key={`seek-${id}`} total={total} position={position} parts={actualParts} broadcastStarted={broadcastStarted} viewerHistory={viewerHistory} viewerGaps={viewerGaps} titleHistory={titleHistory} vodTitle={vodTitle} viewerCurves={viewerCurves} chapters={chapters} endpoint={chapterEndpoint} highlightedRange={highlightedRange} root={root} t={t} onPreview={setPreview}
+          <SeekTimeline omissions={omissions} cutRange={cutRange} onCutRange={onCutRange} cutText={cutText} key={`seek-${id}`} total={total} position={position} parts={actualParts} broadcastStarted={broadcastStarted} viewerHistory={viewerHistory} viewerGaps={viewerGaps} titleHistory={titleHistory} vodTitle={vodTitle} viewerCurves={viewerCurves} chapters={chapters} endpoint={chapterEndpoint} highlightedRange={highlightedRange} root={root} t={t} onPreview={setPreview}
             onScrub={value=>{scrubbing.current=value;navigation.current.cancel();if(!value)updateTime(active.current);}}
             onCommit={value=>{requestSeek(value);navigation.current.flush();revealControls();}}/>
           <span className="archive-clock archive-duration">{timeLabel(total)}</span></div>

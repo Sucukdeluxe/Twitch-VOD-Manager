@@ -1,3 +1,4 @@
+import { parseOmissionConfig } from './vod-edit-plan';
 import type { CustomClip, QueueItem } from '../../types';
 
 export type RendererQueueInput = Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str'> & { customClip?: CustomClip };
@@ -21,12 +22,15 @@ function normalizeCustomClip(value: unknown): CustomClip | null {
         : normalizedString(raw.filenameTemplate, 500);
     if (raw.filenameTemplate !== undefined && !filenameTemplate) return null;
     if (filenameFormat === 'template' && !filenameTemplate) return null;
+    const omissions = raw.omissions === undefined ? undefined : parseOmissionConfig(raw.omissions, Number(raw.durationSec));
+    if (raw.omissions !== undefined && (!omissions || raw.startSec !== 0)) return null;
     return {
         startSec: Number(raw.startSec),
         durationSec: Number(raw.durationSec),
         startPart: Number(raw.startPart),
         filenameFormat,
         ...(filenameTemplate ? { filenameTemplate } : {}),
+        ...(omissions ? { omissions } : {}),
     };
 }
 

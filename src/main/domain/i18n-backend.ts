@@ -3,6 +3,10 @@
 
 export const BACKEND_MESSAGES = {
     de: {
+        editedVodDownloading: 'Abschnitt {index} von {count} wird heruntergeladen',
+        editedVodAssembling: 'Auslassungen entfernen und volle Parts erstellen',
+        editedVodPublishing: 'Datei {index} von {count} wird gespeichert',
+        editedVodFailed: 'VOD mit Auslassungen konnte nicht fertiggestellt werden. Bereits geladene Abschnitte bleiben für einen erneuten Versuch erhalten. Details stehen im Diagnoseprotokoll.',
         invalidVodUrl: 'Ungültige VOD-URL',
         invalidClipUrl: 'Ungültige Clip-URL',
         clipNotFound: 'Clip nicht gefunden',
@@ -46,6 +50,10 @@ export const BACKEND_MESSAGES = {
         preflightDownloadPathNotWritable: 'Download-Ordner ist nicht beschreibbar.'
     },
     en: {
+        editedVodDownloading: 'Downloading range {index} of {count}',
+        editedVodAssembling: 'Removing exclusions and creating full parts',
+        editedVodPublishing: 'Saving file {index} of {count}',
+        editedVodFailed: 'Could not finish the VOD with exclusions. Downloaded ranges are retained for a retry. See the diagnostic log for details.',
         invalidVodUrl: 'Invalid VOD URL',
         invalidClipUrl: 'Invalid clip URL',
         clipNotFound: 'Clip not found',

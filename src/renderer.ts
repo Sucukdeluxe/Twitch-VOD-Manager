@@ -1411,6 +1411,8 @@ interface TemplatePreviewContext {
     startSec: number;
     durationSec: number;
     totalSec: number;
+    endSec?: number;
+    vodId?: string;
 }
 
 function buildTemplatePreview(template: string, context: TemplatePreviewContext): string {
@@ -1418,14 +1420,14 @@ function buildTemplatePreview(template: string, context: TemplatePreviewContext)
     const normalizedPart = context.partNum || '1';
     let output = template
         .replace(/\{title\}/g, context.title || 'Untitled')
-        .replace(/\{id\}/g, '123456789')
+        .replace(/\{id\}/g, context.vodId || '123456789')
         .replace(/\{channel\}/g, context.streamer || 'streamer')
         .replace(/\{channel_id\}/g, '0')
         .replace(/\{date\}/g, dateStr)
         .replace(/\{part\}/g, normalizedPart)
         .replace(/\{part_padded\}/g, normalizedPart.padStart(2, '0'))
         .replace(/\{trim_start\}/g, formatSecondsToTimeDashed(context.startSec))
-        .replace(/\{trim_end\}/g, formatSecondsToTimeDashed(context.startSec + context.durationSec))
+        .replace(/\{trim_end\}/g, formatSecondsToTimeDashed(context.endSec ?? (context.startSec + context.durationSec)))
         .replace(/\{trim_length\}/g, formatSecondsToTimeDashed(context.durationSec))
         .replace(/\{length\}/g, formatSecondsToTimeDashed(context.totalSec))
         .replace(/\{ext\}/g, 'mp4')
@@ -1433,7 +1435,7 @@ function buildTemplatePreview(template: string, context: TemplatePreviewContext)
 
     output = output.replace(/\{date_custom="(.*?)"\}/g, (_, pattern: string) => formatDateWithPattern(context.date, pattern));
     output = output.replace(/\{trim_start_custom="(.*?)"\}/g, (_, pattern: string) => formatSecondsWithPattern(context.startSec, pattern));
-    output = output.replace(/\{trim_end_custom="(.*?)"\}/g, (_, pattern: string) => formatSecondsWithPattern(context.startSec + context.durationSec, pattern));
+    output = output.replace(/\{trim_end_custom="(.*?)"\}/g, (_, pattern: string) => formatSecondsWithPattern(context.endSec ?? (context.startSec + context.durationSec), pattern));
     output = output.replace(/\{trim_length_custom="(.*?)"\}/g, (_, pattern: string) => formatSecondsWithPattern(context.durationSec, pattern));
     output = output.replace(/\{length_custom="(.*?)"\}/g, (_, pattern: string) => formatSecondsWithPattern(context.totalSec, pattern));
 
@@ -1662,11 +1664,34 @@ function formatClipTime(seconds: number): string {
     return formatSecondsToTime(Math.floor(rounded / 1000)) + (milliseconds ? '.' + String(milliseconds).padStart(3, '0') : '');
 }
 
+let clipOmissionState: { config: import('./main/domain/vod-edit-plan').OmissionConfig | null; plan: import('./main/domain/vod-edit-plan').EditedVodPlan | null } | null = null;
+let clipSavedNaming: { format: CustomClip['filenameFormat']; template: string } | null = null;
+
+function updateClipOmissionState(): void {
+    const isEditing = clipOmissionState !== null;
+    const plan = clipOmissionState?.plan;
+    byId('clipDialogDurationLabel').textContent = isEditing ? (currentLanguage === 'de' ? 'Markierter Bereich' : 'Selected range') : UI_TEXT.clips.dialogDuration;
+    byId('clipQueueHint').textContent = isEditing
+        ? plan && plan.parts.length ? (currentLanguage === 'de' ? `${formatUiNumber(plan.parts.length)} Dateien · ${formatClipTime(plan.duration)} · Auslassungen angewendet` : `${formatUiNumber(plan.parts.length)} files · ${formatClipTime(plan.duration)} · Exclusions applied`)
+            : (currentLanguage === 'de' ? 'Keine gültige Ausgabe geplant.' : 'No valid output planned.')
+        : UI_TEXT.clips.queueHint;
+    const start = parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value), end = parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
+    byId<HTMLButtonElement>('clipDialogConfirmBtn').disabled = isEditing ? !plan?.parts.length : !(Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start && end <= clipTotalSeconds);
+}
+
+function previewEditedFilename(part: import('./main/domain/vod-edit-plan').EditedVodPart): string {
+    if (!clipDialogData) return '';
+    const format = getSelectedFilenameFormat();
+    const template = format === 'template' ? byId<HTMLInputElement>('clipFilenameTemplate').value : format === 'parts' ? '{date}_Part{part_padded}.mp4' : format === 'timestamp' ? '{date}_CLIP_{trim_start}_{part}.mp4' : '{date}_{part}.mp4';
+    return buildTemplatePreview(template, { title: clipDialogData.title, date: new Date(clipDialogData.date), streamer: clipDialogData.streamer, partNum: String(part.number), startSec: part.ranges[0].start, durationSec: part.duration, totalSec: clipTotalSeconds, endSec: part.ranges[part.ranges.length - 1].end, vodId: clipDialogData.url.match(/videos\/(\d+)/)?.[1] });
+}
+
 let clipPlayer: ReturnType<Window['VodPlayer']['mount']> | null = null;
 
 function openClipDialog(url: string, title: string, date: string, streamer: string, duration: string): void {
     clipPlayer?.destroy();
     clipPlayer = null;
+    clipOmissionState = null; clipSavedNaming = null;
     clipDialogData = { url, title, date, streamer, duration };
     clipTotalSeconds = parseDurationToSeconds(duration);
 
@@ -1689,6 +1714,22 @@ function openClipDialog(url: string, title: string, date: string, streamer: stri
     RendererAccessibility.openDialog('clipModal', { onEscape: closeClipDialog });
     clipPlayer = window.VodPlayer.mount(byId('clipPlayer'), {
         url, title, date, duration: clipTotalSeconds, language: config.language || 'de', start: 0, end: clipTotalSeconds,
+        partMinutes: config.part_minutes || 60,
+        outputSettings: () => ({ startPart: Number(byId<HTMLInputElement>('clipStartPart').value || 1) }),
+        filename: previewEditedFilename,
+        onOmissions(state) { clipOmissionState = state; updateClipOmissionState(); },
+        onMode(active) {
+            if (active) {
+                clipSavedNaming = { format: getSelectedFilenameFormat(), template: byId<HTMLInputElement>('clipFilenameTemplate').value };
+                query<HTMLInputElement>('input[name="filenameFormat"][value="template"]').checked = true;
+                byId<HTMLInputElement>('clipFilenameTemplate').value = config.filename_template_parts || DEFAULT_PARTS_TEMPLATE;
+            } else if (clipSavedNaming) {
+                query<HTMLInputElement>(`input[name="filenameFormat"][value="${clipSavedNaming.format}"]`).checked = true;
+                byId<HTMLInputElement>('clipFilenameTemplate').value = clipSavedNaming.template;
+                clipSavedNaming = null;
+            }
+            updateFilenameExamples();
+        },
         onRange(start, end) {
             byId<HTMLInputElement>('clipStartTime').value = formatClipTime(start);
             byId<HTMLInputElement>('clipEndTime').value = formatClipTime(end);
@@ -1709,6 +1750,7 @@ function closeClipDialog(): void {
     clipPlayer = null;
     RendererAccessibility.closeDialog('clipModal');
     clipDialogData = null;
+    clipOmissionState = null; clipSavedNaming = null;
 }
 
 function seekClipBoundary(which: 'start' | 'end'): void {
@@ -1767,6 +1809,7 @@ function updateClipDuration(syncPlayer: boolean = true): void {
     byId<HTMLButtonElement>('clipStartLater').disabled = !isValid || endSec - startSec <= .001001;
     byId<HTMLButtonElement>('clipEndEarlier').disabled = !isValid || endSec - startSec <= .001001;
     byId<HTMLButtonElement>('clipEndLater').disabled = !isValid || endSec >= clipTotalSeconds;
+    clipPlayer?.setInputValid(isValid);
     if (isValid && syncPlayer) clipPlayer?.updateRange(startSec, endSec);
     durationDisplay.classList.toggle('invalid', !isValid);
     const milliseconds = Math.round(duration * 1000);
@@ -1774,6 +1817,7 @@ function updateClipDuration(syncPlayer: boolean = true): void {
     byId('clipDurationFraction').textContent = isValid ? '.' + String(milliseconds % 1000).padStart(3, '0') : '';
 
     updateFilenameExamples();
+    updateClipOmissionState();
 }
 
 function updateFilenameExamples(): void {
@@ -1781,6 +1825,7 @@ function updateFilenameExamples(): void {
         return;
     }
 
+    clipPlayer?.refreshOutput();
     const date = new Date(clipDialogData.date);
     const dateStr = `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getFullYear()}`;
     const partNum = byId<HTMLInputElement>('clipStartPart').value || '1';
@@ -1826,8 +1871,9 @@ async function confirmClipDialog(): Promise<void> {
         return;
     }
 
-    const startSec = parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value);
-    const endSec = parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
+    if (clipOmissionState && (!clipOmissionState.config || !clipOmissionState.plan?.parts.length)) return;
+    const startSec = clipOmissionState ? 0 : parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value);
+    const endSec = clipOmissionState ? clipTotalSeconds : parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
     const durationSec = endSec - startSec;
     const startPartStr = byId<HTMLInputElement>('clipStartPart').value.trim();
     const startPart = startPartStr ? parseInt(startPartStr, 10) : 1;
@@ -1872,7 +1918,8 @@ async function confirmClipDialog(): Promise<void> {
         durationSec,
         startPart,
         filenameFormat,
-        filenameTemplate: filenameFormat === 'template' ? filenameTemplate : undefined
+        filenameTemplate: filenameFormat === 'template' ? filenameTemplate : undefined,
+        ...(clipOmissionState?.config ? { omissions: clipOmissionState.config } : {})
     };
 
     if ((config.prevent_duplicate_downloads as boolean) !== false && hasActiveQueueDuplicate(

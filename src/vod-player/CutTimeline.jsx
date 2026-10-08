@@ -1,3 +1,4 @@
+import { OmissionBands } from './OmissionEditor.jsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, ZoomIn } from 'lucide-react';
@@ -107,7 +108,7 @@ export function RangeMarkers({ duration, range, onChange, text, from = 0, to = d
   </div>;
 }
 
-export function CutTimeline({ duration, range, position, chapters, onChange, onSeek, text, finePreview }) {
+export function CutTimeline({ duration, range, position, chapters, onChange, onSeek, text, finePreview, omissions = [] }) {
   const track = useRef(null);
   const [view, setView] = useState(null);
   function selectionView() {
@@ -138,6 +139,7 @@ export function CutTimeline({ duration, range, position, chapters, onChange, onS
           title={`${chapter.name} · ${cutTime(chapter.start)} – ${cutTime(chapter.end)}`}><span>{chapter.name}</span></span>)}
       </div>
       <CategoryColors className="vod-selection-stripe" height={3} chapters={chapters} from={from} to={to}/>
+      <OmissionBands ranges={omissions} from={from} to={to}/>
       <RangeMarkers duration={duration} range={range} onChange={onChange} text={text} from={from} to={to} finePreview={finePreview}/>
       {position >= from && position <= to && <i className="vod-selection-playhead" title={cutTime(position)} style={{ left: `${(position - from) / span * 100}%` }}/>} 
     </div>

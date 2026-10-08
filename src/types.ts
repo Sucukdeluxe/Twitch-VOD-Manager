@@ -4,6 +4,7 @@ export interface CustomClip {
     startPart: number;
     filenameFormat: 'simple' | 'timestamp' | 'template' | 'parts';
     filenameTemplate?: string;
+    omissions?: import('./main/domain/vod-edit-plan').OmissionConfig;
 }
 
 export interface MergeGroupItem {

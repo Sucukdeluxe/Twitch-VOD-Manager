@@ -7,6 +7,8 @@ import { pathToFileURL } from 'node:url';
 import type { Transform } from 'node:stream';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
+import { parseOmissionConfig, planEditedVod } from './main/domain/vod-edit-plan';
+import { cleanupEditedVod, downloadEditedVod } from './main/domain/vod-edit-download';
 import { remuxMp4 } from './main/domain/mp4-remux';
 import { VodPlaybackService } from './main/domain/vod-playback-service';
 import { VodTimelineService } from './main/domain/vod-timeline';
@@ -665,12 +667,16 @@ function sanitizeCustomClip(raw: unknown): CustomClip | undefined {
     const filenameFormat = raw.filenameFormat;
     if (filenameFormat !== 'simple' && filenameFormat !== 'timestamp' && filenameFormat !== 'template' && filenameFormat !== 'parts') return undefined;
 
+    const omissions = raw.omissions === undefined ? undefined : parseOmissionConfig(raw.omissions, durationSec);
+    if (raw.omissions !== undefined && (!omissions || startSec !== 0 || !Number.isInteger(startPart) || startPart < 1 || startPart > 100000)) return undefined;
+
     return {
         startSec: Math.max(0, startSec),
         durationSec: Math.max(1, durationSec),
         startPart: Math.max(1, Math.floor(startPart)),
         filenameFormat,
-        filenameTemplate: typeof raw.filenameTemplate === 'string' ? raw.filenameTemplate : undefined
+        filenameTemplate: typeof raw.filenameTemplate === 'string' ? raw.filenameTemplate : undefined,
+        ...(omissions ? { omissions } : {})
     };
 }
 
@@ -730,6 +736,7 @@ function sanitizeQueueItem(raw: unknown): QueueItem | null {
     }
 
     const customClip = sanitizeCustomClip(raw.customClip);
+    if (isPlainObject(raw.customClip) && raw.customClip.omissions !== undefined && !customClip) return null;
     if (customClip) item.customClip = customClip;
 
     const mergeGroup = sanitizeMergeGroup(raw.mergeGroup);
@@ -1434,7 +1441,9 @@ function getFreeDiskBytes(targetPath: string): number | null {
 }
 
 function estimateRequiredDownloadBytes(item: QueueItem): number {
-    const durationSeconds = Math.max(1, item.customClip?.durationSec || parseDuration(item.duration_str || '0s'));
+    const durationSeconds = item.customClip?.omissions
+        ? planEditedVod(item.customClip.durationSec, item.customClip.omissions.partDurationSec, item.customClip.omissions.ranges, item.customClip.startPart).duration
+        : Math.max(1, item.customClip?.durationSec || parseDuration(item.duration_str || '0s'));
 
     const bytesPerSecondByMode: Record<PerformanceMode, number> = {
         stability: 900 * 1024,
@@ -1444,9 +1453,9 @@ function estimateRequiredDownloadBytes(item: QueueItem): number {
 
     const mode = normalizePerformanceMode(config.performance_mode);
     const baseEstimate = durationSeconds * bytesPerSecondByMode[mode];
-    const withHeadroom = Math.ceil(baseEstimate * (item.customClip ? 1.2 : 1.35));
+    const withHeadroom = Math.ceil(baseEstimate * (item.customClip?.omissions ? 2.2 : item.customClip ? 1.2 : 1.35));
 
-    return Math.max(64 * 1024 * 1024, Math.min(withHeadroom, 40 * 1024 * 1024 * 1024));
+    return Math.max(64 * 1024 * 1024, Math.min(withHeadroom, (item.customClip?.omissions ? 160 : 40) * 1024 * 1024 * 1024));
 }
 
 function ensureDiskSpace(targetPath: string, requiredBytes: number, context: string): DownloadResult {
@@ -6209,6 +6218,13 @@ async function downloadLiveStream(
     return { success: true, outputFiles: finalRecordings };
 }
 
+function editedVodFolder(item: QueueItem): string | null {
+    if (!item.customClip?.omissions || !item.artifactRoot) return null;
+    const date = new Date(item.date);
+    const dateStr = String(date.getDate()).padStart(2, '0') + '.' + String(date.getMonth() + 1).padStart(2, '0') + '.' + date.getFullYear();
+    return path.join(item.artifactRoot, item.streamer.replace(/[^a-zA-Z0-9_-]/g, ''), dateStr);
+}
+
 async function downloadVOD(
     item: QueueItem,
     onProgress: (progress: DownloadProgress) => void
@@ -6260,7 +6276,11 @@ async function downloadVOD(
     const date = new Date(item.date);
     const dateStr = `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getFullYear()}`;
 
-    const folder = path.join(config.download_path, streamer, dateStr);
+    if (item.customClip?.omissions && !item.artifactRoot) {
+        item.artifactRoot = path.resolve(config.download_path);
+        saveQueue(downloadQueue);
+    }
+    const folder = path.join(item.customClip?.omissions ? item.artifactRoot! : config.download_path, streamer, dateStr);
     fs.mkdirSync(folder, { recursive: true });
 
     const totalDuration = parseDuration(item.duration_str);
@@ -6294,6 +6314,60 @@ async function downloadVOD(
 
         return path.join(folder, relativeName);
     };
+
+    if (item.customClip?.omissions) {
+        const clip = item.customClip;
+        const omissions = clip.omissions!;
+        if (!(await ensureFfmpegInstalled())) return { success: false, error: tBackend('ffmpegAutoInstallFailed') };
+        const plan = planEditedVod(clip.durationSec, omissions.partDurationSec, omissions.ranges, clip.startPart);
+        const wait = async (): Promise<boolean> => !appShutdownStarted && downloadQueue.some(candidate => candidate.id === item.id)
+            && !cancelledItemIds.has(item.id) && await waitForQueuePhaseBoundary(item.id);
+        try {
+            const outputFiles = await downloadEditedVod({
+                id: item.id, url: item.url, folder, duration: clip.durationSec, startPart: clip.startPart, omissions,
+                namingIdentity: JSON.stringify([clip.filenameFormat, clip.filenameTemplate, item.title, item.date, item.streamer]),
+                ffmpegPath: getFFmpegPath(), ffprobePath: getFFprobePath(), wait,
+                onProcess(process) {
+                    const command = process.spawnfile;
+                    recordManagedToolExecution(managedToolKindFromCommand(command) || 'ffmpeg', command);
+                    const registration = queueProcessRegistry.register(item.id, 'post-processing', createPhaseBoundaryProcessResource(process, () => waitForChildProcessExit(process)));
+                    if (appShutdownStarted || cancelledItemIds.has(item.id) || !downloadQueue.some(candidate => candidate.id === item.id)) process.kill();
+                    return () => registration.release();
+                },
+                async download(range, filename, progress) {
+                    const clock = (seconds: number): string => {
+                        const milliseconds = Math.round(seconds * 1000);
+                        return formatDuration(Math.floor(milliseconds / 1000)) + '.' + String(milliseconds % 1000).padStart(3, '0');
+                    };
+                    const result = await downloadVODPart(item.url, filename, clock(range.start), clock(range.end - range.start), value => progress(value.progress), item.id, 1, 1);
+                    if (!result.success) throw new Error(result.error || tBackend('editedVodFailed'));
+                },
+                filename(part) {
+                    const template = clip.filenameFormat === 'template' ? clip.filenameTemplate || DEFAULT_FILENAME_TEMPLATE_PARTS
+                        : clip.filenameFormat === 'parts' ? DEFAULT_FILENAME_TEMPLATE_PARTS
+                            : clip.filenameFormat === 'timestamp' ? '{date}_CLIP_{trim_start}_{part}.mp4' : '{date}_{part}.mp4';
+                    const relativeName = renderClipFilenameTemplate({ template: normalizeFilenameTemplate(template, DEFAULT_FILENAME_TEMPLATE_PARTS),
+                        title: item.title, vodId, channel: item.streamer, date, part: part.number, partPadded: String(part.number).padStart(2, '0'),
+                        trimStartSec: part.ranges[0].start, trimEndSec: part.ranges[part.ranges.length - 1].end, trimLengthSec: part.duration, fullLengthSec: clip.durationSec });
+                    return ensureUniqueFilename(path.join(folder, relativeName), item.id);
+                },
+                checkSpace(bytes) {
+                    const result = ensureDiskSpace(folder, bytes, 'MP4');
+                    if (!result.success) throw new Error(result.error);
+                },
+                progress(progress, phase, index, count) {
+                    onProgress({ id: item.id, progress, speed: '', eta: '', currentPart: phase === 'publish' ? index : 0, totalParts: plan.parts.length,
+                        status: tBackend(phase === 'download' ? 'editedVodDownloading' : phase === 'assemble' ? 'editedVodAssembling' : 'editedVodPublishing', { index, count }) });
+                },
+            });
+            return { success: true, outputFiles };
+        } catch (error) {
+            appendDebugLog('edited-vod-failed', { itemId: item.id, error: String(error) });
+            return { success: false, error: tBackend('editedVodFailed') };
+        } finally {
+            if (!downloadQueue.some(candidate => candidate.id === item.id)) await cleanupEditedVod(folder, item.id);
+        }
+    }
 
     // Custom Clip - download specific time range
     if (item.customClip) {
@@ -7087,6 +7161,8 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
         });
 
         saveQueue(downloadQueue);
+        const editFolder = editedVodFolder(item);
+        if (editFolder && finalResult.success) await cleanupEditedVod(editFolder, item.id).catch(error => appendDebugLog('edited-vod-cleanup-failed', String(error)));
         if (!appShutdownStarted) emitQueueUpdated();
     } finally {
         queueProcessRegistry.releaseItem(item.id);
@@ -7906,6 +7982,8 @@ registerTrustedIpcHandler(ipcMain, 'remove-from-queue', isTrustedRendererEvent, 
                 runtimeMetrics.activeItemTitle = nextActiveId ? downloadQueue.find((item) => item.id === nextActiveId)?.title || null : null;
                 appendDebugLog('queue-item-removed-active-cancelled', { id });
             }
+            const editFolder = removedItem ? editedVodFolder(removedItem) : null;
+            if (editFolder && !wasActiveItem) await cleanupEditedVod(editFolder, id);
             for (const cleanupPath of getMergeGroupCleanupPaths(removedItem)) {
                 try { if (fs.existsSync(cleanupPath)) fs.unlinkSync(cleanupPath); } catch { }
             }
@@ -7990,7 +8068,7 @@ ipcMain.handle('create-merge-group', (event, itemIds: string[]) => {
     }
 
     // Validate all are pending
-    if (selectedItems.some(item => item.status !== 'pending')) {
+    if (selectedItems.some(item => item.status !== 'pending' || item.customClip || item.mergeGroup || item.isLive)) {
         return downloadQueue;
     }
 

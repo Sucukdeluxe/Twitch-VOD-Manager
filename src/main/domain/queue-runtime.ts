@@ -61,6 +61,7 @@ export function canonicalQueueItemIdentity(item: QueueIdentityInput): string {
         item.customClip.startSec,
         item.customClip.durationSec,
         item.customClip.startPart,
+        ...(item.customClip.omissions ? [JSON.stringify(item.customClip.omissions)] : []),
     ].join('|');
 }
 

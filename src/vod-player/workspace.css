@@ -164,3 +164,37 @@
 .history-select-range { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: 8px; margin-top: 12px; border: 1px solid var(--border-soft); border-radius: 6px; font-size: 12px; color: var(--text); background: var(--bg-hover); user-select: none; }
 .history-select-range:hover { border-color: var(--text-secondary); }
 .vod-history button:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+
+.vod-omission-modes { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
+.vod-omission-modes button, .vod-omission-actions button, .vod-omission-heading button { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:34px; padding:7px 12px; border:1px solid var(--border-soft); border-radius:6px; background:var(--bg-elevated); color:var(--text); font-size:12px; font-weight:600; cursor:pointer; user-select:none; }
+.vod-omission-modes button[aria-pressed="true"] { background:color-mix(in srgb, #9470ce 18%, var(--bg-elevated)); border-color:#9470ce; }
+.vod-omission-modes button:focus-visible, .vod-omission-editor button:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
+.vod-omission-editor { margin-top:18px; border-top:1px solid var(--border-soft); padding-top:16px; }
+.vod-omission-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.vod-omission-actions > button:first-child { background:#67439f; border-color:#9470ce; color:#fff; }
+.vod-omission-actions button:disabled { opacity:.45; cursor:default; }
+.vod-omission-actions label { display:flex; align-items:center; gap:10px; margin-left:auto; font-size:12px; }
+.vod-omission-actions input { width:82px; min-height:34px; padding:6px 9px; border:1px solid var(--border-soft); border-radius:6px; background:var(--bg-elevated); color:var(--text); font-size:13px; }
+.vod-omission-help { font-size:12px; line-height:1.5; color:var(--text-secondary); margin:10px 0; }
+.vod-omission-columns { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1.2fr); gap:18px; }
+.vod-omission-editor h4 { font-size:13px; margin:0; }
+.vod-omission-heading { display:flex; align-items:center; flex-wrap:wrap; gap:8px; justify-content:space-between; min-height:34px; }
+.vod-omission-heading h4 span { color:var(--text-secondary); margin-left:5px; }
+.vod-omission-heading button { min-height:30px; padding:5px 8px; font-size:11px; }
+.vod-omission-editor ol { list-style:none; padding:0; margin:10px 0 0; max-height:260px; overflow-y:auto; scrollbar-gutter:stable; }
+.vod-omission-editor li { margin-bottom:7px; border:1px solid var(--border-soft); background:var(--bg-elevated); border-radius:7px; padding:8px; font-size:12px; }
+.vod-omission-list li { display:flex; align-items:center; gap:4px; }
+.vod-omission-list li.is-editing { border-color:#9470ce; }
+.vod-omission-time { min-width:0; flex:1; text-align:left; padding:6px; border:0; color:var(--text); background:transparent; font-size:12px; font-variant-numeric:tabular-nums; cursor:pointer; }
+.vod-omission-icon { display:grid; place-items:center; flex:0 0 30px; width:30px; height:30px; padding:0; border:1px solid var(--border-soft); border-radius:5px; background:transparent; color:var(--text); cursor:pointer; }
+.vod-omission-editor button:hover:not(:disabled) { filter:brightness(1.12); border-color:var(--text-secondary); }
+.vod-output-summary { display:flex; flex-wrap:wrap; gap:5px 14px; margin-top:10px; font-size:12px; }
+.vod-output-summary strong { color:var(--success); }
+.vod-output-preview li > div { display:flex; justify-content:space-between; gap:10px; }
+.vod-output-filename, .vod-output-sources { display:block; overflow-wrap:anywhere; margin-top:5px; font-size:11px; line-height:1.5; }
+.vod-output-sources { color:var(--text-secondary); }
+.vod-omission-bands { position:absolute; inset:3px 0 0; pointer-events:none; z-index:3; }
+.vod-omission-bands i { position:absolute; top:0; bottom:0; background:repeating-linear-gradient(135deg,#9297a355 0 4px,#171b2277 4px 8px); border:1px solid #9ba2b2; box-sizing:border-box; }
+.vod-omission-bands.is-compact { inset:5px 7px; }
+@media(max-width:800px) { .vod-omission-columns { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:500px) { .vod-omission-actions label { margin-left:0; } }

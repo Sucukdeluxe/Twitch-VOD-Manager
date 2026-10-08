@@ -6,6 +6,17 @@ function renderRecordingHealthBadge(health: 'ok' | 'stale' | 'unknown' | undefin
     return `<span class="queue-health-dot ${cls}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></span>`;
 }
 
+function renderQueueOmissions(item: QueueItem): string {
+    const clip = item.customClip;
+    if (!clip?.omissions) return '';
+    try {
+        const plan = window.VodPlayer.planEditedVod(clip.durationSec, clip.omissions.partDurationSec, clip.omissions.ranges, clip.startPart);
+        const label = currentLanguage === 'de' ? 'Auslassungen' : 'Exclusions';
+        const summary = formatUiNumber(plan.parts.length) + (currentLanguage === 'de' ? ' Dateien · ' : ' files · ') + formatUiNumber(clip.omissions.partDurationSec / 60) + (currentLanguage === 'de' ? ' Minuten pro Part · ' : ' minutes per part · ') + formatClipTime(plan.duration);
+        return `<div class="queue-omissions"><strong>${escapeHtml(label)}: ${formatUiNumber(plan.omitted.length)}</strong><div>${escapeHtml(summary)}</div><div>${escapeHtml(plan.omitted.map(range => formatClipTime(range.start) + "–" + formatClipTime(range.end)).join(" · "))}</div></div>`;
+    } catch { return ''; }
+}
+
 function renderQueueItemFileActions(item: QueueItem): string {
     if (item.status !== 'completed' || !item.outputFiles || item.outputFiles.length === 0) {
         return '';
@@ -175,7 +186,8 @@ function buildQueueFingerprint(url: string, streamer: string, date: string, cust
             customClip.durationSec,
             customClip.startPart,
             customClip.filenameFormat,
-            (customClip.filenameTemplate || '').trim().toLowerCase()
+            (customClip.filenameTemplate || '').trim().toLowerCase(),
+            customClip.omissions ? JSON.stringify(customClip.omissions) : ''
         ].join(':')
         : 'vod';
 
@@ -361,7 +373,7 @@ function showQueueContextMenu(x: number, y: number, item: QueueItem, invoker: HT
     const isPending = item.status === 'pending' || item.status === 'paused';
     const isFailed = item.status === 'error' && !item.mergeRecoveryBlocked;
     const isCompleted = item.status === 'completed';
-    const canSelectForMerge = item.status === 'pending' && !item.mergeGroup && !item.isLive;
+    const canSelectForMerge = item.status === 'pending' && !item.mergeGroup && !item.isLive && !item.customClip;
 
     if (canSelectForMerge) {
         const isSelectedForMerge = selectedQueueIds.includes(item.id);
@@ -497,7 +509,7 @@ function updateMergeGroupButton(): void {
 
     // Clean up selections: only keep IDs that are still pending in queue
     const validIds = new Set(
-        queue.filter(item => item.status === 'pending' && !item.mergeGroup).map(item => item.id)
+        queue.filter(item => item.status === 'pending' && !item.mergeGroup && !item.isLive && !item.customClip).map(item => item.id)
     );
     selectedQueueIds = selectedQueueIds.filter(id => validIds.has(id));
 
@@ -745,6 +757,7 @@ function renderQueue(): void {
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailStreamer)}</span> <span class="queue-streamer-name">${escapeHtml(getStreamerDisplayName(item.streamer))}</span></div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDuration)}</span> ${escapeHtml(item.duration_str)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDate)}</span> ${escapeHtml(formatUiDateTime(item.date))}</div>
+                        ${renderQueueOmissions(item)}
                         ${renderQueueItemFileActions(item)}
                         </div></div>
                     </div>

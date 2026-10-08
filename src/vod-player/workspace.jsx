@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { ArchivePlayer } from './ArchivePlayer.jsx';
 import { TitleHistory } from './TitleHistory.jsx';
+import { OmissionModes, OmissionEditor } from './OmissionEditor.jsx';
+import { normalizeOmissions, planEditedVod } from '../main/domain/vod-edit-plan';
 import { ListVideo } from 'lucide-react';
 import { CutTimeline } from './CutTimeline.jsx';
 import { playerTexts } from './texts.js';
@@ -25,6 +27,16 @@ function Workspace({ options, bind }) {
   const [session, setSession] = useState(null), [error, setError] = useState(false), [attempt, setAttempt] = useState(0);
   const [duration, setDuration] = useState(options.duration), [position, setPosition] = useState(0);
   const [range, setRange] = useState({ start: options.start, end: options.end });
+  const [omitting, setOmitting] = useState(false), [omissions, setOmissions] = useState([]), [editing, setEditing] = useState(null);
+  const [partMinutes, setPartMinutes] = useState(String(options.partMinutes || 60)), [outputRevision, setOutputRevision] = useState(0), [inputValid, setInputValid] = useState(true);
+  const outputSettings = options.outputSettings?.() || { startPart: 1 };
+  const editedPlan = useMemo(() => {
+    try { return Number.isInteger(Number(partMinutes)) && Number(partMinutes) >= 1 && Number(partMinutes) <= 1440 ? planEditedVod(duration, Number(partMinutes) * 60, omissions, outputSettings.startPart) : null; }
+    catch { return null; }
+  }, [duration, partMinutes, omissions, outputRevision, outputSettings.startPart]);
+  const visibleOmissions = useMemo(() => { try { return omitting ? normalizeOmissions(omissions, duration) : []; } catch { return []; } }, [omitting, omissions, duration]);
+  useEffect(() => { options.onOmissions?.(omitting ? { config: editedPlan ? { version: 1, partDurationSec: Number(partMinutes) * 60, ranges: editedPlan.omitted } : null, plan: editedPlan } : null); }, [omitting, editedPlan, partMinutes, options]);
+  function changeMode(active) { if (active === omitting) return; setOmitting(active); setEditing(null); options.onMode?.(active); setOutputRevision(value => value + 1); }
   const [seekRequest, setSeekRequest] = useState(null), [selectionPlaying, setSelectionPlaying] = useState(false);
   const host = useRef(null), rangeRef = useRef(range), selectedPlayback = useRef(false);
   rangeRef.current = range;
@@ -41,7 +53,7 @@ function Workspace({ options, bind }) {
     if (interaction?.source === 'pointer' && interaction.boundary === 'start') setSeekRequest({ seconds: start });
   }, [options]);
   const seek = useCallback(seconds => { setSeekRequest({ seconds }); }, []);
-  bind.current = { updateRange(start, end) { setRange({ start, end }); selectedPlayback.current = false; setSelectionPlaying(false); }, seek };
+  bind.current = { updateRange(start, end) { setRange({ start, end }); selectedPlayback.current = false; setSelectionPlaying(false); }, seek, refreshOutput() { setOutputRevision(value => value + 1); }, setInputValid };
   useEffect(() => {
     const id = requestId;
     let closed = false;
@@ -70,6 +82,8 @@ function Workspace({ options, bind }) {
       const end = Math.abs(current.end - duration) < .0005 ? total : Math.min(total, Math.max(start + .001, current.end));
       rangeRef.current = { start, end };
       setDuration(total); setRange(rangeRef.current);
+      setOmissions(current => current.map(value => ({ start: value.start, end: Math.abs(value.end - duration) < .0005 ? total : Math.min(total, value.end) })).filter(value => value.end > value.start));
+      setEditing(null);
       options.onDuration(total); options.onRange(start, end);
     }
   }, [duration, options]);
@@ -98,7 +112,7 @@ function Workspace({ options, bind }) {
   }}>
     {session ? <ArchivePlayer key={session.id} id={options.url} userId="tvm-local" parts={parts} seconds={range.start}
       broadcastStarted={started} started t={t} chapters={chapters} titleHistory={metadata?.titleHistory || []} vodTitle={metadata?.title || options.title} chapterPreview={chapterPreview} onProgress={() => {}} onError={() => setError(true)}
-      onPosition={onPosition} onTimeline={onTimeline} seekRequest={seekRequest} cutRange={range} onCutRange={changeRange} cutText={text}/>
+      onPosition={onPosition} onTimeline={onTimeline} seekRequest={seekRequest} cutRange={range} onCutRange={changeRange} cutText={text} omissions={visibleOmissions}/>
       : !error && <div className="vod-player-loading" role="status"><span className="vod-loading-symbol"/>{text.loading}</div>}
     {error && <div className="vod-player-error" role="status"><span>{text.failed}</span><button type="button" className="btn-secondary" onClick={() => setAttempt(value => value + 1)}>{text.retry}</button></div>}
     <div className="vod-player-source"><span>{text.source}: {session?.quality === 'best' ? text.sourceBest : session?.quality || '…'}</span>{selectionPlaying && <span>{text.active}</span>}</div>
@@ -116,8 +130,10 @@ function Workspace({ options, bind }) {
         {metadata.chaptersStatus === 'unavailable' && <p className="vod-history-status">{t('historyNoChapterSource')}</p>}
       </>}
     </div>, document.getElementById('clipHistory'))}
+    {createPortal(<OmissionModes active={omitting} onChange={changeMode} language={language}/>, document.getElementById('clipEditMode'))}
+    {omitting && createPortal(<OmissionEditor ranges={omissions} setRanges={setOmissions} partMinutes={partMinutes} setPartMinutes={setPartMinutes} plan={editedPlan} range={range} valid={inputValid} duration={duration} language={language} editing={editing} setEditing={setEditing} selectRange={value => { changeRange(value.start, value.end); seek(value.start); }} filename={part => options.filename?.(part) || ''}/>, document.getElementById('clipOmissionPanel'))}
     {['start', 'end'].map(which => createPortal(<button type="button" className="vod-set-boundary" disabled={!session} aria-label={which === 'start' ? text.markStart : text.markEnd} title={which === 'start' ? text.markStart : text.markEnd} onClick={() => mark(which)}>{text.setHere}</button>, document.getElementById(which === 'start' ? 'clipMarkStart' : 'clipMarkEnd'), which))}
-    {createPortal(<><CutTimeline chapters={chapters} duration={Math.max(.1, duration)} range={range} position={position} onChange={changeRange} onSeek={seek} text={text}
+    {createPortal(<><CutTimeline chapters={chapters} duration={Math.max(.1, duration)} range={range} position={position} onChange={changeRange} onSeek={seek} text={text} omissions={visibleOmissions}
       finePreview={{root:host, parts, broadcastStarted:started, chapters, titleHistory:metadata?.titleHistory || [], vodTitle:metadata?.title || options.title, t}}/>
     <div className="vod-mark-actions" title={text.keyboard}>
       <button type="button" className="btn-secondary" disabled={!session} onClick={playRange}>{selectionPlaying ? text.stopRange : text.playRange}</button>
@@ -128,6 +144,7 @@ function Workspace({ options, bind }) {
 }
 
 window.VodPlayer = {
+  planEditedVod,
   mount(element, options) {
     const root = createRoot(element), bind = { current: null };
     root.render(<Workspace options={options} bind={bind}/>);
@@ -135,6 +152,8 @@ window.VodPlayer = {
       destroy() { root.unmount(); },
       updateRange(start, end) { bind.current?.updateRange(start, end); },
       seek(seconds) { bind.current?.seek(seconds); },
+      refreshOutput() { bind.current?.refreshOutput(); },
+      setInputValid(valid) { bind.current?.setInputValid(valid); },
     };
   },
 };
