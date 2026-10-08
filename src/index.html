@@ -317,7 +317,7 @@
                 <div class="context-panel-heading" data-context-heading>Video schneiden</div>
                 <nav class="context-list" aria-label="Cutter sections">
                     <button type="button" class="context-link active" onclick="selectCutterVideo()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path></svg><span data-label-source="cutterSelectTitle">Video auswählen</span></button>
-                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('timelineContainer', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12h16M7 8v8M17 8v8"></path></svg><span data-label-source="cutterInfoSelectionLabel">Auswahl</span></button>
+                    <button type="button" class="context-link" onclick="focusWorkspaceTarget('timelineContainer', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12h16M7 8v8M17 8v8"></path></svg><span data-label-source="cutterEditHeading">Schnittbereich</span></button>
                     <button type="button" class="context-link" onclick="focusWorkspaceTarget('btnCut', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="6" cy="7" r="3"></circle><circle cx="6" cy="17" r="3"></circle><path d="m8.5 8.5 11 7M8.5 15.5 20 8"></path></svg><span data-label-source="btnCut">Schneiden</span></button>
                 </nav>
             </section>
@@ -519,15 +519,13 @@
                                     </div>
                                     <div class="cutter-track cutter-audio-track" id="cutterAudioTrack">
                                         <span class="cutter-track-label" id="cutterAudioTrackLabel">AUDIO</span>
-                                        <img id="cutterWaveform" alt="" draggable="false">
+                                        <canvas id="cutterWaveform" aria-hidden="true" hidden></canvas>
                                         <div class="cutter-audio-empty" id="cutterAudioEmpty">Keine Audiospur</div>
                                     </div>
                                     <div class="cutter-outside-shade cutter-outside-left" id="cutterOutsideLeft"></div>
                                     <div class="cutter-outside-shade cutter-outside-right" id="cutterOutsideRight"></div>
-                                    <div class="timeline-selection" id="timelineSelection">
-                                        <button type="button" class="timeline-handle start" id="cutterTrimStartHandle" aria-label="Start verschieben">I</button>
-                                        <button type="button" class="timeline-handle end" id="cutterTrimEndHandle" aria-label="Ende verschieben">O</button>
-                                    </div>
+                                    <div class="timeline-selection" id="timelineSelection"></div>
+                                    <div id="cutterRangeMarkers"></div>
                                     <div class="cutter-cut-overlays" id="cutterCutOverlays"></div>
                                     <div class="timeline-current" id="timelineCurrent"><span></span></div>
                                 </div>
@@ -536,37 +534,60 @@
                                     <div id="cutterPlayerControls"></div>
                                 </div>
                             </section>
-                            <aside class="cutter-sidebar">
-                                <h3 id="cutterExportHeading">Export</h3>
-                                <div class="cutter-info" id="cutterInfo">
-                                    <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoDurationLabel">Dauer</span><span class="cutter-info-value" id="infoDuration">--:--:--</span></div>
-                                    <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoResolutionLabel">Auflösung</span><span class="cutter-info-value" id="infoResolution">----×----</span></div>
-                                    <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoFpsLabel">FPS</span><span class="cutter-info-value" id="infoFps">--</span></div>
-                                    <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoSelectionLabel">Ausgabe</span><span class="cutter-info-value" id="infoSelection">--:--:--</span></div>
+                            <aside class="cutter-sidebar" aria-labelledby="cutterExportHeading">
+                                <div class="cutter-export-header"><h3 id="cutterExportHeading">Export</h3><span class="cutter-format-badge" id="cutterFormatBadge">MP4</span></div>
+                                <div class="cutter-export-body">
+                                    <div class="cutter-export-summary">
+                                        <span id="cutterInfoSelectionLabel">Ausgabelänge</span>
+                                        <strong id="infoSelection">--:--:--</strong>
+                                        <span class="cutter-export-codecs" id="cutterExportCodecs">H.264 · AAC</span>
+                                    </div>
+                                    <fieldset class="cutter-profile-fieldset">
+                                        <legend id="cutterExportProfileLabel">Exportprofil</legend>
+                                        <select id="cutterExportProfile" onchange="setCutterExportProfile(this.value)" disabled hidden aria-labelledby="cutterExportProfileLabel">
+                                            <option value="quality" id="cutterProfileQualityOption">Qualität</option>
+                                            <option value="balanced" id="cutterProfileBalancedOption" selected>Ausgewogen</option>
+                                            <option value="fast" id="cutterProfileFastOption">Schnell</option>
+                                            <option value="archive" id="cutterProfileArchiveOption">Archiv</option>
+                                        </select>
+                                        <div class="cutter-profile-grid">
+                                            <label><input type="radio" name="cutterProfile" value="quality" onchange="setCutterExportProfile(this.value)" disabled><span id="cutterProfileQualityLabel">Qualität</span></label>
+                                            <label><input type="radio" name="cutterProfile" value="balanced" onchange="setCutterExportProfile(this.value)" disabled checked><span id="cutterProfileBalancedLabel">Ausgewogen</span></label>
+                                            <label><input type="radio" name="cutterProfile" value="fast" onchange="setCutterExportProfile(this.value)" disabled><span id="cutterProfileFastLabel">Schnell</span></label>
+                                            <label><input type="radio" name="cutterProfile" value="archive" onchange="setCutterExportProfile(this.value)" disabled><span id="cutterProfileArchiveLabel">Archiv</span></label>
+                                        </div>
+                                        <p class="cutter-field-help" id="cutterProfileHelp"></p>
+                                    </fieldset>
+                                    <div class="cutter-export-field">
+                                        <label for="cutterAudioStream" id="cutterAudioStreamLabel">Audiospur</label>
+                                        <select id="cutterAudioStream" onchange="setCutterAudioStream(this.value)" disabled aria-describedby="cutterAudioHelp"><option value="0" id="cutterAudioStreamEmptyOption">Keine Audiospur</option></select>
+                                        <p class="cutter-field-help" id="cutterAudioHelp"></p>
+                                    </div>
+                                    <details class="cutter-format-details">
+                                        <summary id="cutterFormatSummary">Weitere Optionen</summary>
+                                        <div class="cutter-export-field">
+                                            <label for="cutterExportEncoder" id="cutterExportEncoderLabel">Verarbeitung</label>
+                                            <select id="cutterExportEncoder" onchange="setCutterExportEncoder(this.value)" disabled><option value="software" id="cutterEncoderSoftwareOption">Software (CPU)</option></select>
+                                        </div>
+                                        <div class="cutter-info" id="cutterInfo">
+                                            <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoDurationLabel">Originaldauer</span><span class="cutter-info-value" id="infoDuration">--:--:--</span></div>
+                                            <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoResolutionLabel">Auflösung</span><span class="cutter-info-value" id="infoResolution">----×----</span></div>
+                                            <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoFpsLabel">Bildrate</span><span class="cutter-info-value" id="infoFps">--</span></div>
+                                        </div>
+                                        <p id="cutterEncodingHint" class="cutter-field-help"></p>
+                                    </details>
                                 </div>
-                                <div class="cutter-export-options">
-                                    <label for="cutterExportProfile" id="cutterExportProfileLabel">Exportprofil</label>
-                                    <select id="cutterExportProfile" onchange="setCutterExportProfile(this.value)" disabled>
-                                        <option value="quality" id="cutterProfileQualityOption">Qualität</option>
-                                        <option value="balanced" id="cutterProfileBalancedOption" selected>Ausgewogen</option>
-                                        <option value="fast" id="cutterProfileFastOption">Schnell</option>
-                                        <option value="archive" id="cutterProfileArchiveOption">Archiv</option>
-                                    </select>
-                                    <label for="cutterExportEncoder" id="cutterExportEncoderLabel">Encoder</label>
-                                    <select id="cutterExportEncoder" onchange="setCutterExportEncoder(this.value)" disabled>
-                                        <option value="software" id="cutterEncoderSoftwareOption">Software</option>
-                                    </select>
-                                    <label for="cutterAudioStream" id="cutterAudioStreamLabel">Audiospur</label>
-                                    <select id="cutterAudioStream" onchange="setCutterAudioStream(this.value)" disabled>
-                                        <option value="0" id="cutterAudioStreamEmptyOption">Keine Audiospur</option>
-                                    </select>
+                                <div class="cutter-export-footer">
+                                    <div class="progress-container" id="cutProgress">
+                                        <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Cut progress" id="cutProgressGauge"><div class="progress-bar-fill" id="cutProgressBar"></div></div>
+                                        <div class="progress-text" id="cutProgressText">0%</div>
+                                    </div>
+                                    <p class="cutter-field-help cutter-export-state" id="cutterExportState" hidden></p>
+                                    <div class="cutter-actions">
+                                        <button type="button" class="btn-secondary" id="cutterCancelExportBtn" onclick="cancelCutterExport()" hidden>Abbrechen</button>
+                                        <button type="button" class="btn-primary" id="btnCut" onclick="startCutting()" disabled>Video exportieren</button>
+                                    </div>
                                 </div>
-                                <details class="cutter-format-details"><summary id="cutterFormatSummary">Format und Qualität</summary><p id="cutterEncodingHint" class="clip-preview-hint"></p></details>
-                                <div class="cutter-actions">
-                                    <button type="button" class="btn-secondary" id="cutterCancelExportBtn" onclick="cancelCutterExport()" hidden>Abbrechen</button>
-                                    <button type="button" class="btn-primary" id="btnCut" onclick="startCutting()" disabled>Video exportieren</button>
-                                </div>
-
                             </aside>
                         </div>
                         <section class="cutter-edit-panel" id="cutterEditPanel" hidden>
@@ -597,17 +618,12 @@
                                 <button type="button" class="btn-secondary" id="cutterNewCutBtn" onclick="addCutterCut()" disabled>+ Neuer Bereich</button>
                                 <label class="cutter-preview-toggle"><input type="checkbox" id="cutterPreviewMode" checked onchange="setCutterPreviewMode(this.checked)"><span id="cutterPreviewModeLabel">Auslassungen überspringen</span></label>
                                 <span class="cutter-edit-hint" id="cutterTimeHint">HH:MM:SS:FF · I/O setzt die Ausschnittgrenzen</span>
-                                <span class="cutter-cut-count" id="cutterCutCount">0</span>
+                                <span class="cutter-cut-count" id="cutterCutCount" hidden>0</span>
                             </div>
                             <div class="cutter-cut-list" id="cutterCutList"></div>
                         </section>
 
-                        <div class="progress-container" id="cutProgress">
-                            <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Cut progress" id="cutProgressGauge">
-                                <div class="progress-bar-fill" id="cutProgressBar"></div>
-                            </div>
-                            <div class="progress-text" id="cutProgressText">0%</div>
-                        </div>
+
 
                     </div>
                 </div>

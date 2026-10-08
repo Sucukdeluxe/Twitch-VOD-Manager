@@ -391,6 +391,7 @@ interface VideoEditorAssets {
 }
 
 interface VideoEditorWaveform {
+    channels?: number;
     jobId: number;
     waveform: string | null;
     pixelWidth: number;
@@ -3078,17 +3079,20 @@ async function prepareVideoEditorWaveform(filePath: string, jobId: number): Prom
     const promise = (async (): Promise<VideoEditorWaveform | null> => {
         const tempDir = fs.mkdtempSync(path.join(app.getPath('temp'), `tvm-editor-waveform-${process.pid}-`));
         const waveformFile = path.join(tempDir, 'waveform.png');
+        const channels = Math.max(1, Math.min(8, job.info.audioStreams[0]?.channels || 1));
+        const pixelHeight = Math.max(128, channels * 64);
         try {
             const success = await runEditorWaveformProcess([
                 '-i', filePath,
-                '-filter_complex', 'aformat=channel_layouts=mono,showwavespic=s=32000x240:colors=white',
+                '-filter_complex_threads', '1',
+                '-filter_complex', `[0:a:0]showwavespic=s=32000x${pixelHeight}:split_channels=1:colors=white:scale=sqrt:filter=peak:draw=full`,
                 '-frames:v', '1',
                 '-y', waveformFile,
             ], runGeneration);
             if (!success || runGeneration !== cutterWaveformGeneration || cutterMediaJob !== job || !cutterInputIdentitiesMatch(getCutterInputIdentity(filePath), job.identity) || appShutdownStarted) return null;
             const waveform = readImageDataUrl(waveformFile);
             if (!waveform) return null;
-            const result = { jobId, waveform, pixelWidth: 32000, pixelHeight: 240 };
+            const result = { jobId, waveform, pixelWidth: 32000, pixelHeight, channels };
             job.waveform = result;
             return result;
         } finally {
@@ -3114,7 +3118,9 @@ async function prepareVideoEditorAssets(filePath: string, jobId: number, profile
     const thumbnailTileHeight = 240;
     try {
         const thumbnailsReady = await runEditorMediaProcess([
+            '-threads', '2',
             '-i', filePath,
+            '-filter_threads', '1',
             '-vf', `fps=${thumbnailCount / info.duration},scale=${thumbnailTileWidth}:${thumbnailTileHeight}:force_original_aspect_ratio=increase:flags=lanczos,crop=${thumbnailTileWidth}:${thumbnailTileHeight}`,
             '-frames:v', String(thumbnailCount),
             '-q:v', '2',

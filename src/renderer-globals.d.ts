@@ -215,6 +215,7 @@ interface VideoEditorAssets {
 }
 
 interface VideoEditorWaveform {
+    channels?: number;
     jobId: number;
     waveform: string | null;
     pixelWidth: number;
@@ -541,12 +542,22 @@ interface ApiBridge {
     onUpdateError(callback: (payload: { message: string; kind: 'check' | 'download'; version?: string }) => void): void;
 }
 
+interface LocalCutterViewState {
+    language: string; active: boolean; enabled: boolean; duration: number;
+    fps: number; name: string; generation: number; labels: { start: string; end: string };
+    range: { start: number; end: number } | null;
+    cut: { id: string; start: number; end: number } | null;
+    cutLimits: { start: number; end: number } | null;
+}
+
 interface Window {
     LocalCutterPlayer: {
         mount(element: HTMLElement, options: {
-            video: HTMLVideoElement; state: { language: string; active: boolean; enabled: boolean; duration: number };
-            play(): void; seek(time: number): void; frame(direction: number): void; format(time: number): string;
-        }): { update(state: { language: string; active: boolean; enabled: boolean; duration: number }): void; destroy(): void };
+            video: HTMLVideoElement; state: LocalCutterViewState;
+            play(): void; seek(time: number): void; frame(direction: number): void; format(time: number): string; parse(value: string, total: number): number | null;
+            changeRange(start: number, end: number, cutId: string | null, interaction: { source: string; boundary: string }): void;
+            beginRange(cutId: string | null): void; finishRange(commit: boolean): void;
+        }): { update(state: LocalCutterViewState): void; updatePosition(time: number): void; destroy(): void };
     };
     VodPlayer: {
         planEditedVod: typeof import('./main/domain/vod-edit-plan').planEditedVod;

@@ -1,6 +1,6 @@
 #cutterTab .cutter-container { max-width: 1900px; gap: 14px; }
 #cutterTab .cutter-source-bar { display: flex; padding: 10px 14px; }
-#cutterTab .cutter-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 270px; min-height: 260px; gap: 16px; align-items: stretch; }
+#cutterTab .cutter-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 260px; gap: 16px; align-items: stretch; }
 #cutterTab .cutter-workspace:not(.shown) { grid-template-columns: minmax(0, 1fr); }
 #cutterTab .cutter-preview-panel, #cutterTab .cutter-workspace:not(.shown) .cutter-preview-panel { display: flex; width: 100%; min-height: 0; padding: 0; background: transparent; border: 0; }
 #cutterPlayer { width: 100%; min-width: 0; min-height: 0; border-radius: 12px; }
@@ -9,45 +9,63 @@
 #cutterPlayer.cinema, #cutterPlayer:fullscreen { height: 100dvh; }
 #cutterPlayer.cinema .video-preview, #cutterPlayer:fullscreen .video-preview { aspect-ratio: auto; }
 #cutterPlayer:fullscreen .archive-controls { position: relative; padding: 5px 14px; background: #101318; }
-#cutterTab .cutter-sidebar { display: flex; gap: 14px; overflow: auto; scrollbar-gutter: stable; padding: 16px; border-radius: 12px; }
+#cutterTab .cutter-sidebar { display: flex; flex-direction: column; align-self: start; max-height: 100%; min-height: 0; padding: 0; gap: 0; overflow: hidden; border-radius: 12px; scrollbar-gutter: auto; }
 #cutterTab .cutter-workspace:not(.shown) .cutter-sidebar { display: none; }
 #cutterTab .cutter-sidebar h3, #cutterTab .cutter-edit-toolbar h3 { margin: 0; font-size: 14px; }
-#cutterTab .cutter-info.shown { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-#cutterTab .cutter-info-item { display: grid; gap: 3px; padding: 0; min-width: 0; text-align: left; background: transparent; border: 0; }
+#cutterTab .cutter-export-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 10px; flex: 0 0 auto; }
+#cutterTab .cutter-format-badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 4px 8px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 5px; color: var(--text-secondary); }
+#cutterTab .cutter-export-body { display: grid; gap: 12px; padding: 0 14px 12px; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+#cutterTab .cutter-export-summary { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--workspace-border, var(--border)); background: var(--workspace-control, var(--bg-main)); border-radius: 8px; }
+#cutterTab .cutter-export-summary > span { font-size: 11px; color: var(--text-secondary); }
+#cutterTab .cutter-export-summary strong { font: 600 20px Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--text); }
+#cutterTab .cutter-export-codecs { margin-top: 2px; }
+#cutterTab .cutter-profile-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+#cutterTab .cutter-profile-fieldset legend, #cutterTab .cutter-export-field > label { font-size: 12px; font-weight: 600; margin-bottom: 6px; padding: 0; }
+#cutterTab .cutter-profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#cutterTab .cutter-profile-grid label { display: flex; align-items: center; gap: 7px; min-height: 32px; padding: 6px 8px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; font-size: 12px; background: var(--workspace-panel, var(--bg-card)); cursor: pointer; user-select: none; }
+#cutterTab .cutter-profile-grid label:has(input:checked) { background: #8c6ac41f; border-color: #9e82c7; }
+#cutterTab .cutter-profile-grid label:has(input:disabled) { opacity: .5; cursor: default; }
+#cutterTab .cutter-profile-grid input { position: relative; padding: 0; width: 13px; height: 13px; margin: 0; opacity: 1; accent-color: #9e82c7; flex: 0 0 auto; }
+#cutterTab .cutter-field-help { margin: 6px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+#cutterTab #cutterProfileHelp { min-height: 33px; }
+#cutterTab .cutter-export-field { display: grid; min-width: 0; }
+#cutterTab .cutter-export-field select { appearance: none; width: 100%; min-width: 0; height: 36px; padding: 6px 36px 6px 10px; padding-right: 36px !important; font-size: 12px; color: var(--text); background-color: var(--workspace-control, var(--bg-main)); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23969da8'%3E%3Cpath d='m4 6 4 4 4-4z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-size: 14px; background-position: right 14px center; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; user-select: none; }
+#cutterTab .cutter-export-field select:disabled { opacity: .65; }
+#cutterTab .cutter-info.shown { display: grid; grid-template-columns: 1fr; gap: 8px; margin: 14px 0; padding: 0; background: transparent; border: 0; }
+#cutterTab .cutter-info-item { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 0; min-width: 0; text-align: left; background: transparent; border: 0; }
 #cutterTab .cutter-info-label { font-size: 11px; text-transform: none; letter-spacing: normal; }
 #cutterTab .cutter-info-value { font-size: 12px; }
-#cutterTab .cutter-export-options { display: grid; grid-template-columns: 1fr; gap: 7px; padding: 0; border: 0; }
-#cutterTab .cutter-export-options label { margin-top: 3px; font-size: 12px; }
-#cutterTab .cutter-export-options select { width: 100%; min-height: 34px; padding-right: 32px; background-position: right 14px center; }
-#cutterTab #cutterEncodingHint { margin: 0; font-size: 11px; line-height: 1.55; }
-#cutterTab .cutter-actions { margin: auto 0 0; flex-wrap: wrap; }
-#cutterTab .cutter-actions #btnCut { width: 100%; min-width: 0; }
+#cutterTab .cutter-format-details { font-size: 12px; line-height: 1.5; border-top: 1px solid var(--workspace-border, var(--border)); padding-top: 10px; }
+#cutterTab .cutter-format-details summary { cursor: pointer; padding: 2px 0; color: var(--text-secondary); user-select: none; }
+#cutterTab .cutter-format-details[open] summary { margin-bottom: 12px; }
+#cutterTab #cutterEncodingHint { margin: 0; font-size: 11px; line-height: 1.5; }
+#cutterTab .cutter-export-footer { flex: 0 0 auto; padding: 12px 14px; border-top: 1px solid var(--workspace-border, var(--border)); }
+#cutterTab .cutter-actions { display: flex; gap: 8px; margin: 0; flex-wrap: wrap; }
+#cutterTab .cutter-actions #btnCut { flex: 1 1 100%; width: 100%; min-width: 0; min-height: 38px; font-weight: 600; }
+#cutterTab .cutter-actions #cutterCancelExportBtn { width: 100%; }
+#cutterTab .cutter-export-state { margin: 0 0 10px; }
+#cutterTab #cutProgress { margin: 0 0 12px; padding: 0; }
+#cutterTab #cutProgress .progress-text { font-size: 12px; }
 #cutterTab .timeline-container { flex: 0 0 auto; border: 0; border-radius: 0; background: #101318; color: #f2f3f5; overflow: visible; }
 #cutterTab .cutter-timeline-toolbar { min-height: 34px; padding: 2px 14px; border: 0; }
 #cutterTab .cutter-timeline-timecode { color: #e6e3ff; font-size: 12px; }
 #cutterTab .cutter-zoom-controls .cutter-icon-button { color: #e7e8ec; width: 28px; height: 28px; }
 #cutterTab .cutter-timeline-scroll { margin: 0 14px; padding: 0; overflow-x: auto; overflow-y: hidden; scrollbar-color: #626773 #101318; }
-#cutterTab .timeline { height: 132px; background: #101318; }
+#cutterTab .timeline { height: 164px; background: #101318; }
 #cutterTab .cutter-ruler { height: 32px; border: 0; }
-#cutterTab .cutter-ruler-tick { color: #b9bec8; font-size: 11px; bottom: 10px; }
-#cutterTab .cutter-track { height: 52px; }
-#cutterTab .cutter-audio-track { height: 28px; }
+#cutterTab .cutter-ruler-tick { color: #b9bec8; font-size: 11px; top: 146px; bottom: auto; }
+#cutterTab .cutter-ruler-tick::after { top: -4px; bottom: auto; }
+#cutterTab .cutter-track { height: 64px; }
+#cutterTab .cutter-audio-track { height: 48px; }
+#cutterTab #cutterWaveform { position: absolute; top: 0; height: 100%; width: auto; }
 #cutterTab .cutter-track-label { left: 6px; font-size: 10px; padding: 2px 4px; }
 #cutterTab .cutter-outside-shade { top: 32px; bottom: 20px; }
+#cutterRangeMarkers { position: absolute; top: 32px; left: 0; right: 0; height: 6px; pointer-events: none; z-index: 12; }
 #cutterTab .timeline-selection { top: 32px; bottom: 20px; border: 1px solid #b79bff; z-index: 8; }
-#cutterTab .timeline-handle { top: -22px; bottom: auto; width: 24px; height: 22px; padding: 0; display: grid; place-items: center; color: white; font: 600 12px Consolas, monospace; background: #6644a3; border: 1px solid #c7b0f7; border-radius: 4px 4px 0 0; box-shadow: none; touch-action: none; }
-#cutterTab .timeline-handle::after { position: absolute; top: 22px; width: 2px; height: 80px; border-radius: 0; background: #c7b0f7; }
-#cutterTab .timeline-handle.start::after { left: -1px; }
-#cutterTab .timeline-handle.end::after { right: -1px; }
-#cutterTab .timeline-handle[aria-disabled="true"] { cursor: default; }
 #cutterTab .cutter-cut-overlays { inset: 32px 0 20px; z-index: 7; }
 #cutterTab .cutter-cut-overlay { min-width: 0; background: #bd405943; border: 1px solid #e1667c; }
 #cutterTab .cutter-cut-overlay.active { background: #bd405966; box-shadow: none; }
 #cutterTab .cutter-cut-overlay > span { font-size: 11px; }
-#cutterTab .cutter-cut-handle { top: auto; bottom: -21px; width: 24px; height: 22px; padding: 0; color: #fff; font: 600 12px Consolas, monospace; background: #a83b50; border: 1px solid #f0a5b2; border-radius: 0 0 4px 4px; box-shadow: none; touch-action: none; }
-#cutterTab .cutter-cut-handle::after { position: absolute; bottom: 22px; width: 2px; height: 80px; background: #f0a5b2; }
-#cutterTab .cutter-cut-handle.start::after { left: -1px; }
-#cutterTab .cutter-cut-handle.end::after { right: -1px; }
 #cutterTab .timeline-current { top: 32px; bottom: 20px; width: 1px; z-index: 9; }
 #cutterTab .cutter-edit-panel { padding: 12px 14px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 12px; background: var(--workspace-panel, var(--bg-card)); flex: 0 0 auto; }
 #cutterTab .cutter-edit-panel[hidden] { display: none; }
@@ -56,23 +74,25 @@
 #cutterTab .cutter-modes { display: flex; gap: 5px; }
 #cutterTab .cutter-modes button { min-height: 32px; padding: 6px 12px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; background: var(--workspace-control, var(--bg-main)); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; user-select: none; }
 #cutterTab .cutter-modes button[aria-pressed="true"] { border-color: #bba7e7; background: #8065aa32; }
-#cutterTab .cutter-trim-fields { display: grid; grid-template-columns: minmax(180px, 320px) minmax(160px, 1fr) minmax(180px, 320px); gap: 20px; align-items: end; }
-#cutterTab .cutter-boundary-field { display: grid; gap: 7px; }
+#cutterTab .cutter-trim-fields { display: grid; grid-template-columns: minmax(0, 1fr) 210px minmax(0, 1fr); gap: 12px; align-items: stretch; }
+#cutterTab .cutter-boundary-field { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 8px; background: var(--workspace-control, var(--bg-main)); }
 #cutterTab .cutter-boundary-field > div { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 #cutterTab .cutter-boundary-field label { font-size: 12px; font-weight: 600; }
 #cutterTab .cutter-boundary-field kbd { display: inline-grid; place-items: center; width: 23px; height: 23px; margin-right: 5px; background: #6644a3; border: 1px solid #b79bff; color: #fff; border-radius: 4px; font-size: 12px; }
 #cutterTab .cutter-boundary-field .btn-secondary { min-height: 28px; padding: 4px 10px; font-size: 11px; }
-#cutterTab .cutter-boundary-field input { width: 100%; height: 38px; text-align: center; font: 600 16px Consolas, monospace; font-variant-numeric: tabular-nums; padding: 7px 12px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; }
-#cutterTab .cutter-output-length { justify-self: center; min-width: 190px; text-align: center; display: grid; gap: 5px; padding: 10px 20px; border: 1px solid #78ad8e60; border-radius: 7px; background: #78ad8e12; }
+#cutterTab .cutter-boundary-field input { width: 100%; height: 32px; text-align: center; font: 600 19px Consolas, monospace; font-variant-numeric: tabular-nums; padding: 4px 6px; background: transparent; border: 0; border-radius: 4px; }
+#cutterTab .cutter-output-length { justify-self: stretch; min-width: 0; text-align: center; display: grid; align-content: center; gap: 7px; padding: 12px 16px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 8px; background: transparent; }
 #cutterTab .cutter-output-length span { font-size: 11px; color: var(--text-secondary); }
-#cutterTab .cutter-output-length strong { font: 600 18px Consolas, monospace; font-variant-numeric: tabular-nums; color: #80c49e; }
+#cutterTab .cutter-output-length strong { font: 600 20px Consolas, monospace; font-variant-numeric: tabular-nums; color: #80c49e; }
 .theme-light #cutterTab .cutter-output-length strong { color: #227649; }
-#cutterTab .cutter-edit-bottom { display: flex; align-items: center; gap: 14px; margin-top: 12px; min-height: 32px; }
+#cutterTab .cutter-edit-bottom { display: flex; align-items: center; gap: 12px; margin-top: 12px; min-height: 32px; flex-wrap: wrap; }
 #cutterTab .cutter-preview-toggle { display: flex; align-items: center; gap: 7px; margin: 0; padding: 0; font-size: 12px; white-space: nowrap; }
 #cutterTab .cutter-preview-toggle input { position: static; opacity: 1; width: 15px; height: 15px; accent-color: #9c80d5; }
 #cutterTab .cutter-edit-hint { font-size: 11px; color: var(--text-secondary); margin-left: auto; }
-#cutterTab .cutter-cut-list { height: 108px; min-height: 108px; max-height: 108px; overflow: auto; scrollbar-gutter: stable; margin-top: 8px; gap: 5px; }
-#cutterTab .cutter-edit-panel[data-mode="trim"] .cutter-cut-list { visibility: hidden; pointer-events: none; }
+#cutterTab .cutter-cut-list { height: auto; min-height: 0; max-height: 110px; overflow: auto; scrollbar-gutter: stable; margin-top: 10px; gap: 6px; }
+#cutterTab .cutter-cut-list:has(.cutter-cut-empty) { display: none; }
+#cutterTab .cutter-cut-count { padding: 4px 8px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 5px; background: transparent; color: var(--text-secondary); font-size: 11px; }
+#cutterTab .cutter-cut-count[hidden] { display: none; }
 #cutterTab .cutter-cut-empty { min-height: 90px; display: grid; place-items: center; font-size: 12px; }
 #cutterTab .cutter-cut-row { display: grid; grid-template-columns: 100px minmax(240px, 1fr) 110px 175px; gap: 12px; align-items: center; padding: 7px 10px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; margin: 0; }
 #cutterTab .cutter-cut-row.active { border-color: #c76d80; background: #bd405914; }
@@ -90,7 +110,6 @@
 #cutterTab .local-cutter-controls { padding: 3px 10px 5px; }
 #cutterTab .local-frame-controls { display: flex; }
 #cutterTab .local-player-message { position: absolute; bottom: 60px; right: 15px; padding: 8px 12px; border: 1px solid #626773; border-radius: 6px; background: #171b21; font-size: 12px; }
-#cutterTab .cutter-icon-button:focus-visible, #cutterTab .timeline-handle:focus-visible, #cutterTab .cutter-cut-handle:focus-visible { outline: 2px solid #bfa4ff; outline-offset: 2px; }
 @container (max-width: 800px) { .local-cutter-controls .local-frame-controls { display: none !important; } .local-cutter-controls .player-button.player-rate-button { width: 74px; } }
 @container (max-width: 550px) { .local-cutter-controls .player-volume-control { display: none; } .local-cutter-controls .player-button { width: 36px; } }
 @media (min-width: 1001px) and (min-height: 760px) {
@@ -109,9 +128,9 @@
 }
 @media (max-width: 1000px) {
   #cutterTab .cutter-workspace { grid-template-columns: 1fr; }
-  #cutterTab .cutter-sidebar { display: grid; grid-template-columns: 1fr 2fr; align-items: start; overflow: visible; }
-  #cutterTab .cutter-export-options { grid-column: 2; grid-row: 1 / 4; grid-template-columns: 90px 1fr; align-items: center; }
-  #cutterTab #cutterEncodingHint { grid-column: 1 / -1; }
+  #cutterTab .cutter-sidebar { display: flex; max-height: none; overflow: visible; }
+  #cutterTab .cutter-export-body { grid-template-columns: 1fr 1fr; align-items: start; overflow: visible; }
+  #cutterTab .cutter-export-footer .cutter-actions { max-width: 360px; margin-left: auto; }
   #cutterTab .cutter-trim-fields { grid-template-columns: 1fr 170px 1fr; gap: 10px; }
   #cutterTab .cutter-output-length { min-width: 0; padding: 10px; }
   #cutterTab .cutter-cut-row { grid-template-columns: 80px minmax(180px, 1fr) 130px; gap: 8px; }
@@ -126,7 +145,11 @@
   #cutterTab .cutter-cut-fields { grid-row: 2; grid-column: 1 / -1; }
   #cutterTab .cutter-cut-actions { grid-row: 1; grid-column: 2; }
   #cutterTab .cutter-sidebar { display: flex; }
-  #cutterTab .cutter-export-options { grid-template-columns: 90px 1fr; }
+  #cutterTab .cutter-export-body { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 500px) {
+  #cutterTab .cutter-trim-fields { grid-template-columns: minmax(0, 1fr); }
 }
 
 #cutterTab .cutter-source-bar:has(~ .cutter-workspace.shown) { display: flex; }
@@ -134,20 +157,22 @@
 
 @media (min-width: 1001px) and (min-height: 760px) and (max-height: 900px) {
   #cutterTab .cutter-container { gap: 10px; }
-  #cutterTab .cutter-cut-list { height: 58px; min-height: 58px; max-height: 58px; }
+  #cutterTab .cutter-cut-list { max-height: 56px; }
   #cutterTab .cutter-cut-empty { min-height: 48px; }
-  #cutterTab .timeline { height: 96px; }
-  #cutterTab .cutter-track { height: 30px; }
-  #cutterTab .cutter-audio-track { height: 14px; }
-  #cutterTab .timeline-handle::after, #cutterTab .cutter-cut-handle::after { height: 44px; }
+  #cutterTab .timeline { height: 132px; }
+  #cutterTab .cutter-track { height: 48px; }
+  #cutterTab .cutter-audio-track { height: 32px; }
+  #cutterTab .cutter-ruler-tick { top: 114px; }
   #cutterTab .cutter-edit-panel { padding: 9px 12px; }
   #cutterTab .cutter-edit-toolbar { margin-bottom: 8px; }
   #cutterTab .cutter-edit-bottom { margin-top: 8px; }
 }
 
-#cutterTab .timeline-handle::after, #cutterTab .cutter-cut-handle::after { left: var(--boundary-offset, 0); right: auto; }
 
-#cutterTab .cutter-sidebar > h3 { position: sticky; top: -16px; margin: -1px 0 0; padding: 2px 0 6px; background: var(--workspace-panel, var(--bg-card)); z-index: 1; }
-#cutterTab .cutter-format-details { font-size: 11px; line-height: 1.5; }
-#cutterTab .cutter-format-details summary { cursor: pointer; padding: 4px 0; color: var(--text-secondary); user-select: none; }
-#cutterTab .cutter-format-details[open] summary { margin-bottom: 6px; }
+
+body:has(#cutterTab.active) :is(#cutterTab, .top-nav, .context-sidebar, .workspace-toolbar, .player-panel-position) :is(button, input, select, summary, [tabindex]):focus,
+body:has(#cutterTab.active) :is(#cutterTab, .top-nav, .context-sidebar, .workspace-toolbar, .player-panel-position) :is(button, input, select, summary, [tabindex]):focus-visible { outline: none !important; box-shadow: none !important; }
+#cutterTab .cutter-boundary-field input:focus { border: 0; }
+#cutterTab .cutter-export-field select:focus { border-color: var(--workspace-border, var(--border)); }
+#cutterTab :is(button, summary, .cutter-modes, .cutter-boundary-field label) { user-select: none; }
+#cutterTab .cutter-cut-fields input { user-select: text; }

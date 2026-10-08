@@ -12,7 +12,7 @@ interface CutterEditorState {
     cuts: CutterCut[];
 }
 
-type CutterDragKind = 'playhead' | 'trim-start' | 'trim-end' | 'cut-start' | 'cut-end' | 'cut-move';
+type CutterDragKind = 'playhead' | 'cut-move';
 
 interface CutterDragState {
     kind: CutterDragKind;
@@ -37,6 +37,7 @@ let cutterViewActive = true;
 let cutterPlayerView: ReturnType<Window['LocalCutterPlayer']['mount']> | null = null;
 let cutterPreviewMode = true;
 let cutterDragState: CutterDragState | null = null;
+let cutterRangeDrag: { before: CutterEditorState; cutId: string | null; generation: number; playing: boolean } | null = null;
 let cutterDragPointerX: number | null = null;
 let cutterDragFineTime: number | null = null;
 let cutterDragAnimationFrame: number | null = null;
@@ -56,10 +57,16 @@ let cutterThumbnailSpriteCount = 0;
 let cutterThumbnailRenderFrame: number | null = null;
 let cutterThumbnailSpriteObjectUrl: string | null = null;
 let cutterThumbnailImages: HTMLImageElement[] = [];
+let cutterWaveformPeaks: Uint8Array[] = [];
+let cutterWaveformImage: HTMLImageElement | null = null;
+let cutterWaveformRenderFrame: number | null = null;
 let cutterEditorInitialized = false;
 let cutterPlaybackFrame: number | null = null;
 let cutterPlaybackUsesVideoCallback = false;
 let cutterPreviousPlaybackTime: number | null = null;
+let cutterPresentedTime: number | null = null;
+let cutterPendingSeekTime: number | null = null;
+let cutterPendingSeekRetries = 0;
 let cutterWheelZoomFrame: number | null = null;
 let cutterWheelZoomDeltaPixels = 0;
 let cutterWheelZoomAnchorX = 0;
@@ -117,13 +124,10 @@ function getInitialCutterZoom(_duration: number): number {
 
 function formatCutterTimecode(time: number): string {
     const fps = cutterEditorState?.fps || cutterVideoInfo?.fps || 30;
-    let seconds = Math.floor(Math.max(0, time));
-    let frames = Math.round((Math.max(0, time) - seconds) * fps);
     const frameBase = Math.max(1, Math.round(fps));
-    if (frames >= frameBase) {
-        seconds += 1;
-        frames = 0;
-    }
+    const totalFrames = Math.round(Math.max(0, time) * fps);
+    const seconds = Math.floor(totalFrames / frameBase);
+    const frames = totalFrames % frameBase;
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const remainingSeconds = seconds % 60;
@@ -140,7 +144,9 @@ function parseCutterTimecode(value: string): number | null {
         ? fields
         : [fields[0], fields[1], fields[2], 0];
     if (minutes >= 60 || seconds >= 60 || frames >= Math.max(1, Math.round(cutterEditorState.fps))) return null;
-    return snapCutterTime(hours * 3600 + minutes * 60 + seconds + frames / cutterEditorState.fps);
+    const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+    return fields.length === 3 ? snapCutterTime(totalSeconds)
+        : snapCutterTime((totalSeconds * Math.max(1, Math.round(cutterEditorState.fps)) + frames) / cutterEditorState.fps);
 }
 
 function getCutterVideo(): HTMLVideoElement {
@@ -211,9 +217,11 @@ function updateCutterAudioStreams(): void {
         const option = document.createElement('option');
         option.value = String(stream.index);
         const channelLabel = stream.channels === 1 ? UI_TEXT.cutter.channelSingular : UI_TEXT.cutter.channelPlural;
-        const details = [stream.language, stream.codec, stream.channels > 0 ? `${stream.channels} ${channelLabel}` : ''].filter(Boolean).join(' · ');
+        const language = getCutterAudioLanguage(stream.language);
+        const details = [language, stream.codec, stream.channels > 0 ? `${stream.channels} ${channelLabel}` : ''].filter(Boolean).join(' · ');
         const label = UI_TEXT.cutter.audioStream.replace('{index}', String(stream.index + 1));
-        option.textContent = `${label}${details ? ` (${details})` : ''}`;
+        option.textContent = `${label}${language ? ` · ${language}` : ''}`;
+        option.title = details;
         select.append(option);
     });
     if (!streams.some((stream) => stream.index === cutterAudioStreamIndex)) cutterAudioStreamIndex = streams[0].index;
@@ -259,7 +267,8 @@ function updateCutterExportControls(options: CutterExportOptions | null | undefi
     }
     if (cutterExportProfile === 'archive' || (options !== undefined && !Array.from(encoder.options).some((option) => option.value === cutterExportEncoder))) cutterExportEncoder = 'software';
     encoder.value = cutterExportEncoder;
-    encoder.disabled = !options || cutterExportProfile === 'archive';
+    encoder.disabled = !cutterControlsEnabled || !options || cutterExportProfile === 'archive';
+    updateCutterExportPresentation();
 }
 
 function refreshCutterLocalizedUi(): void {
@@ -352,6 +361,7 @@ function setCutterExportProfile(value: string): void {
 function setCutterExportEncoder(value: string): void {
     if (value !== 'software' && value !== 'h264_nvenc' && value !== 'h264_qsv' && value !== 'h264_amf') return;
     cutterExportEncoder = value;
+    updateCutterExportPresentation();
     scheduleCutterAutosave();
 }
 
@@ -359,6 +369,7 @@ function setCutterAudioStream(value: string): void {
     const index = Number(value);
     if (!Number.isInteger(index) || index < 0 || !(cutterVideoInfo?.audioStreams ?? []).some((stream) => stream.index === index)) return;
     cutterAudioStreamIndex = index;
+    updateCutterExportPresentation();
     scheduleCutterAutosave();
 }
 
@@ -438,6 +449,11 @@ function finishCutterScrubPlayback(): void {
     void getCutterVideo().play().catch(() => undefined);
 }
 
+function cutterSeekTime(time: number): number {
+    if (!cutterEditorState || time >= cutterEditorState.duration) return time;
+    return Math.min(cutterEditorState.duration, time + Math.min(.001, 1 / cutterEditorState.fps / 16));
+}
+
 function presentNextCutterScrubFrame(): void {
     if (!cutterEditorState || cutterScrubSeekInFlight || cutterScrubTargetTime === null) return;
     const video = getCutterVideo() as HTMLVideoElement & {
@@ -472,15 +488,15 @@ function presentNextCutterScrubFrame(): void {
     if (video.requestVideoFrameCallback) {
         cutterScrubFrameRequest = video.requestVideoFrameCallback((_now, metadata) => finish(metadata.mediaTime));
     }
-    const seeked = (): void => finish(video.currentTime);
+    const seeked = (): void => { if (!video.requestVideoFrameCallback) finish(video.currentTime); };
     video.addEventListener('seeked', seeked, { once: true });
-    const timeout = window.setTimeout(seeked, 1500);
+    const timeout = window.setTimeout(() => finish(video.currentTime), 1500);
     cutterScrubCleanup = () => {
         window.clearTimeout(timeout);
         video.removeEventListener('seeked', seeked);
         if (cutterScrubFrameRequest !== null) video.cancelVideoFrameCallback?.(cutterScrubFrameRequest);
     };
-    video.currentTime = targetTime;
+    video.currentTime = cutterSeekTime(targetTime);
 }
 
 function queueCutterScrubFrame(time: number): void {
@@ -492,6 +508,7 @@ function queueCutterScrubFrame(time: number): void {
 function cancelCutterScrubFrames(): void {
     const video = getCutterVideo() as HTMLVideoElement & { cancelVideoFrameCallback?: (handle: number) => void };
     cutterScrubGeneration += 1;
+    cutterPendingSeekTime = null;
     cutterScrubCleanup?.();
     cutterScrubCleanup = null;
     if (cutterScrubFrameRequest !== null && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(cutterScrubFrameRequest);
@@ -506,9 +523,24 @@ function seekCutterVideo(time: number, skipCuts = false): void {
     cancelCutterScrubFrames();
     const video = getCutterVideo();
     const nextTime = skipCuts ? findCutterPreviewTime(time) : clampCutterValue(snapCutterTime(time), 0, cutterEditorState.duration);
-    if (Number.isFinite(video.duration)) video.currentTime = nextTime;
+    cutterPendingSeekTime = nextTime;
+    cutterPendingSeekRetries = 0;
+    if (!video.seeking && Number.isFinite(video.duration)) video.currentTime = cutterSeekTime(nextTime);
     cutterPreviousPlaybackTime = nextTime;
     updateCutterPlayhead(nextTime);
+}
+
+function settleCutterSeek(): void {
+    if (cutterPendingSeekTime === null || !cutterEditorState) return;
+    const video = getCutterVideo();
+    const target = Math.min(cutterPendingSeekTime, Number.isFinite(video.duration) ? video.duration : cutterEditorState.duration);
+    if (Math.abs(video.currentTime - target) < 1 / cutterEditorState.fps / 2 || cutterPendingSeekRetries >= 3) {
+        cutterPendingSeekTime = null;
+        cutterPendingSeekRetries = 0;
+        return;
+    }
+    cutterPendingSeekRetries += 1;
+    video.currentTime = cutterSeekTime(target);
 }
 
 function updateCutterPlayhead(time: number): void {
@@ -516,6 +548,8 @@ function updateCutterPlayhead(time: number): void {
     if (cutterDragState?.kind !== 'playhead' && !cutterScrubSeekInFlight && cutterScrubTargetTime === null) {
         updateCutterInteractionPlayhead(time);
     }
+    cutterPresentedTime = time;
+    cutterPlayerView?.updatePosition(time);
     const timecode = formatCutterTimecode(time);
     const timelineTimecode = byId('cutterTimelineTimecode');
 
@@ -533,12 +567,21 @@ function renderCutterRuler(): void {
     if (!cutterEditorState) return;
     const ruler = byId('cutterRuler');
     const fragment = document.createDocumentFragment();
-    const count = Math.max(8, Math.round(8 * cutterZoom));
-    for (let index = 0; index <= count; index += 1) {
+    const width = Math.max(1, byId('timeline').getBoundingClientRect().width);
+    const fps = cutterEditorState.fps;
+    const frameBase = Math.max(1, Math.round(fps));
+    const totalFrames = Math.max(1, Math.round(cutterEditorState.duration * fps));
+    const minimumStep = totalFrames * 112 / width;
+    const intervals = [1, 2, 5, 10, 15].filter(value => value < frameBase)
+        .concat([1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400, 28800, 86400].map(value => value * frameBase));
+    const step = intervals.find(value => value >= minimumStep) || Math.ceil(minimumStep / frameBase) * frameBase;
+    const detailed = step < frameBase;
+    for (let frame = 0; frame <= totalFrames; frame += step) {
         const tick = document.createElement('span');
         tick.className = 'cutter-ruler-tick';
-        tick.style.left = `${index / count * 100}%`;
-        tick.textContent = formatCutterTimecode(cutterEditorState.duration * index / count).replace(/:\d{2}$/, '');
+        tick.style.left = `${frame / totalFrames * 100}%`;
+        const label = formatCutterTimecode(frame / fps);
+        tick.textContent = detailed ? label : label.replace(/:\d{2}$/, '');
         fragment.appendChild(tick);
     }
     ruler.replaceChildren(fragment);
@@ -644,20 +687,16 @@ function drawCutterThumbnailImages(cssWidthOverride?: number): void {
     const trackHeight = Math.max(1, strip.getBoundingClientRect().height);
     const tileWidth = Math.max(1, Math.ceil(trackHeight * sourceFrameWidth / sourceFrameHeight));
     const targetWidth = Math.min(sourceFrameWidth * cutterThumbnailImages.length, Math.max(1, Math.ceil(cssWidth * pixelRatio)));
-    const renderedFrameCount = Math.min(cutterThumbnailImages.length, Math.max(1, Math.ceil(cssWidth / tileWidth), Math.ceil(targetWidth / sourceFrameWidth)));
+    const renderedFrameCount = Math.min(2048, Math.max(1, Math.ceil(cssWidth / tileWidth)));
     const sourceIndexes: number[] = [];
     const visibleImages: HTMLImageElement[] = [];
     for (let index = 0; index < renderedFrameCount; index += 1) {
-        const sourceIndex = renderedFrameCount === 1
-            ? Math.floor((cutterThumbnailImages.length - 1) / 2)
-            : Math.round(index * (cutterThumbnailImages.length - 1) / (renderedFrameCount - 1));
+        const sourceIndex = Math.min(cutterThumbnailImages.length - 1, Math.floor((index + .5) / renderedFrameCount * cutterThumbnailImages.length));
         sourceIndexes.push(sourceIndex);
-        const image = cutterThumbnailImages[sourceIndex];
-        const visibleWidth = index === renderedFrameCount - 1
-            ? Math.max(1, cssWidth - tileWidth * (renderedFrameCount - 1))
-            : tileWidth;
+        const image = cutterThumbnailImages[sourceIndex].cloneNode() as HTMLImageElement;
+        const visibleWidth = cssWidth / renderedFrameCount;
         image.style.width = `${visibleWidth}px`;
-        image.style.minWidth = `${visibleWidth}px`;
+        image.style.minWidth = '0';
         image.style.flex = `0 0 ${visibleWidth}px`;
         visibleImages.push(image);
     }
@@ -711,6 +750,10 @@ function renderCutterThumbnails(thumbnails: string[], thumbnailSprite: string | 
         return image;
     });
     drawCutterThumbnailImages();
+    const currentImages = cutterThumbnailImages;
+    if (currentImages[0]) void currentImages[0].decode().then(() => {
+        if (cutterThumbnailImages === currentImages) drawCutterThumbnailImages();
+    }).catch(() => undefined);
 }
 
 function getCutterAssetProfile(): VideoEditorAssetProfile {
@@ -741,7 +784,9 @@ function scheduleCutterAssetRefresh(): void {
 function renderCutterCutList(): void {
     const list = byId('cutterCutList');
     list.replaceChildren();
-    byId('cutterCutCount').textContent = formatUiNumber(cutterEditorState?.cuts.length || 0);
+    const count = cutterEditorState?.cuts.length || 0;
+    byId('cutterCutCount').textContent = `${UI_TEXT.cutter.cutsLabel}: ${formatUiNumber(count)}`;
+    byId('cutterCutCount').hidden = count === 0;
     if (!cutterEditorState?.cuts.length) {
         const empty = document.createElement('div');
         empty.className = 'cutter-cut-empty';
@@ -785,7 +830,7 @@ function renderCutterCutList(): void {
             const valid = start !== null && end !== null && start >= cutterEditorState!.trimStart && end <= cutterEditorState!.trimEnd && setCutterCutRange(cut.id, start, end);
             inputs.forEach(input => input.setAttribute('aria-invalid', String(!valid)));
             primary.disabled = !valid; error.hidden = valid; error.textContent = valid ? '' : UI_TEXT.cutter.invalidRange;
-            if (valid) { updateCutterEditorGeometry(); seekCutterVideo(start!); }
+            if (valid) updateCutterEditorGeometry();
         };
         if (editing) inputs.forEach(input => {
             input.addEventListener('input', apply);
@@ -814,44 +859,8 @@ function renderCutterCutOverlays(): void {
         overlay.setAttribute('aria-label', `${UI_TEXT.cutter.cutLabel} ${index + 1}, ${UI_TEXT.cutter.startLabel} ${formatCutterTimecode(cut.start)}, ${UI_TEXT.cutter.endLabel} ${formatCutterTimecode(cut.end)}`);
         const label = document.createElement('span');
         label.textContent = `${index + 1}`;
-        const startHandle = document.createElement('button');
-        startHandle.type = 'button';
-        startHandle.className = 'cutter-cut-handle start';
-        startHandle.setAttribute('role', 'slider');
-        startHandle.setAttribute('aria-label', `${UI_TEXT.cutter.cutLabel} ${index + 1}: ${UI_TEXT.cutter.startLabel}`);
-        startHandle.setAttribute('aria-valuemin', String(editorState.trimStart));
-        startHandle.setAttribute('aria-valuemax', String(cut.end - 1 / editorState.fps));
-        startHandle.setAttribute('aria-valuenow', String(cut.start));
-        startHandle.setAttribute('aria-valuetext', formatCutterTimecode(cut.start));
-        const endHandle = document.createElement('button');
-        endHandle.type = 'button';
-        endHandle.className = 'cutter-cut-handle end';
-        endHandle.setAttribute('role', 'slider');
-        endHandle.setAttribute('aria-label', `${UI_TEXT.cutter.cutLabel} ${index + 1}: ${UI_TEXT.cutter.endLabel}`);
-        endHandle.setAttribute('aria-valuemin', String(cut.start + 1 / editorState.fps));
-        endHandle.setAttribute('aria-valuemax', String(editorState.trimEnd));
-        endHandle.setAttribute('aria-valuenow', String(cut.end));
-        endHandle.setAttribute('aria-valuetext', formatCutterTimecode(cut.end));
-        startHandle.textContent = 'I';
-        endHandle.textContent = 'O';
-        startHandle.addEventListener('pointerdown', (event) => beginCutterDrag('cut-start', event, cut.id));
-        endHandle.addEventListener('pointerdown', (event) => beginCutterDrag('cut-end', event, cut.id));
-        startHandle.addEventListener('keydown', (event) => handleCutterBoundaryKey(event, 'cut-start', cut.id));
-        endHandle.addEventListener('keydown', (event) => handleCutterBoundaryKey(event, 'cut-end', cut.id));
         overlay.addEventListener('pointerdown', (event) => {
-            const rect = overlay.getBoundingClientRect();
-            if (cut.id !== cutterCutDraft?.id || rect.width >= 24) return;
-            const center = rect.left + rect.width / 2;
-            const moveHalfWidth = Math.min(3, Math.max(1, rect.width / 6));
-            const kind = event.clientX < center - moveHalfWidth
-                ? 'cut-start'
-                : event.clientX > center + moveHalfWidth
-                    ? 'cut-end'
-                    : 'cut-move';
-            beginCutterDrag(kind, event, cut.id);
-        }, { capture: true });
-        overlay.addEventListener('pointerdown', (event) => {
-            if (cut.id !== cutterCutDraft?.id || event.target === startHandle || event.target === endHandle) return;
+            if (cut.id !== cutterCutDraft?.id) return;
             cutterActiveCutId = cut.id;
             beginCutterDrag('cut-move', event, cut.id);
         });
@@ -860,10 +869,10 @@ function renderCutterCutOverlays(): void {
                 event.preventDefault();
                 editCutterCut(cut.id);
             } else if (cut.id === cutterCutDraft?.id && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
-                handleCutterBoundaryKey(event, 'cut-move', cut.id);
+                handleCutterCutMoveKey(event, cut.id);
             }
         });
-        if (cut.id === cutterCutDraft?.id) overlay.append(startHandle, label, endHandle);
+        if (cut.id === cutterCutDraft?.id) overlay.append(label);
         else {
             overlay.append(label);
             overlay.style.cursor = 'pointer';
@@ -885,19 +894,6 @@ function updateCutterEditorGeometry(): void {
     byId('cutterOutsideRight').style.width = `${100 - endPercent}%`;
     byId<HTMLInputElement>('startTime').value = formatCutterTimecode(cutterEditorState.trimStart);
     byId<HTMLInputElement>('endTime').value = formatCutterTimecode(cutterEditorState.trimEnd);
-    const trimStartHandle = byId<HTMLElement>('cutterTrimStartHandle');
-    trimStartHandle.setAttribute('role', 'slider');
-    trimStartHandle.setAttribute('aria-valuemin', '0');
-    trimStartHandle.setAttribute('aria-valuemax', String(cutterEditorState.trimEnd - 1 / cutterEditorState.fps));
-    trimStartHandle.setAttribute('aria-valuenow', String(cutterEditorState.trimStart));
-    trimStartHandle.setAttribute('aria-valuetext', formatCutterTimecode(cutterEditorState.trimStart));
-    const trimEndHandle = byId<HTMLElement>('cutterTrimEndHandle');
-    trimEndHandle.setAttribute('role', 'slider');
-    trimEndHandle.setAttribute('aria-valuemin', String(cutterEditorState.trimStart + 1 / cutterEditorState.fps));
-    trimEndHandle.setAttribute('aria-valuemax', String(cutterEditorState.duration));
-    trimEndHandle.setAttribute('aria-valuenow', String(cutterEditorState.trimEnd));
-    trimEndHandle.setAttribute('aria-valuetext', formatCutterTimecode(cutterEditorState.trimEnd));
-    positionCutterHandles(cutterEditorState.trimStart, cutterEditorState.trimEnd, trimStartHandle, trimEndHandle);
     byId('infoSelection').textContent = formatCutterTimecode(getCutterPlayableDuration());
     byId('cutterOutputLength').textContent = formatCutterTimecode(getCutterPlayableDuration());
     document.querySelectorAll<HTMLElement>('.cutter-cut-overlay[data-cut-id]').forEach((overlay) => {
@@ -906,21 +902,12 @@ function updateCutterEditorGeometry(): void {
         overlay.style.left = `${cut.start / cutterEditorState!.duration * 100}%`;
         overlay.style.width = `${(cut.end - cut.start) / cutterEditorState!.duration * 100}%`;
         overlay.classList.toggle('active', cut.id === cutterActiveCutId);
-        const startHandle = overlay.querySelector<HTMLElement>('.cutter-cut-handle.start');
-        const endHandle = overlay.querySelector<HTMLElement>('.cutter-cut-handle.end');
-        startHandle?.setAttribute('aria-valuemax', String(cut.end - 1 / cutterEditorState!.fps));
-        startHandle?.setAttribute('aria-valuenow', String(cut.start));
-        startHandle?.setAttribute('aria-valuetext', formatCutterTimecode(cut.start));
-        endHandle?.setAttribute('aria-valuemin', String(cut.start + 1 / cutterEditorState!.fps));
-        endHandle?.setAttribute('aria-valuenow', String(cut.end));
-        endHandle?.setAttribute('aria-valuetext', formatCutterTimecode(cut.end));
-        if (startHandle && endHandle) positionCutterHandles(cut.start, cut.end, startHandle, endHandle);
     });
     document.querySelectorAll<HTMLElement>('.cutter-cut-row[data-cut-id]').forEach((row) => {
         const cut = cutterEditorState!.cuts.find((entry) => entry.id === row.dataset.cutId);
         if (!cut) return;
         const inputs = row.querySelectorAll<HTMLInputElement>('input');
-        if (cutterDragState?.cutId === cut.id) {
+        if (cutterDragState?.cutId === cut.id || cutterRangeDrag?.cutId === cut.id) {
             inputs.forEach(input => input.setAttribute('aria-invalid', 'false'));
             const apply = row.querySelector<HTMLButtonElement>('.btn-secondary');
             const error = row.querySelector<HTMLElement>('.cutter-range-error');
@@ -933,6 +920,7 @@ function updateCutterEditorGeometry(): void {
         if (duration) duration.textContent = formatCutterTimecode(cut.end - cut.start);
         row.classList.toggle('active', cut.id === cutterActiveCutId);
     });
+    syncCutterPlayer();
 }
 
 function renderCutterEditor(): void {
@@ -1004,25 +992,105 @@ async function requestCutterAssets(): Promise<void> {
     if (getCutterAssetPixelWidth() > cutterAssetsPixelWidth * 1.05 || getCutterAssetPixelHeight() > cutterAssetsPixelHeight) scheduleCutterAssetRefresh();
 }
 
+function clearCutterWaveform(): void {
+    cutterWaveformImage = null;
+    cutterWaveformPeaks = [];
+    if (cutterWaveformRenderFrame !== null) cancelAnimationFrame(cutterWaveformRenderFrame);
+    cutterWaveformRenderFrame = null;
+    const canvas = byId<HTMLCanvasElement>('cutterWaveform');
+    canvas.hidden = true;
+    canvas.width = 1;
+}
+
+function drawCutterWaveform(): void {
+    cutterWaveformRenderFrame = null;
+    if (!cutterWaveformPeaks.length) return;
+    const scroll = byId('cutterTimelineScroll');
+    const track = byId('cutterAudioTrack');
+    const canvas = byId<HTMLCanvasElement>('cutterWaveform');
+    const totalWidth = Math.max(1, track.getBoundingClientRect().width);
+    const left = Math.max(0, scroll.scrollLeft);
+    const cssWidth = Math.max(1, Math.min(scroll.clientWidth, totalWidth - left));
+    const cssHeight = Math.max(1, track.clientHeight);
+    const ratio = clampCutterValue(window.devicePixelRatio || 1, 1, 3);
+    canvas.width = Math.ceil(cssWidth * ratio);
+    canvas.height = Math.ceil(cssHeight * ratio);
+    canvas.style.left = `${left}px`;
+    canvas.style.width = `${cssWidth}px`;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const laneHeight = canvas.height / cutterWaveformPeaks.length;
+    cutterWaveformPeaks.forEach((peaks, channel) => {
+        const center = (channel + .5) * laneHeight;
+        context.fillStyle = '#64717c';
+        context.fillRect(0, Math.round(center), canvas.width, 1);
+        context.fillStyle = '#9ac8bb';
+        for (let x = 0; x < canvas.width; x += 1) {
+            const start = Math.min(peaks.length - 1, Math.floor((left + x / ratio) / totalWidth * peaks.length));
+            const end = Math.min(peaks.length, Math.max(start + 1, Math.ceil((left + (x + 1) / ratio) / totalWidth * peaks.length)));
+            let peak = 0;
+            for (let index = start; index < end; index += 1) peak = Math.max(peak, peaks[index]);
+            const height = Math.round(peak / 255 * Math.max(1, laneHeight / 2 - 2));
+            if (height > 0) context.fillRect(x, Math.round(center) - height, 1, height * 2);
+        }
+    });
+    canvas.hidden = false;
+}
+
+function scheduleCutterWaveformRender(): void {
+    if (!cutterWaveformPeaks.length || cutterWaveformRenderFrame !== null) return;
+    cutterWaveformRenderFrame = requestAnimationFrame(drawCutterWaveform);
+}
+
 async function requestCutterWaveform(file: FileCapabilityReference, jobId: number, loadGeneration: number): Promise<void> {
     let result: VideoEditorWaveform | null = null;
     try {
         result = await window.api.prepareVideoEditorWaveform(file.token, jobId);
     } catch { }
     if (loadGeneration !== cutterLoadGeneration || cutterFile !== file || cutterMediaJobId !== jobId || !result || result.jobId !== jobId) return;
-    const waveform = byId<HTMLImageElement>('cutterWaveform');
-    waveform.hidden = !result.waveform;
-    if (result.waveform) {
-        if (waveform.src !== result.waveform) waveform.src = result.waveform;
-    } else {
-        waveform.removeAttribute('src');
+    if (!result.waveform) {
+        clearCutterWaveform();
+        byId('cutterAudioEmpty').hidden = false;
+        return;
     }
-    byId('cutterAudioEmpty').hidden = Boolean(result.waveform);
+    const image = new Image();
+    cutterWaveformImage = image;
+    image.src = result.waveform;
+    try { await image.decode(); } catch { return; }
+    if (cutterWaveformImage !== image || loadGeneration !== cutterLoadGeneration) return;
+    const channels = Math.max(1, Math.min(8, result.channels || 1));
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return;
+    context.drawImage(image, 0, 0);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const laneHeight = canvas.height / channels;
+    cutterWaveformPeaks = Array.from({ length: channels }, (_, channel) => {
+        const peaks = new Uint8Array(canvas.width);
+        const start = Math.floor(channel * laneHeight), end = Math.floor((channel + 1) * laneHeight);
+        const center = (start + end - 1) / 2;
+        for (let y = start; y < end; y += 1) {
+            const amplitude = Math.min(255, Math.round(Math.abs(y - center) / (laneHeight / 2) * 255));
+            for (let x = 0; x < canvas.width; x += 1) {
+                const offset = (y * canvas.width + x) * 4;
+                if (pixels[offset] > 32 && pixels[offset + 3] > 32) peaks[x] = Math.max(peaks[x], amplitude);
+            }
+        }
+        return peaks;
+    });
+    canvas.width = 1;
+    cutterWaveformImage = null;
+    byId('cutterAudioEmpty').hidden = true;
+    scheduleCutterWaveformRender();
 }
 
 async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> {
     if (!file || isCutting) return;
     const generation = ++cutterLoadGeneration;
+    cutterPresentedTime = null;
+    cutterPendingSeekTime = null;
+    finishCutterPlayerRange(false);
     const video = getCutterVideo();
     const hadEditor = Boolean(cutterEditorState && cutterFile);
     video.pause();
@@ -1098,9 +1166,7 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
     byId('infoFps').textContent = media.info.fps.toFixed(media.info.fps % 1 === 0 ? 0 : 2);
 
     renderCutterThumbnails(media.thumbnails);
-    const waveform = byId<HTMLImageElement>('cutterWaveform');
-    waveform.hidden = true;
-    waveform.removeAttribute('src');
+    clearCutterWaveform();
     byId('cutterAudioEmpty').hidden = media.info.hasAudio;
     video.src = media.sourceUrl;
 
@@ -1196,7 +1262,6 @@ function updateTimeFromInput(): void {
         return;
     }
     commitCutterChange(before);
-    seekCutterVideo(cutterEditorState.trimStart);
     renderCutterEditor();
 }
 
@@ -1297,6 +1362,15 @@ async function toggleCutterPlayback(): Promise<void> {
     try { await video.play(); } catch { }
 }
 
+function stepCutterFrame(direction: number): void {
+    if (!cutterEditorState) return;
+    const video = getCutterVideo();
+    const time = cutterPendingSeekTime ?? (video.paused ? video.currentTime : cutterPresentedTime ?? video.currentTime);
+    video.pause();
+    const target = clampCutterValue((Math.round(time * cutterEditorState.fps) + direction) / cutterEditorState.fps, 0, cutterEditorState.duration);
+    seekCutterVideo(target);
+}
+
 function stopCutterPlayback(): void {
     if (!cutterEditorState) return;
     const video = getCutterVideo();
@@ -1359,6 +1433,7 @@ function updateCutterZoom(value: number, animate = false, anchorClientX: number 
     } else {
         scroll.scrollLeft = target;
     }
+    scheduleCutterWaveformRender();
     if ((cutterVideoInfo?.duration || 0) > 120 && (cutterAssetsPixelWidth > 0 || cutterAssetsInFlightJobId !== null)) scheduleCutterAssetRefresh();
 }
 
@@ -1420,67 +1495,30 @@ function autoScrollCutterDrag(clientX: number): boolean {
     return scroll.scrollLeft !== before;
 }
 
-function handleCutterBoundaryKey(event: KeyboardEvent, kind: Exclude<CutterDragKind, 'playhead'>, cutId: string | null = null): void {
-    if (!cutterEditorState || !cutterControlsEnabled || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End')) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if ((kind === 'trim-start' || kind === 'trim-end') && cutterCutDraft) return;
+function handleCutterCutMoveKey(event: KeyboardEvent, cutId: string): void {
+    if (!cutterEditorState || !cutterControlsEnabled || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const cut = cutterEditorState.cuts.find(entry => entry.id === cutId);
+    if (!cut || cutId !== cutterCutDraft?.id) return;
+    event.preventDefault(); event.stopPropagation();
     const before = cloneCutterState(cutterEditorState);
-    const direction = event.key === 'ArrowLeft' ? -1 : 1;
-    const step = event.key === 'Home' ? -cutterEditorState.duration : event.key === 'End' ? cutterEditorState.duration : (event.shiftKey ? 10 : 1) / cutterEditorState.fps * direction;
-    let changed = false;
-    const frame = 1 / cutterEditorState.fps;
-    if (kind === 'trim-start') changed = setCutterTrim(clampCutterValue(cutterEditorState.trimStart + step, 0, cutterEditorState.trimEnd - frame), cutterEditorState.trimEnd);
-    if (kind === 'trim-end') changed = setCutterTrim(cutterEditorState.trimStart, clampCutterValue(cutterEditorState.trimEnd + step, cutterEditorState.trimStart + frame, cutterEditorState.duration));
-    const cut = cutId ? cutterEditorState.cuts.find((entry) => entry.id === cutId) : null;
     const others = cutterEditorState.cuts.filter(entry => entry.id !== cutId);
-    const minimum = Math.max(cutterEditorState.trimStart, ...others.filter(entry => entry.end <= (cut?.start ?? 0)).map(entry => entry.end));
-    const maximum = Math.min(cutterEditorState.trimEnd, ...others.filter(entry => entry.start >= (cut?.end ?? Infinity)).map(entry => entry.start));
-    if (cut && kind === 'cut-start') changed = setCutterCutRange(cut.id, clampCutterValue(cut.start + step, minimum, cut.end - frame), cut.end);
-    if (cut && kind === 'cut-end') changed = setCutterCutRange(cut.id, cut.start, clampCutterValue(cut.end + step, cut.start + frame, maximum));
-    if (cut && kind === 'cut-move') {
-        const duration = cut.end - cut.start;
-        const start = clampCutterValue(cut.start + step, minimum, maximum - duration);
-        changed = setCutterCutRange(cut.id, start, start + duration);
-    }
-    if (!changed) return;
-    commitCutterChange(before);
-    const nextCut = cutId ? cutterEditorState.cuts.find((entry) => entry.id === cutId) : null;
-    const seekTime = kind === 'trim-start'
-        ? cutterEditorState.trimStart
-        : kind === 'trim-end'
-            ? cutterEditorState.trimEnd
-            : nextCut?.start ?? cutterEditorState.trimStart;
-    seekCutterVideo(seekTime);
-    renderCutterEditor();
-    requestAnimationFrame(() => {
-        if (!cutId) {
-            byId<HTMLElement>(kind === 'trim-start' ? 'cutterTrimStartHandle' : 'cutterTrimEndHandle').focus();
-            return;
-        }
-        const overlay = document.querySelector<HTMLElement>(`.cutter-cut-overlay[data-cut-id="${CSS.escape(cutId)}"]`);
-        if (kind === 'cut-start') overlay?.querySelector<HTMLElement>('.cutter-cut-handle.start')?.focus();
-        else if (kind === 'cut-end') overlay?.querySelector<HTMLElement>('.cutter-cut-handle.end')?.focus();
-        else overlay?.focus();
-    });
+    const minimum = Math.max(cutterEditorState.trimStart, ...others.filter(entry => entry.end <= cut.start).map(entry => entry.end));
+    const maximum = Math.min(cutterEditorState.trimEnd, ...others.filter(entry => entry.start >= cut.end).map(entry => entry.start));
+    const duration = cut.end - cut.start;
+    const delta = (event.shiftKey ? 10 : 1) / cutterEditorState.fps * (event.key === 'ArrowLeft' ? -1 : 1);
+    const start = event.key === 'Home' ? minimum : event.key === 'End' ? maximum - duration : clampCutterValue(cut.start + delta, minimum, maximum - duration);
+    if (!setCutterCutRange(cutId, start, start + duration)) return;
+    commitCutterChange(before); renderCutterEditor(); seekCutterVideo(start);
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('.cutter-cut-overlay[data-cut-id="' + CSS.escape(cutId) + '"]')?.focus());
 }
 
 function beginCutterDrag(kind: CutterDragKind, event: PointerEvent, cutId: string | null = null): void {
     if (!cutterEditorState || !cutterControlsEnabled || event.button !== 0) return;
-    if ((kind === 'trim-start' || kind === 'trim-end') && cutterCutDraft) return;
     event.preventDefault();
     event.stopPropagation();
     const cut = cutId ? cutterEditorState.cuts.find((entry) => entry.id === cutId) : null;
     const pointerTime = kind === 'playhead' ? cutterPointerTimeAt(event.clientX) : cutterPointerRawTimeAt(event.clientX);
-    const anchorTarget = kind === 'trim-start'
-        ? cutterEditorState.trimStart
-        : kind === 'trim-end'
-            ? cutterEditorState.trimEnd
-            : kind === 'cut-start' || kind === 'cut-move'
-                ? cut?.start
-                : kind === 'cut-end'
-                    ? cut?.end
-                    : null;
+    const anchorTarget = kind === 'cut-move' ? cut?.start : null;
     const captureTarget = event.currentTarget instanceof HTMLElement ? event.currentTarget : byId<HTMLElement>('timeline');
     try { captureTarget.setPointerCapture(event.pointerId); } catch { }
     cutterDragState = {
@@ -1523,25 +1561,13 @@ function applyCutterDragFrame(): void {
     if (drag.cutId) cutterActiveCutId = drag.cutId;
     const anchoredTime = time - drag.anchor;
     let previewTime: number | null = null;
-    if (drag.kind === 'trim-start') {
-        if (setCutterTrim(anchoredTime, cutterEditorState.trimEnd)) previewTime = cutterEditorState.trimStart;
-    } else if (drag.kind === 'trim-end') {
-        if (setCutterTrim(cutterEditorState.trimStart, anchoredTime)) previewTime = cutterEditorState.trimEnd;
-    } else if (drag.cutId) {
+    if (drag.cutId) {
         const cut = cutterEditorState.cuts.find((entry) => entry.id === drag.cutId);
         if (!cut) return;
         const orderedCuts = [...drag.before.cuts].sort((left, right) => left.start - right.start);
         const originalIndex = orderedCuts.findIndex((entry) => entry.id === drag.cutId);
         const previousEnd = originalIndex > 0 ? orderedCuts[originalIndex - 1].end : cutterEditorState.trimStart;
         const nextStart = originalIndex >= 0 && originalIndex < orderedCuts.length - 1 ? orderedCuts[originalIndex + 1].start : cutterEditorState.trimEnd;
-        if (drag.kind === 'cut-start') {
-            const start = clampCutterValue(anchoredTime, previousEnd, cut.end - 1 / cutterEditorState.fps);
-            if (setCutterCutRange(cut.id, start, cut.end)) previewTime = start;
-        }
-        if (drag.kind === 'cut-end') {
-            const end = clampCutterValue(anchoredTime, cut.start + 1 / cutterEditorState.fps, nextStart);
-            if (setCutterCutRange(cut.id, cut.start, end)) previewTime = end;
-        }
         if (drag.kind === 'cut-move') {
             const original = drag.before.cuts.find((entry) => entry.id === drag.cutId);
             if (original) {
@@ -1603,6 +1629,9 @@ async function startCutting(): Promise<void> {
     button.disabled = true;
     button.textContent = UI_TEXT.cutter.cutting;
     cancel.hidden = false;
+    byId('cutProgressBar').style.width = '0%';
+    byId('cutProgressText').textContent = '0%';
+    byId('cutProgressGauge').setAttribute('aria-valuenow', '0');
     byId('cutProgress').classList.add('show');
     try {
         const result = await window.api.exportVideoEdit({
@@ -1644,19 +1673,19 @@ function stopCutterPlaybackFrameSync(): void {
     cutterPlaybackFrame = null;
 }
 
-function synchronizeCutterPlaybackFrame(): void {
+function synchronizeCutterPlaybackFrame(_now?: number, metadata?: VideoFrameCallbackMetadata): void {
     cutterPlaybackFrame = null;
     if (!cutterEditorState) return;
     if (cutterDragState) {
-        if (!getCutterVideo().paused) scheduleCutterPlaybackFrameSync();
+        if (!getCutterVideo().paused || (typeof getCutterVideo().requestVideoFrameCallback === 'function' && cutterViewActive)) scheduleCutterPlaybackFrameSync();
         return;
     }
     const video = getCutterVideo();
-    const time = video.currentTime;
+    const time = metadata?.mediaTime ?? video.currentTime;
     if (!video.paused && cutterPreviewMode) {
         const skipped = findCutterPreviewTime(time, cutterPreviousPlaybackTime);
         if (skipped > time + 1 / cutterEditorState.fps / 2) {
-            video.currentTime = skipped;
+            video.currentTime = cutterSeekTime(skipped);
             cutterPreviousPlaybackTime = skipped;
             updateCutterPlayhead(skipped);
             scheduleCutterPlaybackFrameSync();
@@ -1671,10 +1700,11 @@ function synchronizeCutterPlaybackFrame(): void {
         return;
     }
     updateCutterPlayhead(time);
-    if (!video.paused) scheduleCutterPlaybackFrameSync();
+    if (!video.paused || video.seeking || (typeof video.requestVideoFrameCallback === 'function' && cutterViewActive)) scheduleCutterPlaybackFrameSync();
 }
 
 function deactivateCutterEditor(): void {
+    finishCutterPlayerRange(false);
     cutterViewActive = false;
     syncCutterPlayer();
     const video = getCutterVideo();
@@ -1706,7 +1736,7 @@ function activateCutterEditor(): void {
 function scheduleCutterPlaybackFrameSync(): void {
     if (cutterPlaybackFrame !== null) return;
     const video = getCutterVideo() as HTMLVideoElement & {
-        requestVideoFrameCallback?: (callback: () => void) => number;
+        requestVideoFrameCallback?: (callback: (now: number, metadata: VideoFrameCallbackMetadata) => void) => number;
     };
     if (video.requestVideoFrameCallback) {
         cutterPlaybackUsesVideoCallback = true;
@@ -1722,9 +1752,11 @@ function initCutterEditor(): void {
     cutterEditorInitialized = true;
     const video = getCutterVideo();
     cutterPlayerView = window.LocalCutterPlayer.mount(byId('cutterPlayerControls'), {
-        video, state: { language: currentLanguage, active: false, enabled: false, duration: 0 },
+        video, state: getCutterPlayerState(),
+        changeRange: changeCutterPlayerRange, beginRange: beginCutterPlayerRange, finishRange: finishCutterPlayerRange,
         play: () => { void toggleCutterPlayback(); }, seek: time => seekCutterVideo(time),
-        frame: direction => { video.pause(); seekCutterVideo(video.currentTime + direction / (cutterEditorState?.fps || 30)); }, format: formatCutterTimecode,
+        frame: stepCutterFrame, format: formatCutterTimecode,
+        parse: (value, total) => { const time = parseCutterTimecode(value); return time !== null && time <= total ? time : null; },
     });
     setCutterControlsEnabled(Boolean(cutterEditorState));
     document.querySelectorAll<HTMLButtonElement>('.cutter-speed-options button').forEach((button) => {
@@ -1736,33 +1768,36 @@ function initCutterEditor(): void {
         cutterPreviousPlaybackTime = video.currentTime;
         scheduleCutterPlaybackFrameSync();
     });
+    video.addEventListener('seeking', scheduleCutterPlaybackFrameSync);
+    video.addEventListener('seeked', settleCutterSeek);
     video.addEventListener('pause', () => {
         byId('cutterPreview').classList.remove('playing');
-        stopCutterPlaybackFrameSync();
-        if (cutterEditorState && !cutterDragState && !cutterScrubSeekInFlight && cutterScrubTargetTime === null) updateCutterPlayhead(video.currentTime);
+        if (typeof video.requestVideoFrameCallback === 'function' && cutterViewActive) scheduleCutterPlaybackFrameSync();
+        else stopCutterPlaybackFrameSync();
+        if (cutterEditorState && !cutterDragState && !cutterScrubSeekInFlight && cutterScrubTargetTime === null) updateCutterPlayhead(cutterPresentedTime ?? video.currentTime);
     });
     video.addEventListener('waiting', () => byId('cutterPreview').classList.add('buffering'));
     video.addEventListener('playing', () => byId('cutterPreview').classList.remove('buffering'));
     video.addEventListener('timeupdate', () => {
-        if (video.paused && cutterEditorState && !cutterDragState && !cutterScrubSeekInFlight && cutterScrubTargetTime === null) updateCutterPlayhead(video.currentTime);
+        if (!video.requestVideoFrameCallback && video.paused && cutterEditorState && !cutterDragState && !cutterScrubSeekInFlight && cutterScrubTargetTime === null) updateCutterPlayhead(video.currentTime);
     });
     window.addEventListener('resize', () => {
         if (!cutterEditorState || !byId('cutterTab').classList.contains('active')) return;
         updateCutterZoom(cutterZoom);
     });
     byId<HTMLInputElement>('cutterZoom').addEventListener('input', (event) => updateCutterZoom(Number((event.currentTarget as HTMLInputElement).value)));
+    byId('cutterTimelineScroll').addEventListener('scroll', scheduleCutterWaveformRender, { passive: true });
     byId('cutterTimelineScroll').addEventListener('wheel', zoomCutterTimelineWithWheel, { passive: false });
     byId<HTMLInputElement>('startTime').addEventListener('keydown', (event) => { if (event.key === 'Enter') updateTimeFromInput(); });
     byId<HTMLInputElement>('endTime').addEventListener('keydown', (event) => { if (event.key === 'Enter') updateTimeFromInput(); });
     byId('timeline').addEventListener('pointerdown', (event: PointerEvent) => {
         const target = event.target as HTMLElement;
-        if (target.closest('.timeline-handle, .cutter-cut-overlay')) return;
+        if (target.closest('.vod-range-markers, .cutter-cut-overlay')) return;
         beginCutterDrag('playhead', event);
     });
-    byId('cutterTrimStartHandle').addEventListener('pointerdown', (event: PointerEvent) => beginCutterDrag('trim-start', event));
-    byId('cutterTrimEndHandle').addEventListener('pointerdown', (event: PointerEvent) => beginCutterDrag('trim-end', event));
-    byId('cutterTrimStartHandle').addEventListener('keydown', (event: KeyboardEvent) => handleCutterBoundaryKey(event, 'trim-start'));
-    byId('cutterTrimEndHandle').addEventListener('keydown', (event: KeyboardEvent) => handleCutterBoundaryKey(event, 'trim-end'));
+    document.addEventListener('keydown', handleCutterPageKey, true);
+    document.addEventListener('keyup', handleCutterPageKeyUp, true);
+    window.addEventListener('blur', () => { cutterPageSpaceHeld = false; });
     document.addEventListener('pointermove', moveCutterDrag);
     document.addEventListener('pointerup', endCutterDrag);
     document.addEventListener('pointercancel', cancelCutterDrag);
@@ -1797,13 +1832,63 @@ function initCutterEditor(): void {
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
             event.preventDefault();
             const direction = event.key === 'ArrowLeft' ? -1 : 1;
-            seekCutterVideo(getCutterVideo().currentTime + direction / cutterEditorState.fps);
+            stepCutterFrame(direction);
         }
     });
 }
 
+function getCutterPlayerState(): LocalCutterViewState {
+    const state = cutterEditorState;
+    const cut = state?.cuts.find(entry => entry.id === cutterCutDraft?.id) || null;
+    const others = state?.cuts.filter(entry => entry.id !== cut?.id) || [];
+    return {
+        language: currentLanguage, active: Boolean(state) && cutterViewActive, enabled: cutterControlsEnabled,
+        duration: state?.duration || 0, fps: state?.fps || 30, name: cutterFile?.name || '', generation: cutterLoadGeneration,
+        labels: { start: UI_TEXT.cutter.startLabel, end: UI_TEXT.cutter.endLabel },
+        range: state ? { start: state.trimStart, end: state.trimEnd } : null,
+        cut: cut ? { ...cut } : null,
+        cutLimits: state && cut ? {
+            start: Math.max(state.trimStart, ...others.filter(entry => entry.end <= cut.start).map(entry => entry.end)),
+            end: Math.min(state.trimEnd, ...others.filter(entry => entry.start >= cut.end).map(entry => entry.start)),
+        } : null,
+    };
+}
+
+function beginCutterPlayerRange(cutId: string | null): void {
+    if (!cutterEditorState || !cutterControlsEnabled) return;
+    cancelCutterScrubFrames();
+    const video = getCutterVideo();
+    cutterRangeDrag = { before: cloneCutterState(cutterEditorState), cutId, generation: cutterLoadGeneration, playing: !video.paused };
+    video.pause();
+}
+
+function changeCutterPlayerRange(start: number, end: number, cutId: string | null, interaction: { source: string; boundary: string }): void {
+    if (!cutterEditorState || !cutterControlsEnabled || (cutId ? cutId !== cutterCutDraft?.id : Boolean(cutterCutDraft))) return;
+    const before = cloneCutterState(cutterEditorState);
+    const changed = cutId ? setCutterCutRange(cutId, start, end) : setCutterTrim(start, end);
+    if (!changed) return;
+    if (!cutterRangeDrag) commitCutterChange(before);
+    updateCutterEditorGeometry();
+    updateCutterEditActions();
+    if (interaction.source === 'pointer' && interaction.boundary === 'start') {
+        const position = cutId ? cutterEditorState.cuts.find(entry => entry.id === cutId)?.start : cutterEditorState.trimStart;
+        if (position !== undefined) queueCutterScrubFrame(position);
+    }
+}
+
+function finishCutterPlayerRange(commit: boolean): void {
+    const drag = cutterRangeDrag;
+    cutterRangeDrag = null;
+    if (!drag || drag.generation !== cutterLoadGeneration) return;
+    if (commit) commitCutterChange(drag.before);
+    else { cutterEditorState = cloneCutterState(drag.before); cancelCutterScrubFrames(); }
+    renderCutterEditor();
+    cutterScrubResumePlayback = drag.playing;
+    finishCutterScrubPlayback();
+}
+
 function syncCutterPlayer(): void {
-    cutterPlayerView?.update({ language: currentLanguage, active: Boolean(cutterEditorState) && cutterViewActive, enabled: cutterControlsEnabled, duration: cutterEditorState?.duration || 0 });
+    cutterPlayerView?.update(getCutterPlayerState());
 }
 
 function updateCutterEditActions(): void {
@@ -1818,8 +1903,6 @@ function updateCutterEditActions(): void {
     byId<HTMLButtonElement>('cutterOpenProjectBtn').disabled = disabled || draft;
     byId<HTMLButtonElement>('cutterFullRange').disabled = disabled || draft;
     for (const id of ['startTime', 'endTime', 'cutterMarkStart', 'cutterMarkEnd']) (byId(id) as HTMLInputElement).disabled = disabled || draft;
-    byId('cutterTrimStartHandle').setAttribute('aria-disabled', String(disabled || draft));
-    byId('cutterTrimEndHandle').setAttribute('aria-disabled', String(disabled || draft));
     byId('cutterTrimMode').setAttribute('aria-label', UI_TEXT.cutter.excerpt);
     byId('cutterOmitMode').setAttribute('aria-label', UI_TEXT.cutter.omit);
     byId('cutterCutCount').setAttribute('aria-label', UI_TEXT.cutter.cutsLabel);
@@ -1832,7 +1915,9 @@ function updateCutterEditActions(): void {
     byId('cutterFormatSummary').textContent = UI_TEXT.cutter.formatDetails;
     byId('cutterNewCutBtn').textContent = '+ ' + UI_TEXT.cutter.newCut;
     byId('cutterTimeHint').textContent = draft ? UI_TEXT.cutter.confirmHint : UI_TEXT.cutter.timeHint;
+    updateCutterExportPresentation();
     updateCutterHistoryButtons();
+    syncCutterPlayer();
 }
 
 function setCutterMode(mode: 'trim' | 'omit'): void {
@@ -1900,20 +1985,64 @@ function cancelCutterDrag(): void {
     endCutterDrag();
 }
 
-function positionCutterHandles(start: number, end: number, startHandle: HTMLElement, endHandle: HTMLElement): void {
-    if (!cutterEditorState) return;
-    const width = Math.max(1, byId('timeline').getBoundingClientRect().width);
-    const left = start / cutterEditorState.duration * width;
-    const right = end / cutterEditorState.duration * width;
-    let first = clampCutterValue(left + 12, 12, width - 12);
-    let last = clampCutterValue(right - 12, 12, width - 12);
-    if (last - first < 30) {
-        const center = clampCutterValue((left + right) / 2, 27, width - 27);
-        first = center - 15; last = center + 15;
+function getCutterAudioLanguage(language: string | null | undefined): string {
+    const code = language?.trim().toLowerCase();
+    if (!code || code === 'und' || code === 'zxx') return '';
+    try { return new Intl.DisplayNames([currentLanguage], { type: 'language' }).of(code) || code; }
+    catch { return code; }
+}
+
+function updateCutterExportPresentation(): void {
+    const t = UI_TEXT.cutter;
+    const archive = cutterExportProfile === 'archive';
+    const stream = cutterVideoInfo?.audioStreams.find(entry => entry.index === cutterAudioStreamIndex);
+    const channelText = !stream || stream.channels <= 0 ? '' : stream.channels === 1 ? t.mono : stream.channels === 2 ? t.stereo : formatUiNumber(stream.channels) + ' ' + t.channelPlural;
+    const texts: Record<string, string> = {
+        cutterProfileQualityLabel: t.profileQuality, cutterProfileBalancedLabel: t.profileBalanced,
+        cutterProfileFastLabel: t.profileFast, cutterProfileArchiveLabel: t.profileArchive,
+        cutterProfileHelp: { quality: t.profileQualityHelp, balanced: t.profileBalancedHelp, fast: t.profileFastHelp, archive: t.profileArchiveHelp }[cutterExportProfile],
+        cutterFormatBadge: archive ? 'MKV' : 'MP4',
+        cutterExportCodecs: [archive ? 'FFV1' : 'H.264', stream ? archive ? 'FLAC' : 'AAC' : t.noAudio].join(' · '),
+        cutterAudioHelp: stream ? [stream.codec.toUpperCase(), channelText].filter(Boolean).join(' · ') : '',
+        cutterExportState: t.exportDraft,
+    };
+    for (const [id, text] of Object.entries(texts)) {
+        const element = document.getElementById(id);
+        if (element) element.textContent = text;
     }
-    startHandle.style.left = (first - left - 12) + 'px';
-    endHandle.style.left = (last - left - 12) + 'px';
-    endHandle.style.right = 'auto';
-    startHandle.style.setProperty('--boundary-offset', (left - first + 12) + 'px');
-    endHandle.style.setProperty('--boundary-offset', (right - last + 12) + 'px');
+    const status = document.getElementById('cutterExportState');
+    if (status) status.hidden = !cutterCutDraft;
+    document.querySelectorAll<HTMLInputElement>('input[name="cutterProfile"]').forEach(input => {
+        input.checked = input.value === cutterExportProfile;
+        input.disabled = !cutterControlsEnabled || Boolean(cutterExportOptions && !cutterExportOptions.profiles.some(profile => profile.id === input.value));
+    });
+}
+
+let cutterPageSpaceHeld = false;
+
+function handleCutterPageKey(event: KeyboardEvent): void {
+    if (!byId('cutterTab').classList.contains('active') || event.ctrlKey || event.metaKey || event.altKey) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('.modal-overlay, [aria-modal="true"]')) return;
+    const field = target.closest('input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, select, [contenteditable="true"]');
+    if (event.key === 'Tab' && !field) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    if (event.code !== 'Space' && event.key !== ' ') return;
+    if (field && !target.matches('select, input[readonly]')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat || cutterPageSpaceHeld) return;
+    cutterPageSpaceHeld = true;
+    if (cutterEditorState && cutterControlsEnabled) void toggleCutterPlayback();
+}
+
+function handleCutterPageKeyUp(event: KeyboardEvent): void {
+    if (event.code !== 'Space' && event.key !== ' ') return;
+    if (cutterPageSpaceHeld) {
+        event.preventDefault();
+        event.stopPropagation();
+        cutterPageSpaceHeld = false;
+    }
 }

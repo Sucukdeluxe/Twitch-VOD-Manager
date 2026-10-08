@@ -73,6 +73,7 @@ interface VideoEditorAssets {
 }
 
 interface VideoEditorWaveform {
+    channels?: number;
     jobId: number;
     waveform: string | null;
     pixelWidth: number;

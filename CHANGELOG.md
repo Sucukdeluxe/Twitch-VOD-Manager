@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Synchronize local cutter time displays with presented video frames, fix adjacent-frame seeking and fractional-rate timecode round-trips, and show frame labels when zoomed. Keep thumbnail widths uniform and render separate audio-channel peaks sharply at the current zoom.
+
+- Reuse the VOD trimming I/O markers and fine-seek preview in the local cutter, replacing duplicate marker rendering and input handling while preserving frame-aligned edits and undo/redo.
+
+- Compact the local cutter export and selection panels, show readable audio-track choices and keep exclusions visible in both edit modes. Route Space to playback after control clicks, suppress control focus rings and Tab traversal outside editable fields, and reset progress for each export.
+
 - Fix broken cutter loading and misplaced navigation after source changes by loading a complete renderer build. Keep single-start development sessions stable and rebuild all assets before restarting watch sessions.
 
 - Rework the local Video Cutter around shared player controls, one thumbnail/waveform timeline, visible excerpt markers, confirmed exclusion edits and a compact export sidebar. Preserve frame stepping, project recovery and undo/redo; improve keyboard boundaries, fine dragging and scrub completion.
