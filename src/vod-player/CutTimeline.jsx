@@ -21,9 +21,11 @@ export function RangeMarkers({ duration, range, onChange, text, from = 0, to = d
     startCenter = center - 17; endCenter = center + 17;
   }
   const grip = compact ? { start: startCenter / width, end: endCenter / width } : boundary;
-  function update(which, value) {
-    onChange(which === 'start' ? Math.max(0, Math.min(value, range.end - .001)) : range.start,
-      which === 'end' ? Math.min(duration, Math.max(value, range.start + .001)) : range.end);
+  function update(which, value, source = 'keyboard') {
+    const start = which === 'start' ? Math.max(0, Math.min(value, range.end - .001)) : range.start;
+    const end = which === 'end' ? Math.min(duration, Math.max(value, range.start + .001)) : range.end;
+    if (start === range.start && end === range.end) return;
+    onChange(start, end, { source, boundary: which });
   }
   return <div ref={track} className={`vod-range-markers${compact ? ' is-compact' : ''}`}>
     {compact && <svg className="vod-range-connectors" viewBox="0 0 1000 60" preserveAspectRatio="none" aria-hidden="true">
@@ -44,7 +46,7 @@ export function RangeMarkers({ duration, range, onChange, text, from = 0, to = d
         if (drag.current?.id !== event.pointerId) return;
         event.stopPropagation();
         const value = drag.current.value + (event.clientX - drag.current.x) / Math.max(1, drag.current.width) * drag.current.span;
-        update(which, Math.max(from, Math.min(to, Math.round(value * 10) / 10)));
+        update(which, Math.max(from, Math.min(to, Math.round(value * 10) / 10)), 'pointer');
       }}
       onPointerUp={event => { event.stopPropagation(); drag.current = null; }}
       onPointerCancel={() => { drag.current = null; }} onLostPointerCapture={() => { drag.current = null; }}

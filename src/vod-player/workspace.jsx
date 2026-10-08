@@ -35,9 +35,10 @@ function Workspace({ options, bind }) {
   useEffect(() => {
     setChapterPreview(hoveredChapter || focusedChapter ? { recordingId: options.url, chapterId: hoveredChapter || focusedChapter } : null);
   }, [hoveredChapter, focusedChapter, options.url]);
-  const changeRange = useCallback((start, end) => {
+  const changeRange = useCallback((start, end, interaction) => {
     selectedPlayback.current = false; setSelectionPlaying(false);
     setRange({ start, end }); options.onRange(start, end);
+    if (interaction?.source === 'pointer' && interaction.boundary === 'start') setSeekRequest({ seconds: start });
   }, [options]);
   const seek = useCallback(seconds => { setSeekRequest({ seconds }); }, []);
   bind.current = { updateRange(start, end) { setRange({ start, end }); selectedPlayback.current = false; setSelectionPlaying(false); }, seek };
