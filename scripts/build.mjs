@@ -6,3 +6,5 @@ await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../node_modu
     cwd: fileURLToPath(new URL('../', import.meta.url)), windowsHide: true,
 });
 await import('./build-player.mjs');
+
+await import('./build-renderer.mjs');

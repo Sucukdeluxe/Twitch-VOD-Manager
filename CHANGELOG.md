@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix broken cutter loading and misplaced navigation after source changes by loading a complete renderer build. Keep single-start development sessions stable and rebuild all assets before restarting watch sessions.
+
 - Rework the local Video Cutter around shared player controls, one thumbnail/waveform timeline, visible excerpt markers, confirmed exclusion edits and a compact export sidebar. Preserve frame stepping, project recovery and undo/redo; improve keyboard boundaries, fine dragging and scrub completion.
 
 - Add the Streamrecorder history sidebar with Twitch game chapters, covers, category filters, direct seeking and one-click selection of a category for trimming. Show VOD time, original date/time, category and available title history when hovering over the player timeline.

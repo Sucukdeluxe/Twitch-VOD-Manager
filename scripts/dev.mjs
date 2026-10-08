@@ -10,7 +10,6 @@ const developmentAppVersion = JSON.parse(readFileSync(resolve(rootDirectory, 'pa
 if (typeof developmentAppVersion !== 'string' || developmentAppVersion.trim().length === 0) {
     throw new Error('package.json version must be a non-empty string');
 }
-const typescriptCli = resolve(rootDirectory, 'node_modules', 'typescript', 'bin', 'tsc');
 const electronSourceExecutable = process.platform === 'win32'
     ? resolve(rootDirectory, 'node_modules', 'electron', 'dist', 'electron.exe')
     : resolve(rootDirectory, 'node_modules', '.bin', 'electron');
@@ -23,10 +22,11 @@ const runOnce = process.argv.includes('--once');
 
 let electronProcess;
 let restarting = false;
-let restartTimer;
-let compiler;
-let playerCompiler;
-let outputWatcher;
+let buildTimer;
+let buildProcess;
+let sourceWatcher;
+let buildPending = false;
+let stopping = false;
 
 function run(command, args, options = {}) {
     return spawn(command, args, { cwd: rootDirectory, stdio: 'inherit', windowsHide: true, ...options });
@@ -70,18 +70,27 @@ function restartElectron() {
     startElectron();
 }
 
-function isElectronRestartTarget(fileName) {
-    const baseName = fileName.replaceAll('\\', '/').split('/').at(-1) ?? '';
-    if (baseName === 'renderer.js') return false;
-    if (!baseName.startsWith('renderer') || !baseName.endsWith('.js')) return true;
-    const suffix = baseName.slice(8);
-    return suffix.length <= 4 || (suffix[0] !== '-' && suffix[0] !== '.');
+async function buildAndRestart() {
+    if (buildProcess || stopping || !buildPending) return;
+    clearTimeout(buildTimer);
+    buildPending = false;
+    buildProcess = run(process.execPath, [resolve(rootDirectory, 'scripts', 'build.mjs')]);
+    const exitCode = await waitForExit(buildProcess);
+    buildProcess = undefined;
+    if (stopping) return;
+    if (buildPending) {
+        await buildAndRestart();
+    } else if (exitCode === 0) {
+        restartElectron();
+    }
 }
 
-function scheduleRestart(fileName) {
-    if (!fileName || !isElectronRestartTarget(fileName.toString())) return;
-    clearTimeout(restartTimer);
-    restartTimer = setTimeout(restartElectron, 200);
+function scheduleBuild(fileName) {
+    const name = fileName?.toString() ?? '';
+    if (!/\.(?:ts|tsx|js|jsx|css|html)$/.test(name) || /\.(?:test|spec)\./.test(name)) return;
+    buildPending = true;
+    clearTimeout(buildTimer);
+    buildTimer = setTimeout(() => void buildAndRestart(), 300);
 }
 
 function stop(child) {
@@ -105,10 +114,10 @@ if (process.platform === 'win32') {
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => {
-        outputWatcher?.close();
-        clearTimeout(restartTimer);
-        stop(compiler);
-        stop(playerCompiler);
+        stopping = true;
+        sourceWatcher?.close();
+        clearTimeout(buildTimer);
+        stop(buildProcess);
         stop(electronProcess);
         process.exit();
     });
@@ -117,8 +126,6 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 if (runOnce) {
     process.exitCode = await waitForExit(startElectron());
 } else {
-    compiler = run(process.execPath, [typescriptCli, '--watch', '--preserveWatchOutput']);
-    playerCompiler = run(process.execPath, [resolve(rootDirectory, 'scripts', 'build-player.mjs'), '--watch']);
-    outputWatcher = watch(outputDirectory, { recursive: true }, (_, fileName) => scheduleRestart(fileName));
+    sourceWatcher = watch(resolve(rootDirectory, 'src'), { recursive: true }, (_, fileName) => scheduleBuild(fileName));
     startElectron();
 }

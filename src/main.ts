@@ -21,7 +21,6 @@ import {
     getMergeGroupPhaseText as getMergeGroupPhaseTextCore,
 } from './main/infra/format-helpers';
 import { tBackend as tBackendCore, type BackendMessageKey } from './main/domain/i18n-backend';
-import { watchRendererChanges } from './main/dev-reload';
 import { createPausableOutput, type PausableOutput } from './main/domain/pausable-output';
 import { createTokenBucketBudget, createTokenBucketTransform } from './main/domain/token-bucket-transform';
 import { decideDownloadStart, decideStandaloneDownloadStart, normalizeDownloadPolicy, type DownloadPolicy } from './main/domain/download-policy';
@@ -850,20 +849,6 @@ function flushQueueSave(): void {
 // GLOBAL STATE
 // ==========================================
 let mainWindow: BrowserWindow | null = null;
-let stopDevelopmentReload: (() => void) | null = null;
-
-function startDevelopmentReload(): void {
-    if (process.env.TWITCH_VOD_MANAGER_DEV !== '1' || stopDevelopmentReload) return;
-    stopDevelopmentReload = watchRendererChanges(
-        __dirname,
-        path.join(__dirname, '../src'),
-        () => mainWindow?.webContents.reloadIgnoringCache(),
-    );
-    app.once('before-quit', () => {
-        stopDevelopmentReload?.();
-        stopDevelopmentReload = null;
-    });
-}
 let appStateStore: AppStateStore | null = null;
 let appSecretStore: SecretStore | null = null;
 let config = normalizeConfigTemplates(defaultConfig);
@@ -7316,7 +7301,7 @@ function createWindow(): void {
         mainWindow.removeMenu();
     }
 
-    const rendererFile = path.join(__dirname, '../src/index.html');
+    const rendererFile = path.join(__dirname, 'renderer/index.html');
     const rendererUrl = pathToFileURL(rendererFile).href;
     mainWindow.webContents.on('will-navigate', (event, url) => {
         if (url.split(/[?#]/, 1)[0] !== rendererUrl) event.preventDefault();
@@ -8844,7 +8829,7 @@ ipcMain.handle('import-config', async (event) => {
 
 function isTrustedRendererEvent(event: IpcMainInvokeEvent): boolean {
     if (!mainWindow) return false;
-    const rendererUrl = pathToFileURL(path.join(__dirname, '../src/index.html')).href;
+    const rendererUrl = pathToFileURL(path.join(__dirname, 'renderer/index.html')).href;
     const senderUrl = event.senderFrame?.url || event.sender.getURL();
     return isTrustedFileIpcSender(mainWindow.webContents.id, rendererUrl, event.sender.id, senderUrl);
 }
@@ -9164,7 +9149,6 @@ app.whenReady().then(() => {
     restartLiveStatusPoller();
     restartAutoCleanupTimer();
     createWindow();
-    startDevelopmentReload();
     if (app.isPackaged) {
         startupToolsProvisionTimer = setTimeout(() => {
             startupToolsProvisionTimer = null;
