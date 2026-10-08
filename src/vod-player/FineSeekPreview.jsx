@@ -26,19 +26,20 @@ export function FineSeekPreview({ preview, anchorRef, root, total, parts = [], b
   const { isMounted, styles } = useTransitionStyles(context, { duration:{open:140,close:140}, initial:{opacity:0,transform:"translateY(4px)"} });
   if (preview) lastPreview.current = preview;
   const shown = preview || lastPreview.current;
+  const open = Boolean(preview), fine = Boolean(preview?.fine);
+  const anchor = fine ? preview.anchorX : preview?.value;
   useLayoutEffect(() => {
     const element = anchorRef.current;
-    if (!preview || !element) return;
-    const anchor = preview.fine ? preview.anchor : preview.value;
+    if (!open || !element) return;
     refs.setPositionReference({contextElement:element,getBoundingClientRect() {
       const bounds = element.getBoundingClientRect();
-      const x = preview.fine ? preview.anchorX : bounds.left + 7 + clampTime(anchor,total) / Math.max(1,total) * Math.max(1,bounds.width-14);
+      const x = fine ? anchor : bounds.left + 7 + clampTime(anchor,total) / Math.max(1,total) * Math.max(1,bounds.width-14);
       return {x,y:bounds.top,left:x,right:x,top:bounds.top,bottom:bounds.top,width:0,height:0};
     }});
-  }, [preview, total, refs, anchorRef]);
+  }, [open, fine, anchor, total, refs, anchorRef]);
   useLayoutEffect(() => {
-    if (preview?.fine && ruler.current) onAlign?.(ruler.current.getBoundingClientRect());
-  }, [preview, floatingStyles.transform, panelWidth, onAlign]);
+    if (fine && ruler.current) onAlign?.(ruler.current.getBoundingClientRect());
+  }, [fine, floatingStyles.transform, panelWidth, onAlign]);
   const boundaries = [...new Set(chapters.flatMap(chapter => [chapter.start, chapter.end]))];
   const titleEvents = useMemo(() => projectTitles(titleHistory,parts,broadcastStarted), [titleHistory,parts,broadcastStarted]);
   const shownChapter = shown && chapterAt(chapters,shown.value,endpoint);

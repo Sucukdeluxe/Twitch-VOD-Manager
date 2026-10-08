@@ -14,7 +14,7 @@ import { ViewerHistory } from "./ViewerHistory.jsx";
 import { projectTitles, titleAt, titleMarkers } from "./title-history.js";
 import "./title-history.css";
 
-export function SeekTimeline({ total:availableTotal, position, parts, broadcastStarted, viewerHistory, viewerGaps, titleHistory:availableTitles = [], vodTitle, viewerCurves = [], chapters:availableChapters, endpoint:availableEndpoint, highlightedRange, root, onCommit, onScrub, onPreview, t, excerptRange, onExcerptRange, cutRange, onCutRange, cutText, omissions = [] }) {
+export function SeekTimeline({ total:availableTotal, position, parts, broadcastStarted, viewerHistory, viewerGaps, titleHistory:availableTitles = [], vodTitle, viewerCurves = [], chapters:availableChapters, endpoint:availableEndpoint, highlightedRange, root, onCommit, onScrub, onPreview, t, excerptRange, onExcerptRange, cutRange, cutLimits, onCutRange, cutText, omissions = [] }) {
   const locale = t("locale");
   const streamClock = useMemo(() => createStreamClock(locale), [locale]);
   const input = useRef(null), drag = useRef(null), callbacks = useRef(null);
@@ -89,7 +89,7 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
     {(excerptRange || cutRange) && <RangeMarkers compact trackWidth={trackWidth - 14} duration={total} range={excerptRange || cutRange} onChange={excerptRange ? onExcerptRange : onCutRange}
       text={{ ...cutText, start:`${cutText.excerpt}: ${cutText.start}`, end:`${cutText.excerpt}: ${cutText.end}` }} onInteraction={cancel} onPreviewChange={setRangePreviewOpen}
       finePreview={{root, parts:previewParts, broadcastStarted, chapters, endpoint, titleHistory, vodTitle, viewerHistory, viewerGaps, t}}/>}
-    {excerptRange && cutRange && <RangeMarkers variant="omission" limits={excerptRange} compact trackWidth={trackWidth - 14} duration={total} range={cutRange} onChange={onCutRange}
+    {excerptRange && cutRange && <RangeMarkers variant="omission" limits={cutLimits || excerptRange} compact trackWidth={trackWidth - 14} duration={total} range={cutRange} onChange={onCutRange}
       text={{ ...cutText, start:`${cutText.omission}: ${cutText.start}`, end:`${cutText.omission}: ${cutText.end}` }} onInteraction={cancel} onPreviewChange={setOmissionPreviewOpen}
       finePreview={{root, parts:previewParts, broadcastStarted, chapters, endpoint, titleHistory, vodTitle, viewerHistory, viewerGaps, t}}/>}
     <span id={hintId} className="fine-seek-instructions">{t("fineSeekInstructions")}</span>

@@ -136,6 +136,7 @@
     "src/vod-player/fine-seek.css",
     "src/vod-player/fine-seek.js",
     "src/vod-player/media-source.js",
+    "src/vod-player/omission-ranges.js",
     "src/vod-player/playback-checkpoint.js",
     "src/vod-player/playback-metrics.js",
     "src/vod-player/playback-navigation.js",

@@ -18,7 +18,7 @@ export function beginFineSeek({ x, y, bounds, total, position, width }) {
 
 export function alignFineSeek(state, bounds) {
   if (!state.fine || !(bounds?.width > 0)) return state;
-  if (state.rulerLeft === bounds.left && state.width === bounds.width) return state;
+  if (Math.abs(state.rulerLeft - bounds.left) < .01 && Math.abs(state.width - bounds.width) < .01) return state;
   const fraction = Math.max(0, Math.min(1, (state.anchorX - bounds.left) / bounds.width));
   const span = Math.min(60, state.total);
   const start = state.anchor - fraction * span;

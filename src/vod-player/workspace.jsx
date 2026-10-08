@@ -7,6 +7,7 @@ import { OmissionModes, OmissionEditor } from './OmissionEditor.jsx';
 import { normalizeOmissions, planEditedVod } from '../main/domain/vod-edit-plan';
 import { ListVideo } from 'lucide-react';
 import { CutTimeline } from './CutTimeline.jsx';
+import { omissionGaps, omissionFits, omissionGap, boundOmission } from './omission-ranges.js';
 import { playerTexts } from './texts.js';
 import './player.css';
 import './chapters.css';
@@ -30,11 +31,6 @@ class WorkspaceBoundary extends React.Component {
   }
 }
 
-function boundedOmission(value, selection) {
-  const from = Math.round(selection.start * 1000), to = Math.round(selection.end * 1000);
-  const start = Math.max(from, Math.min(Math.round(value.start * 1000), to - 1));
-  return { start:start / 1000, end:Math.max(start + 1, Math.min(Math.round(value.end * 1000), to)) / 1000 };
-}
 
 function Workspace({ options, bind }) {
   const language = options.language === 'en' ? 'en' : 'de';
@@ -55,6 +51,9 @@ function Workspace({ options, bind }) {
   const outputSettings = options.outputSettings?.() || { startPart: 1 };
   const selection = omitting ? modeRanges.current.excerpt : range;
   const combined = omitting || omissions.length > 0 || editing !== null;
+  const gaps = useMemo(() => omissionGaps(selection, omissions, editing), [selection.start, selection.end, omissions, editing]);
+  const draftRange = omitting ? range : modeRanges.current.omission;
+  const draftBounds = omissionGap(draftRange, gaps);
   const editedPlan = useMemo(() => {
     try { return Number.isInteger(Number(partMinutes)) && Number(partMinutes) >= 1 && Number(partMinutes) <= 1440 ? planEditedVod(duration, Number(partMinutes) * 60, omissions, outputSettings.startPart, selection) : null; }
     catch { return null; }
@@ -76,8 +75,10 @@ function Workspace({ options, bind }) {
     stopPreview();
     modeRanges.current[omitting ? 'omission' : 'excerpt'] = { ...range };
     const saved = modeRanges.current[active ? 'omission' : 'excerpt'];
-    const next = active ? boundedOmission(saved, modeRanges.current.excerpt) : saved;
-    setOmitting(active); options.onMode?.(active); changeRange(next.start, next.end);
+    const bounds = active && omissionGap(saved, omissionGaps(modeRanges.current.excerpt, omissions, editing));
+    const next = active ? boundOmission(saved, bounds || modeRanges.current.excerpt) : saved;
+    selectedPlayback.current = false; setSelectionPlaying(false);
+    setOmitting(active); options.onMode?.(active); setRange(next); options.onRange(next.start, next.end);
     setOutputRevision(value => value + 1);
   }
   function commitRanges(next) {
@@ -95,9 +96,15 @@ function Workspace({ options, bind }) {
     if (editing !== null || (index === -1 && omissions.length >= 256)) return;
     if (value && (value.end <= selection.start || value.start >= selection.end)) return;
     stopPreview();
-    const start = Math.max(selection.start, Math.min(Math.round(position * 1000) / 1000, selection.end - Math.min(60, selection.end - selection.start)));
-    const next = boundedOmission(value || (index === -1 ? { start, end:Math.min(selection.end, start + 60) } : omissions[index]), selection);
-    setEditing(index); changeRange(next.start, next.end); setSeekRequest({ seconds:next.start, playing:false });
+    const available = omissionGaps(selection, omissions, index);
+    const requested = value || (index === -1 ? { start:position, end:position + 60 } : omissions[index]);
+    const candidates = value ? available.filter(gap => gap.end > value.start && gap.start < value.end) : available;
+    const bounds = omissionGap(requested, candidates);
+    if (!bounds) return;
+    const start = Math.max(bounds.start, Math.min(requested.start, bounds.end - Math.min(60, bounds.end - bounds.start)));
+    const next = boundOmission(index === -1 && !value ? { start, end:start + 60 } : requested, bounds);
+    selectedPlayback.current = false; setSelectionPlaying(false);
+    setEditing(index); setRange(next); options.onRange(next.start, next.end); setSeekRequest({ seconds:next.start, playing:false });
   }
   function preview() {
     if (previewPlayback.current) { stopPreview(); return; }
@@ -118,16 +125,20 @@ function Workspace({ options, bind }) {
   }, [hoveredChapter, focusedChapter, options.url]);
   const changeRange = useCallback((start, end, interaction) => {
     stopPreview();
-    if (omitting) ({ start, end } = boundedOmission({ start, end }, selection));
+    if (omitting) {
+      if (!draftBounds || (interaction?.source === 'input' && !omissionFits({ start, end }, gaps))) return;
+      if (interaction?.source !== 'input') ({ start, end } = boundOmission({ start, end }, draftBounds));
+    }
     selectedPlayback.current = false; setSelectionPlaying(false);
     setRange({ start, end }); options.onRange(start, end);
     if (interaction?.source === 'pointer' && interaction.boundary === 'start') setSeekRequest({ seconds: start });
-  }, [options, omitting, selection.start, selection.end]);
+  }, [options, omitting, draftBounds?.start, draftBounds?.end, gaps]);
   function changeExcerpt(start, end, interaction) {
     stopPreview();
     selectedPlayback.current = false; setSelectionPlaying(false);
     const next = { start:Math.round(start * 1000) / 1000, end:Math.round(end * 1000) / 1000 };
-    const draft = boundedOmission(range, next);
+    const bounds = omissionGap(range, omissionGaps(next, omissions, editing));
+    const draft = boundOmission(range, bounds || next);
     modeRanges.current.excerpt = next;
     modeRanges.current.omission = draft;
     setRange(draft); options.onRange(draft.start, draft.end);
@@ -211,7 +222,7 @@ function Workspace({ options, bind }) {
     <WorkspaceBoundary text={text} onFailure={() => { stopPreview(); selectedPlayback.current = false; setSelectionPlaying(false); setSeekRequest({ seconds:position, playing:false }); }}>
     {session ? <ArchivePlayer key={session.id} id={options.url} userId="tvm-local" parts={parts} seconds={range.start}
       broadcastStarted={started} started t={t} chapters={chapters} titleHistory={metadata?.titleHistory || []} vodTitle={metadata?.title || options.title} chapterPreview={chapterPreview} onProgress={() => {}} onError={() => setError(true)}
-      onPosition={onPosition} onTimeline={onTimeline} seekRequest={seekRequest} excerptRange={omitting ? selection : null} onExcerptRange={changeExcerpt} cutRange={omitting && editing === null ? null : range} onCutRange={changeRange} cutText={text} omissions={visibleOmissions}/>
+      onPosition={onPosition} onTimeline={onTimeline} seekRequest={seekRequest} excerptRange={omitting ? selection : null} onExcerptRange={changeExcerpt} cutRange={omitting && (editing === null || !draftBounds) ? null : range} cutLimits={omitting ? draftBounds : null} onCutRange={changeRange} cutText={text} omissions={visibleOmissions}/>
       : !error && <div className="vod-player-loading" role="status"><span className="vod-loading-symbol"/>{text.loading}</div>}
     {error && <div className="vod-player-error" role="status"><span>{text.failed}</span><button type="button" className="btn-secondary" onClick={() => setAttempt(value => value + 1)}>{text.retry}</button></div>}
     <div className="vod-player-source"><span>{text.source}: {session?.quality === 'best' ? text.sourceBest : session?.quality || '…'}</span>{selectionPlaying && <span>{text.active}</span>}</div>
@@ -230,9 +241,9 @@ function Workspace({ options, bind }) {
       </>}
     </div>, document.getElementById('clipHistory'))}
     {createPortal(<OmissionModes active={omitting} onChange={changeMode} language={language} count={omissions.filter(value => value.end > selection.start && value.start < selection.end).length}/>, document.getElementById('clipEditMode'))}
-    {createPortal(<OmissionEditor active={omitting} selection={selection} onSelection={() => changeMode(false)} ranges={omissions} plan={editedPlan} range={omitting ? range : modeRanges.current.omission} duration={duration} language={language} editing={editing}
+    {createPortal(<OmissionEditor active={omitting} gaps={gaps} selection={selection} onSelection={() => changeMode(false)} ranges={omissions} plan={editedPlan} range={omitting ? range : modeRanges.current.omission} duration={duration} language={language} editing={editing}
       onNew={() => beginRange()} onEdit={beginRange} onRange={changeRange} onCancel={() => setEditing(null)}
-      onApply={value => commitRanges(editing === -1 ? [...omissions, value] : omissions.map((item, index) => index === editing ? value : item))}
+      onApply={value => { if (editing !== null && omissionFits(value, gaps)) commitRanges(editing === -1 ? [...omissions, value] : omissions.map((item, index) => index === editing ? value : item)); }}
       onRemove={index => commitRanges(omissions.filter((_, at) => at !== index))} onUndo={() => restoreRanges('undo')} onRedo={() => restoreRanges('redo')}
       canUndo={undo.length > 0} canRedo={redo.length > 0} previewing={previewing} onPreview={preview} canPreview={Boolean(session)} root={host}
       filename={part => options.filename?.(part) || ''}/>, document.getElementById('clipOmissionPanel'))}
