@@ -558,7 +558,7 @@ const UI_TEXT_DE = {
         dialogStartTime: 'Startzeit',
         dialogEnd: 'Ende:',
         dialogEndTime: 'Endzeit',
-        dialogDuration: 'Schnittdauer',
+        dialogDuration: 'Videolänge',
         dialogPartLabel: 'Start Part-Nummer (optional, für Fortsetzung):',
         dialogPartHint: 'Leer lassen = Teil 1',
         dialogFormatLabel: 'Dateinamen-Format:',

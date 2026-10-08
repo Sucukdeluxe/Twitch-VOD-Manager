@@ -63,12 +63,14 @@ function Workspace({ options, bind }) {
     return () => { closed = true; };
   }, [options.url, requestId, historyAttempt]);
   const onTimeline = useCallback(timeline => {
-    const total = timeline.reduce((sum, part) => sum + part.duration, 0);
-    if (total > 0 && Math.abs(total - duration) > .05) {
-      setDuration(total); options.onDuration(total);
-      const start = Math.min(rangeRef.current.start, Math.max(0, total - .1));
-      const end = Math.min(total, Math.max(start + .1, rangeRef.current.end));
-      setRange({ start, end }); options.onRange(start, end);
+    const total = Math.round(timeline.reduce((sum, part) => sum + part.duration, 0) * 1000) / 1000;
+    if (total > 0 && total !== duration) {
+      const current = rangeRef.current;
+      const start = Math.min(current.start, Math.max(0, total - .001));
+      const end = Math.abs(current.end - duration) < .0005 ? total : Math.min(total, Math.max(start + .001, current.end));
+      rangeRef.current = { start, end };
+      setDuration(total); setRange(rangeRef.current);
+      options.onDuration(total); options.onRange(start, end);
     }
   }, [duration, options]);
   const onPosition = useCallback(seconds => {

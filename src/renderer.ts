@@ -1675,10 +1675,10 @@ function openClipDialog(url: string, title: string, date: string, streamer: stri
     byId<HTMLInputElement>('clipStartSlider').max = String(clipTotalSeconds);
     byId<HTMLInputElement>('clipEndSlider').max = String(clipTotalSeconds);
     byId<HTMLInputElement>('clipStartSlider').value = '0';
-    byId<HTMLInputElement>('clipEndSlider').value = String(Math.min(60, clipTotalSeconds));
+    byId<HTMLInputElement>('clipEndSlider').value = String(clipTotalSeconds);
 
     byId<HTMLInputElement>('clipStartTime').value = '00:00:00';
-    byId<HTMLInputElement>('clipEndTime').value = formatSecondsToTime(Math.min(60, clipTotalSeconds));
+    byId<HTMLInputElement>('clipEndTime').value = formatSecondsToTime(clipTotalSeconds);
     byId<HTMLInputElement>('clipStartPart').value = '';
     byId<HTMLInputElement>('clipFilenameTemplate').value = (config.filename_template_clip as string) || DEFAULT_CLIP_TEMPLATE;
     query<HTMLInputElement>('input[name="filenameFormat"][value="simple"]').checked = true;
@@ -1688,7 +1688,7 @@ function openClipDialog(url: string, title: string, date: string, streamer: stri
     updateFilenameExamples();
     RendererAccessibility.openDialog('clipModal', { onEscape: closeClipDialog });
     clipPlayer = window.VodPlayer.mount(byId('clipPlayer'), {
-        url, title, date, duration: clipTotalSeconds, language: config.language || 'de', start: 0, end: Math.min(60, clipTotalSeconds),
+        url, title, date, duration: clipTotalSeconds, language: config.language || 'de', start: 0, end: clipTotalSeconds,
         onRange(start, end) {
             byId<HTMLInputElement>('clipStartTime').value = formatClipTime(start);
             byId<HTMLInputElement>('clipEndTime').value = formatClipTime(end);
@@ -1700,7 +1700,6 @@ function openClipDialog(url: string, title: string, date: string, streamer: stri
             clipTotalSeconds = total;
             byId<HTMLInputElement>('clipStartSlider').max = String(total);
             byId<HTMLInputElement>('clipEndSlider').max = String(total);
-            updateClipDuration();
         },
     });
 }
@@ -1770,9 +1769,9 @@ function updateClipDuration(syncPlayer: boolean = true): void {
     byId<HTMLButtonElement>('clipEndLater').disabled = !isValid || endSec >= clipTotalSeconds;
     if (isValid && syncPlayer) clipPlayer?.updateRange(startSec, endSec);
     durationDisplay.classList.toggle('invalid', !isValid);
-    durationDisplay.textContent = isValid
-        ? formatClipTime(duration)
-        : UI_TEXT.clips.invalidDuration;
+    const milliseconds = Math.round(duration * 1000);
+    byId('clipDurationTime').textContent = isValid ? formatSecondsToTime(Math.floor(milliseconds / 1000)) : UI_TEXT.clips.invalidDuration;
+    byId('clipDurationFraction').textContent = isValid ? '.' + String(milliseconds % 1000).padStart(3, '0') : '';
 
     updateFilenameExamples();
 }
