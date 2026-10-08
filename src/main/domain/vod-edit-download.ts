@@ -7,7 +7,8 @@ import { planEditedVod, type EditedVodPart, type OmissionConfig, type OmittedRan
 
 interface CachedInput { size: number; duration: number; signature: string }
 interface PublishedPart { path: string; size: number }
-interface PendingPart extends PublishedPart { index: number; number: number }
+interface CopyIdentity { dev: number; ino: number; birthtimeMs: number }
+interface PendingPart extends PublishedPart { index: number; number: number; copyIdentity?: CopyIdentity }
 interface EditJournal { version: 1; identity: string; inputs: Record<string, CachedInput>; published: Record<string, PublishedPart>; pending?: PendingPart }
 export interface EditedVodOptions extends MediaProcessOptions {
     id: string; url: string; folder: string; duration: number; startPart: number; omissions: OmissionConfig;
@@ -49,15 +50,58 @@ async function probe(filename: string, options: EditedVodOptions): Promise<Cache
     return { size, duration, signature: JSON.stringify(data.streams.filter(stream => stream.codec_type === 'video' || stream.codec_type === 'audio')) };
 }
 
-async function hashFile(filename: string): Promise<string> {
+async function hashFile(filename: string, length?: number): Promise<string> {
     const hash = createHash('sha256');
-    for await (const chunk of createReadStream(filename)) hash.update(chunk);
+    if (length !== 0) for await (const chunk of createReadStream(filename, length === undefined ? {} : { start: 0, end: length - 1 })) hash.update(chunk);
     return hash.digest('hex');
+}
+
+function sameCopyIdentity(left: CopyIdentity, right: CopyIdentity): boolean {
+    return left.dev === right.dev && left.ino === right.ino && left.birthtimeMs === right.birthtimeMs;
+}
+
+async function copyIntoReservedOutput(source: string, output: Awaited<ReturnType<typeof fs.open>>, offset: number, options: EditedVodOptions): Promise<void> {
+    const input = await fs.open(source, 'r');
+    const buffer = Buffer.alloc(1024 * 1024);
+    try {
+        while (true) {
+            if (!(await options.wait())) throw new Error('Edited VOD cancelled');
+            const { bytesRead } = await input.read(buffer, 0, buffer.length, offset);
+            if (bytesRead === 0) break;
+            let written = 0;
+            while (written < bytesRead) {
+                const result = await output.write(buffer, written, bytesRead - written, offset + written);
+                if (!result.bytesWritten) throw new Error('Could not write edited VOD output');
+                written += result.bytesWritten;
+            }
+            offset += bytesRead;
+        }
+        await output.sync();
+    } finally { await input.close(); }
 }
 
 function validateOutputPath(folder: string, filename: string): void {
     const relative = path.relative(path.resolve(folder), path.resolve(filename));
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Invalid edited VOD output path');
+}
+
+async function finalSplitTime(inputs: Array<{ name: string; duration: number }>, split: number, end: number, previous: number, workspace: string, options: EditedVodOptions): Promise<number> {
+    const keyframes: number[] = [];
+    let offset = 0;
+    for (const input of inputs) {
+        if (offset + input.duration >= split - 30) {
+            if (!(await options.wait())) throw new Error('Edited VOD cancelled');
+            const raw = await runMediaProcess(options.ffprobePath, ['-v', 'error', '-read_intervals', Math.max(0, split - 30 - offset).toFixed(6) + '%', '-select_streams', 'v:0', '-show_packets', '-show_entries', 'packet=pts_time,flags', '-of', 'json', path.join(workspace, input.name)], { ...options, timeoutMs: 120000 });
+            const data = JSON.parse(raw) as { packets?: Array<{ pts_time?: string; flags?: string }> };
+            for (const packet of data.packets || []) {
+                const local = Number(packet.pts_time), time = offset + local;
+                if (packet.flags?.includes('K') && Number.isFinite(time) && local >= 0 && local < input.duration - .05 && time > previous + .1 && time < end - .05) keyframes.push(time);
+            }
+        }
+        offset += input.duration;
+    }
+    if (!keyframes.length || keyframes.some(time => time >= split - .05)) return split;
+    return Math.max(...keyframes);
 }
 
 export async function downloadEditedVod(options: EditedVodOptions): Promise<string[]> {
@@ -85,6 +129,15 @@ export async function downloadEditedVod(options: EditedVodOptions): Promise<stri
         validateOutputPath(options.folder, pending.path);
         if (await fileSize(pending.path) >= 0) {
             const stagedPath = path.join(workspace, 'part-' + String(pending.index).padStart(4, '0') + '.mp4');
+            const currentSize = await fileSize(pending.path);
+            if (currentSize < pending.size && pending.copyIdentity) {
+                const output = await fs.open(pending.path, 'r+');
+                try {
+                    if (!sameCopyIdentity(await output.stat(), pending.copyIdentity) || await hashFile(pending.path) !== await hashFile(stagedPath, currentSize)) throw new Error('Pending VOD output changed');
+                    options.checkSpace(pending.size - currentSize + 32 * 1024 * 1024);
+                    await copyIntoReservedOutput(stagedPath, output, currentSize, options);
+                } finally { await output.close(); }
+            }
             if (await fileSize(pending.path) !== pending.size || await hashFile(pending.path) !== await hashFile(stagedPath)) throw new Error('Pending VOD output changed');
             journal.published[String(pending.number)] = { path: pending.path, size: pending.size };
         }
@@ -99,7 +152,10 @@ export async function downloadEditedVod(options: EditedVodOptions): Promise<stri
         if (await fileSize(published.path) !== published.size) throw new Error('Published VOD part changed');
         outputs.push(published.path);
     }
-    if (outputs.length === plan.parts.length) return outputs;
+    if (outputs.length === plan.parts.length) {
+        if (!(await options.wait())) throw new Error('Edited VOD cancelled');
+        return outputs;
+    }
     let completedDuration = 0;
     const inputs: Array<{ name: string; duration: number }> = [];
     let signature = '';
@@ -127,6 +183,10 @@ export async function downloadEditedVod(options: EditedVodOptions): Promise<stri
     await fs.writeFile(path.join(workspace, 'concat.ffconcat'), 'ffconcat version 1.0\n' + inputs.map(input => 'file ' + input.name + '\noutpoint ' + input.duration.toFixed(6) + '\nduration ' + input.duration.toFixed(6)).join('\n') + '\n');
     for (const name of await fs.readdir(workspace)) if (/^part-\d{4}\.mp4$/.test(name)) await fs.unlink(path.join(workspace, name));
     const splitTimes = plan.parts.slice(1).map(part => part.start.toFixed(6));
+    if (splitTimes.length && plan.parts[plan.parts.length - 1].duration < 12) {
+        const index = splitTimes.length - 1;
+        splitTimes[index] = (await finalSplitTime(inputs, Number(splitTimes[index]), plan.duration, index > 0 ? Number(splitTimes[index - 1]) : 0, workspace, options)).toFixed(6);
+    }
     options.progress(75, 'assemble', 0, plan.parts.length);
     await runMediaProcess(options.ffmpegPath, [
         '-hide_banner', '-loglevel', 'warning', '-nostdin', '-f', 'concat', '-safe', '1', '-i', path.join(workspace, 'concat.ffconcat'),
@@ -155,7 +215,14 @@ export async function downloadEditedVod(options: EditedVodOptions): Promise<stri
         try { await fs.link(stagedPath, target); }
         catch (error) {
             if (!['EPERM', 'ENOTSUP', 'EXDEV', 'EOPNOTSUPP'].includes((error as NodeJS.ErrnoException).code || '')) throw error;
-            await fs.copyFile(stagedPath, target, fs.constants.COPYFILE_EXCL);
+            options.checkSpace(staged[index].size + 32 * 1024 * 1024);
+            const output = await fs.open(target, 'wx');
+            try {
+                const { dev, ino, birthtimeMs } = await output.stat();
+                journal.pending.copyIdentity = { dev, ino, birthtimeMs };
+                await save();
+                await copyIntoReservedOutput(stagedPath, output, 0, options);
+            } finally { await output.close(); }
         }
         journal.published[String(part.number)] = { path: target, size: staged[index].size };
         delete journal.pending;
@@ -163,5 +230,6 @@ export async function downloadEditedVod(options: EditedVodOptions): Promise<stri
         outputs.push(target);
         options.progress(97 + (index + 1) / plan.parts.length * 3, 'publish', index + 1, plan.parts.length);
     }
+    if (!(await options.wait())) throw new Error('Edited VOD cancelled');
     return outputs;
 }

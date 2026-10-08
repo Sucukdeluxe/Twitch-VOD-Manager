@@ -2490,7 +2490,7 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
         color: var(--workspace-primary-text);
         background: var(--workspace-primary);
         border-radius: 999px;
-        font-size: 9px;
+        font-size: 10px;
         line-height: 14px;
         text-align: center;
     }

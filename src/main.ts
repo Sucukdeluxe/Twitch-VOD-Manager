@@ -6320,7 +6320,9 @@ async function downloadVOD(
         const omissions = clip.omissions!;
         if (!(await ensureFfmpegInstalled())) return { success: false, error: tBackend('ffmpegAutoInstallFailed') };
         const plan = planEditedVod(clip.durationSec, omissions.partDurationSec, omissions.ranges, clip.startPart);
-        const wait = async (): Promise<boolean> => !appShutdownStarted && downloadQueue.some(candidate => candidate.id === item.id)
+        const editRegistration = queueProcessRegistry.register(item.id, 'post-processing', {});
+        if (!editRegistration.accepted) return { success: false, error: tBackend('downloadCancelled') };
+        const wait = async (): Promise<boolean> => !appShutdownStarted && isDownloading && downloadQueue.some(candidate => candidate.id === item.id)
             && !cancelledItemIds.has(item.id) && await waitForQueuePhaseBoundary(item.id);
         try {
             const outputFiles = await downloadEditedVod({
@@ -6365,6 +6367,7 @@ async function downloadVOD(
             appendDebugLog('edited-vod-failed', { itemId: item.id, error: String(error) });
             return { success: false, error: tBackend('editedVodFailed') };
         } finally {
+            editRegistration.release();
             if (!downloadQueue.some(candidate => candidate.id === item.id)) await cleanupEditedVod(folder, item.id);
         }
     }

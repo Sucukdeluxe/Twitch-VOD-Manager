@@ -38,13 +38,12 @@ export function OmissionEditor({ ranges, setRanges, partMinutes, setPartMinutes,
           <button type="button" className="vod-omission-icon" title={t.restore} aria-label={t.restore} onClick={() => { setRanges(current => current.filter((_, at) => at !== index)); setEditing(null); }}><X size={17}/></button>
         </li>)}</ol>}
       </div>
-      <div className="vod-output-preview">
-        <h4>{t.output}</h4>
-        {plan ? <><div className="vod-output-summary"><strong>{number(plan.parts.length)} {t.files}</strong><span>{t.remaining}: {cutTime(plan.duration)}</span><span>{t.removed}: {cutTime(plan.omittedDuration)}</span></div>
+      <div className="vod-omission-overview">
+        {plan ? <><details className="vod-output-preview"><summary>{t.output}<span>{number(plan.parts.length)} {t.files}</span></summary><div className="vod-output-summary"><strong>{number(plan.parts.length)} {t.files}</strong><span>{t.remaining}: {cutTime(plan.duration)}</span><span>{t.removed}: {cutTime(plan.omittedDuration)}</span></div>
           {plan.parts.length === 0 && <p role="status">{t.noOutput}</p>}
           {plan.skippedNumbers.length > 0 && <p className="vod-omission-help">{t.skipped}: {plan.skippedNumbers.map(number).join(', ')}</p>}
           <ol>{plan.parts.map(part => <li key={part.number}><div><strong>Part {String(part.number).padStart(2, '0')}</strong><time>{cutTime(part.duration)}</time></div><span className="vod-output-filename" title={filename(part)}>{filename(part)}</span><span className="vod-output-sources">{t.source}: {part.ranges.map(source => cutTime(source.start) + '–' + cutTime(source.end)).join(' · ')}</span></li>)}</ol>
-        </> : <p role="status">{t.invalid}</p>}
+        </details><div className="vod-output-summary"><strong>{t.remaining}: {cutTime(plan.duration)}</strong><span>{t.removed}: {cutTime(plan.omittedDuration)}</span></div></> : <p role="status">{t.invalid}</p>}
       </div>
     </div>
   </section>;

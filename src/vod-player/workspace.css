@@ -5,7 +5,7 @@
 .vod-cut-header .clip-modal-title { text-align: left; margin: 0 0 5px; font-size: 21px; }
 .vod-cut-header p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vod-cut-header .modal-close { position: static; flex: none; width: 36px; height: 36px; font-size: 24px; }
-.vod-cut-layout { display: grid; flex: 1; grid-template-rows: minmax(320px, 1fr) max-content; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; padding: 18px 22px; min-height: 0; overflow: auto; align-items: stretch; }
+.vod-cut-layout { display: grid; flex: 1; grid-template-rows: minmax(clamp(460px, 52dvh, 760px), 1fr) max-content; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; padding: 18px 22px; min-height: 0; overflow: auto; align-items: stretch; }
 .vod-cut-stage, .vod-cut-sidebar { min-width: 0; }
 .vod-cut-stage { display: flex; flex-direction: column; min-height: 0; }
 #clipPlayer { flex: 1; min-height: 0; }
@@ -165,7 +165,7 @@
 .history-select-range:hover { border-color: var(--text-secondary); }
 .vod-history button:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
 
-.vod-omission-modes { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
+.vod-omission-modes { display:flex; flex-wrap:wrap; gap:8px; margin:0; }
 .vod-omission-modes button, .vod-omission-actions button, .vod-omission-heading button { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:34px; padding:7px 12px; border:1px solid var(--border-soft); border-radius:6px; background:var(--bg-elevated); color:var(--text); font-size:12px; font-weight:600; cursor:pointer; user-select:none; }
 .vod-omission-modes button[aria-pressed="true"] { background:color-mix(in srgb, #9470ce 18%, var(--bg-elevated)); border-color:#9470ce; }
 .vod-omission-modes button:focus-visible, .vod-omission-editor button:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
@@ -181,7 +181,7 @@
 .vod-omission-heading { display:flex; align-items:center; flex-wrap:wrap; gap:8px; justify-content:space-between; min-height:34px; }
 .vod-omission-heading h4 span { color:var(--text-secondary); margin-left:5px; }
 .vod-omission-heading button { min-height:30px; padding:5px 8px; font-size:11px; }
-.vod-omission-editor ol { list-style:none; padding:0; margin:10px 0 0; max-height:260px; overflow-y:auto; scrollbar-gutter:stable; }
+.vod-omission-editor ol { list-style:none; padding:0; margin:10px 0 0; max-height:180px; overflow-y:auto; scrollbar-gutter:stable; }
 .vod-omission-editor li { margin-bottom:7px; border:1px solid var(--border-soft); background:var(--bg-elevated); border-radius:7px; padding:8px; font-size:12px; }
 .vod-omission-list li { display:flex; align-items:center; gap:4px; }
 .vod-omission-list li.is-editing { border-color:#9470ce; }
@@ -191,6 +191,14 @@
 .vod-output-summary { display:flex; flex-wrap:wrap; gap:5px 14px; margin-top:10px; font-size:12px; }
 .vod-output-summary strong { color:var(--success); }
 .vod-output-preview li > div { display:flex; justify-content:space-between; gap:10px; }
+.vod-output-preview summary { display:flex; align-items:center; gap:9px; min-height:34px; padding:6px 10px; border:1px solid var(--border-soft); border-radius:6px; background:var(--bg-elevated); font-size:13px; font-weight:600; cursor:pointer; user-select:none; }
+.vod-output-preview summary::before { content:"▸"; }
+.vod-output-preview[open] summary::before { content:"▾"; }
+.vod-output-preview summary span { margin-left:auto; font-size:12px; color:var(--text-secondary); }
+.vod-output-preview summary:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
+.vod-output-preview li { border:0; border-bottom:1px solid var(--border-soft); border-radius:0; background:transparent; margin:0; padding:8px 2px; }
+.vod-omission-overview { margin-bottom:10px; }
+.vod-omission-actions > button:first-child:hover:not(:disabled) { background:#7950b7; color:#fff; border-color:#b899eb; }
 .vod-output-filename, .vod-output-sources { display:block; overflow-wrap:anywhere; margin-top:5px; font-size:11px; line-height:1.5; }
 .vod-output-sources { color:var(--text-secondary); }
 .vod-omission-bands { position:absolute; inset:3px 0 0; pointer-events:none; z-index:3; }

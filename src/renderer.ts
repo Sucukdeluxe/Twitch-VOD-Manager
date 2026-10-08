@@ -1664,8 +1664,16 @@ function formatClipTime(seconds: number): string {
     return formatSecondsToTime(Math.floor(rounded / 1000)) + (milliseconds ? '.' + String(milliseconds).padStart(3, '0') : '');
 }
 
-let clipOmissionState: { config: import('./main/domain/vod-edit-plan').OmissionConfig | null; plan: import('./main/domain/vod-edit-plan').EditedVodPlan | null } | null = null;
+let clipOmissionState: { editing?: boolean; config: import('./main/domain/vod-edit-plan').OmissionConfig | null; plan: import('./main/domain/vod-edit-plan').EditedVodPlan | null } | null = null;
 let clipSavedNaming: { format: CustomClip['filenameFormat']; template: string } | null = null;
+
+let clipQueueInFlight = false;
+let clipQueueError = '';
+
+function getClipStartPart(): number {
+    const value = byId<HTMLInputElement>('clipStartPart').value.trim();
+    return value === '' ? 1 : /^\d{1,6}$/.test(value) && Number(value) >= 1 && Number(value) <= 100000 ? Number(value) : NaN;
+}
 
 function updateClipOmissionState(): void {
     const isEditing = clipOmissionState !== null;
@@ -1676,7 +1684,13 @@ function updateClipOmissionState(): void {
             : (currentLanguage === 'de' ? 'Keine gültige Ausgabe geplant.' : 'No valid output planned.')
         : UI_TEXT.clips.queueHint;
     const start = parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value), end = parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
-    byId<HTMLButtonElement>('clipDialogConfirmBtn').disabled = isEditing ? !plan?.parts.length : !(Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start && end <= clipTotalSeconds);
+    const invalidPart = !Number.isInteger(getClipStartPart());
+    byId('clipStartPart').setAttribute('aria-invalid', String(invalidPart));
+    byId<HTMLButtonElement>('clipDialogConfirmBtn').disabled = clipQueueInFlight || invalidPart || Boolean(clipOmissionState?.editing)
+        || (isEditing ? !plan?.parts.length : !(Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start && end <= clipTotalSeconds));
+    if (invalidPart) byId('clipQueueHint').textContent = currentLanguage === 'de' ? 'Startnummer: eine ganze Zahl von 1 bis 100.000 eingeben.' : 'Starting number: enter a whole number from 1 to 100,000.';
+    else if (clipOmissionState?.editing) byId('clipQueueHint').textContent = currentLanguage === 'de' ? 'Bereich zuerst übernehmen oder die Bearbeitung abbrechen.' : 'Apply the range or cancel editing first.';
+    else if (clipQueueError) byId('clipQueueHint').textContent = clipQueueError;
 }
 
 function previewEditedFilename(part: import('./main/domain/vod-edit-plan').EditedVodPart): string {
@@ -1689,6 +1703,7 @@ function previewEditedFilename(part: import('./main/domain/vod-edit-plan').Edite
 let clipPlayer: ReturnType<Window['VodPlayer']['mount']> | null = null;
 
 function openClipDialog(url: string, title: string, date: string, streamer: string, duration: string): void {
+    clipQueueError = '';
     clipPlayer?.destroy();
     clipPlayer = null;
     clipOmissionState = null; clipSavedNaming = null;
@@ -1715,7 +1730,7 @@ function openClipDialog(url: string, title: string, date: string, streamer: stri
     clipPlayer = window.VodPlayer.mount(byId('clipPlayer'), {
         url, title, date, duration: clipTotalSeconds, language: config.language || 'de', start: 0, end: clipTotalSeconds,
         partMinutes: config.part_minutes || 60,
-        outputSettings: () => ({ startPart: Number(byId<HTMLInputElement>('clipStartPart').value || 1) }),
+        outputSettings: () => ({ startPart: getClipStartPart() }),
         filename: previewEditedFilename,
         onOmissions(state) { clipOmissionState = state; updateClipOmissionState(); },
         onMode(active) {
@@ -1826,6 +1841,7 @@ function updateFilenameExamples(): void {
     }
 
     clipPlayer?.refreshOutput();
+    updateClipOmissionState();
     const date = new Date(clipDialogData.date);
     const dateStr = `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getFullYear()}`;
     const partNum = byId<HTMLInputElement>('clipStartPart').value || '1';
@@ -1867,16 +1883,16 @@ function updateFilenameExamples(): void {
 }
 
 async function confirmClipDialog(): Promise<void> {
-    if (!clipDialogData) {
+    if (!clipDialogData || clipQueueInFlight) {
         return;
     }
 
-    if (clipOmissionState && (!clipOmissionState.config || !clipOmissionState.plan?.parts.length)) return;
+    if (clipOmissionState && (clipOmissionState.editing || !clipOmissionState.config || !clipOmissionState.plan?.parts.length)) return;
     const startSec = clipOmissionState ? 0 : parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value);
     const endSec = clipOmissionState ? clipTotalSeconds : parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
     const durationSec = endSec - startSec;
-    const startPartStr = byId<HTMLInputElement>('clipStartPart').value.trim();
-    const startPart = startPartStr ? parseInt(startPartStr, 10) : 1;
+    const startPart = getClipStartPart();
+    if (!Number.isInteger(startPart)) { updateClipOmissionState(); return; }
     const filenameFormat = getSelectedFilenameFormat();
     const filenameTemplate = byId<HTMLInputElement>('clipFilenameTemplate').value.trim();
 
@@ -1932,17 +1948,32 @@ async function confirmClipDialog(): Promise<void> {
         return;
     }
 
-    queue = await window.api.addToQueue({
-        url: clipDialogData.url,
-        title: clipDialogData.title,
-        date: clipDialogData.date,
-        streamer: clipDialogData.streamer,
-        duration_str: clipDialogData.duration,
-        customClip
-    });
-
-    renderQueue();
-    closeClipDialog();
+    const submittingDialog = clipDialogData;
+    const failureMessage = currentLanguage === 'de' ? 'Einreihen fehlgeschlagen. Bitte erneut versuchen.' : 'Could not add the download. Please try again.';
+    let submissionError = '';
+    clipQueueInFlight = true;
+    clipQueueError = '';
+    updateClipOmissionState();
+    try {
+        const result = await window.api.addToQueueWithResult({
+            url: submittingDialog.url, title: submittingDialog.title, date: submittingDialog.date,
+            streamer: submittingDialog.streamer, duration_str: submittingDialog.duration, customClip,
+        });
+        queue = result.queue;
+        renderQueue();
+        if (result.accepted && clipDialogData === submittingDialog) closeClipDialog();
+        if (!result.accepted) submissionError = result.reason === 'duplicate'
+            ? (currentLanguage === 'de' ? 'Dieser Download ist bereits in der Warteschlange.' : 'This download is already in the queue.')
+            : failureMessage;
+    } catch {
+        submissionError = failureMessage;
+    } finally {
+        clipQueueInFlight = false;
+        if (clipDialogData) {
+            if (clipDialogData === submittingDialog) clipQueueError = submissionError;
+            updateClipOmissionState();
+        }
+    }
 }
 
 let clipDownloadInFlight = false;

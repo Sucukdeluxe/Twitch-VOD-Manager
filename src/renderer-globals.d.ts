@@ -547,7 +547,7 @@ interface Window {
         mount(element: HTMLElement, options: {
             url: string; title: string; duration: number; date: string; language: string;
             partMinutes?: number; outputSettings?(): { startPart: number }; filename?(part: import('./main/domain/vod-edit-plan').EditedVodPart): string;
-            onOmissions?(state: { config: import('./main/domain/vod-edit-plan').OmissionConfig | null; plan: import('./main/domain/vod-edit-plan').EditedVodPlan | null } | null): void; onMode?(active: boolean): void;
+            onOmissions?(state: { editing?: boolean; config: import('./main/domain/vod-edit-plan').OmissionConfig | null; plan: import('./main/domain/vod-edit-plan').EditedVodPlan | null } | null): void; onMode?(active: boolean): void;
             start: number; end: number; onRange(start: number, end: number): void; onDuration(duration: number): void;
         }): { destroy(): void; updateRange(start: number, end: number): void; seek(seconds: number): void; refreshOutput(): void; setInputValid(valid: boolean): void };
     };

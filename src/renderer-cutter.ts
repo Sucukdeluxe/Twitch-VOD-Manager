@@ -1099,7 +1099,6 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
     byId('cutterWorkspace').classList.add('shown');
     byId('cutterInfo').classList.add('shown');
     byId('timelineContainer').classList.add('shown');
-    if (previousPreviewRect) animateCutterWorkspaceReveal(previousPreviewRect);
     byId('infoDuration').textContent = formatCutterTimecode(media.info.duration);
     byId('infoResolution').textContent = `${media.info.width}×${media.info.height}`;
     byId('infoFps').textContent = media.info.fps.toFixed(media.info.fps % 1 === 0 ? 0 : 2);
@@ -1117,6 +1116,7 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
     updateCutterZoom(cutterZoom);
     renderCutterEditor();
     updateCutterPlayhead(0);
+    if (previousPreviewRect) animateCutterWorkspaceReveal(previousPreviewRect);
     void (async () => {
         let project: CutterProject | null = null;
         try { project = await window.api.getCutterProjectRecovery(file.token); } catch { }

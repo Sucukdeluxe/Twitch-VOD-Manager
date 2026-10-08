@@ -35,7 +35,7 @@ function Workspace({ options, bind }) {
     catch { return null; }
   }, [duration, partMinutes, omissions, outputRevision, outputSettings.startPart]);
   const visibleOmissions = useMemo(() => { try { return omitting ? normalizeOmissions(omissions, duration) : []; } catch { return []; } }, [omitting, omissions, duration]);
-  useEffect(() => { options.onOmissions?.(omitting ? { config: editedPlan ? { version: 1, partDurationSec: Number(partMinutes) * 60, ranges: editedPlan.omitted } : null, plan: editedPlan } : null); }, [omitting, editedPlan, partMinutes, options]);
+  useEffect(() => { options.onOmissions?.(omitting ? { editing: editing !== null, config: editedPlan ? { version: 1, partDurationSec: Number(partMinutes) * 60, ranges: editedPlan.omitted } : null, plan: editedPlan } : null); }, [omitting, editedPlan, partMinutes, editing, options]);
   function changeMode(active) { if (active === omitting) return; setOmitting(active); setEditing(null); options.onMode?.(active); setOutputRevision(value => value + 1); }
   const [seekRequest, setSeekRequest] = useState(null), [selectionPlaying, setSelectionPlaying] = useState(false);
   const host = useRef(null), rangeRef = useRef(range), selectedPlayback = useRef(false);
