@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useFloating, offset, flip, shift, size, autoUpdate, FloatingPortal, useTransitionStyles } from "@floating-ui/react";
+import { RangeMarkers } from "./CutTimeline.jsx";
 import { ChapterPreview } from "./ChapterPreview.jsx";
 import { ChapterRangePreview } from "./ChapterRangePreview.jsx";
 import { chapterAt, chapterColor, chapterGradient } from "./chapters.js";
@@ -13,7 +14,7 @@ import { ViewerHistory, ViewerCount } from "./ViewerHistory.jsx";
 import { projectTitles, titleAt, titleMarkers } from "./title-history.js";
 import "./title-history.css";
 
-export function SeekTimeline({ total:availableTotal, position, parts, broadcastStarted, viewerHistory, viewerGaps, titleHistory:availableTitles = [], vodTitle, viewerCurves = [], chapters:availableChapters, endpoint:availableEndpoint, highlightedRange, root, onCommit, onScrub, onPreview, t }) {
+export function SeekTimeline({ total:availableTotal, position, parts, broadcastStarted, viewerHistory, viewerGaps, titleHistory:availableTitles = [], vodTitle, viewerCurves = [], chapters:availableChapters, endpoint:availableEndpoint, highlightedRange, root, onCommit, onScrub, onPreview, t, cutRange, onCutRange, cutText }) {
   const locale = t("locale");
   const streamClock = useMemo(() => createStreamClock(locale), [locale]);
   const input = useRef(null), ruler = useRef(null), drag = useRef(null), lastPreview = useRef(null), callbacks = useRef(null);
@@ -110,6 +111,7 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
     </svg>}
     <span className="timeline-title-markers" aria-hidden="true">{titleMarkers(titleEvents,total,trackWidth).map(marker=><i key={marker.id} className={marker.count>1?'is-grouped':undefined} style={{left:`${marker.fraction*100}%`}}/>)}</span>
     <ChapterRangePreview range={highlightedRange} suppressed={Boolean(preview)} chapters={chapters} fallback={t("categoryUnavailable")}/>
+    {cutRange && <RangeMarkers compact duration={total} range={cutRange} onChange={onCutRange} text={cutText} onInteraction={cancel}/>}
     <span id={hintId} className="fine-seek-instructions">{t("fineSeekInstructions")}</span>
     <input ref={input} className={`archive-timeline${gradient?" has-chapters":""}`} type="range" aria-label={t("playbackPosition")} aria-describedby={hintId}
       aria-valuetext={`${timeLabel(value)} / ${timeLabel(total)}${currentTimestamp ? ` · ${currentTimestamp.label}` : ""} - ${chapterAt(chapters,value,endpoint)?.name || t("categoryUnavailable")}${currentTitle ? ` · ${currentTitle.title || t('historyEmptyTitle')}` : ''}${currentViewerGap ? ` · ${t("viewerMeasurementMissing")}` : currentViewerSample ? ` · ${currentViewerSample.viewers.toLocaleString(locale)} ${t("viewerCount")}` : ""}`} min="0" max={total||1} step="0.1" value={Math.min(value,total)} disabled={total<=0}

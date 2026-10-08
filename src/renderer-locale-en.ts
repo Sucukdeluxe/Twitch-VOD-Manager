@@ -537,6 +537,7 @@ const UI_TEXT_EN = {
         ctxUnmarkDownloaded: 'Unmark downloaded'
     },
     clips: {
+        timeInputHint: 'HH:MM:SS.mmm or seconds · Drag cut markers or enter times.',
         selectionTitle: 'Selected range',
         seekStart: 'Go to start',
         seekEnd: 'Go to end',
@@ -552,9 +553,9 @@ const UI_TEXT_EN = {
         sourceQualityHint: 'Downloads retain the selected stream quality. MP4 is saved without re-encoding; cut boundaries may align with stream segments.',
         dialogTitle: 'Trim VOD',
         dialogStart: 'Start:',
-        dialogStartTime: 'Start time (HH:MM:SS):',
+        dialogStartTime: 'Start time',
         dialogEnd: 'End:',
-        dialogEndTime: 'End time (HH:MM:SS):',
+        dialogEndTime: 'End time',
         dialogDuration: 'Duration: ',
         dialogPartLabel: 'Start part number (optional, for continuation):',
         dialogPartHint: 'Leave empty = part 1',

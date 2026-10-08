@@ -114,6 +114,7 @@
     "src/tools.ts",
     "src/types.ts",
     "src/vod-player/ArchivePlayer.jsx",
+    "src/vod-player/CutTimeline.jsx",
     "src/vod-player/ChannelImage.jsx",
     "src/vod-player/ChapterPreview.jsx",
     "src/vod-player/ChapterRangePreview.jsx",

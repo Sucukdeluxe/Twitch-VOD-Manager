@@ -537,6 +537,7 @@ const UI_TEXT_DE = {
         ctxUnmarkDownloaded: 'Markierung entfernen'
     },
     clips: {
+        timeInputHint: 'HH:MM:SS.mmm oder Sekunden · Schnittmarken ziehen oder Zeiten eingeben.',
         selectionTitle: 'Schnittbereich',
         seekStart: 'Zum Start',
         seekEnd: 'Zum Ende',
@@ -552,9 +553,9 @@ const UI_TEXT_DE = {
         sourceQualityHint: 'Downloads behalten die gewählte Streamqualität. MP4 wird ohne Neukodierung gespeichert; Schnittgrenzen können an Streamsegmenten liegen.',
         dialogTitle: 'VOD zuschneiden',
         dialogStart: 'Start:',
-        dialogStartTime: 'Startzeit (HH:MM:SS):',
+        dialogStartTime: 'Startzeit',
         dialogEnd: 'Ende:',
-        dialogEndTime: 'Endzeit (HH:MM:SS):',
+        dialogEndTime: 'Endzeit',
         dialogDuration: 'Dauer: ',
         dialogPartLabel: 'Start Part-Nummer (optional, für Fortsetzung):',
         dialogPartHint: 'Leer lassen = Teil 1',

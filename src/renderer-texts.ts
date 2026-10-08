@@ -161,6 +161,7 @@ function applyLanguageToStaticUI(): void {
     setText('clipDialogPartHint', UI_TEXT.clips.dialogPartHint);
     setText('clipDialogFormatLabel', UI_TEXT.clips.dialogFormatLabel);
     setText('clipDialogConfirmBtn', UI_TEXT.clips.dialogConfirm);
+    setText('clipTimeHint', UI_TEXT.clips.timeInputHint);
     setText('clipSelectionTitle', UI_TEXT.clips.selectionTitle);
     setText('clipSeekStart', UI_TEXT.clips.seekStart);
     setText('clipSeekEnd', UI_TEXT.clips.seekEnd);

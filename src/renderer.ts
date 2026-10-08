@@ -1646,7 +1646,10 @@ function updateTemplateGuidePreview(): void {
 }
 
 function parseTimeToSeconds(timeStr: string): number {
-    const parts = timeStr.trim().replace(',', '.').split(':');
+    const normalized = timeStr.trim().replace(',', '.');
+    const numericParts = normalized.split('.');
+    if (numericParts.length <= 2 && /^\d{1,7}$/.test(numericParts[0]) && (numericParts.length === 1 || /^\d{1,3}$/.test(numericParts[1]))) return Number(normalized);
+    const parts = normalized.split(':');
     if (parts.length !== 3 || !/^\d{1,3}$/.test(parts[0]) || !/^[0-5]\d$/.test(parts[1])) return NaN;
     const seconds = parts[2].split('.');
     if (seconds.length > 2 || !/^[0-5]\d$/.test(seconds[0]) || (seconds.length === 2 && !/^\d{1,3}$/.test(seconds[1]))) return NaN;
@@ -1711,7 +1714,7 @@ function closeClipDialog(): void {
 
 function seekClipBoundary(which: 'start' | 'end'): void {
     const value = parseTimeToSeconds(byId<HTMLInputElement>(which === 'start' ? 'clipStartTime' : 'clipEndTime').value);
-    if (Number.isFinite(value)) clipPlayer?.seek(which === 'end' ? Math.max(0, value - 3) : value);
+    if (Number.isFinite(value)) clipPlayer?.seek(value);
 }
 
 function updateFromSlider(which: string): void {
@@ -1727,16 +1730,16 @@ function updateFromSlider(which: string): void {
     updateClipDuration();
 }
 
+function normalizeClipTime(which: 'start' | 'end'): void {
+    const input = byId<HTMLInputElement>(which === 'start' ? 'clipStartTime' : 'clipEndTime');
+    const seconds = parseTimeToSeconds(input.value);
+    if (Number.isFinite(seconds)) input.value = formatClipTime(seconds);
+    updateClipDuration();
+}
+
 function updateFromInput(which: string): void {
-    const startSec = parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value);
-    const endSec = parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
-
-    if (which === 'start') {
-        byId<HTMLInputElement>('clipStartSlider').value = String(Math.max(0, Math.min(startSec, clipTotalSeconds)));
-    } else {
-        byId<HTMLInputElement>('clipEndSlider').value = String(Math.max(0, Math.min(endSec, clipTotalSeconds)));
-    }
-
+    const seconds = parseTimeToSeconds(byId<HTMLInputElement>(which === 'start' ? 'clipStartTime' : 'clipEndTime').value);
+    if (Number.isFinite(seconds)) byId<HTMLInputElement>(which === 'start' ? 'clipStartSlider' : 'clipEndSlider').value = String(seconds);
     updateClipDuration();
 }
 
@@ -1748,6 +1751,8 @@ function updateClipDuration(syncPlayer: boolean = true): void {
 
     const isValid = Number.isFinite(duration) && startSec >= 0 && duration > 0 && endSec <= clipTotalSeconds;
     byId<HTMLButtonElement>('clipDialogConfirmBtn').disabled = !isValid;
+    byId('clipStartTime').setAttribute('aria-invalid', String(!Number.isFinite(startSec) || startSec < 0 || startSec >= endSec || startSec >= clipTotalSeconds));
+    byId('clipEndTime').setAttribute('aria-invalid', String(!Number.isFinite(endSec) || endSec <= startSec || endSec > clipTotalSeconds));
     if (isValid && syncPlayer) clipPlayer?.updateRange(startSec, endSec);
     durationDisplay.classList.toggle('invalid', !isValid);
     durationDisplay.textContent = isValid

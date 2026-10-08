@@ -62,16 +62,17 @@
             <div class="vod-cut-layout">
                 <section class="vod-cut-stage"><div id="clipPlayer"></div><p id="clipSourceQualityHint" class="clip-preview-hint"></p></section>
                 <aside class="vod-cut-sidebar">
-                    <div id="clipSidebarTabs"></div>
-                    <section id="clipHistoryPanel" role="tabpanel" aria-labelledby="clipHistoryTab"><div id="clipHistory"></div></section>
-                    <section id="clipCutPanel" role="tabpanel" aria-labelledby="clipCutTab" hidden>
-                    <h3 id="clipSelectionTitle">Schnittbereich</h3>
+                    <section id="clipHistoryPanel" aria-labelledby="clipHistoryTitle"><div id="clipHistory"></div></section>
+                </aside>
+                <section id="clipCutPanel" aria-labelledby="clipSelectionTitle">
+                    <div class="vod-cut-heading"><h3 id="clipSelectionTitle">Schnittbereich</h3><p id="clipTimeHint"></p><div id="clipTimelineView"></div></div>
+                    <div class="vod-cut-fields">
             <div class="clip-modal-field">
                 <label class="clip-modal-label" hidden id="clipDialogStartLabel" for="clipStartSlider">Start:</label>
                 <input hidden step="0.1" type="range" id="clipStartSlider" min="0" max="100" value="0" oninput="updateFromSlider('start')">
                 <div class="clip-modal-time-row">
                     <label class="clip-modal-meta" id="clipDialogStartTimeLabel" for="clipStartTime">Startzeit (HH:MM:SS):</label>
-                    <input type="text" id="clipStartTime" value="00:00:00" class="clip-modal-time-input" onchange="updateFromInput('start')">
+                    <input type="text" id="clipStartTime" value="00:00:00" class="clip-modal-time-input" aria-describedby="clipTimeHint" spellcheck="false" autocomplete="off" oninput="updateFromInput('start')" onchange="normalizeClipTime('start')">
                 </div>
             </div>
 
@@ -80,17 +81,18 @@
                 <input hidden step="0.1" type="range" id="clipEndSlider" min="0" max="100" value="60" oninput="updateFromSlider('end')">
                 <div class="clip-modal-time-row">
                     <label class="clip-modal-meta" id="clipDialogEndTimeLabel" for="clipEndTime">Endzeit (HH:MM:SS):</label>
-                    <input type="text" id="clipEndTime" value="00:01:00" class="clip-modal-time-input" onchange="updateFromInput('end')">
+                    <input type="text" id="clipEndTime" value="00:01:00" class="clip-modal-time-input" aria-describedby="clipTimeHint" spellcheck="false" autocomplete="off" oninput="updateFromInput('end')" onchange="normalizeClipTime('end')">
                 </div>
             </div>
 
             <div class="clip-modal-duration">
                 <span id="clipDialogDurationLabel" class="clip-modal-meta">Dauer: </span>
-                <span id="clipDurationDisplay" class="clip-modal-duration-value">00:01:00</span>
+                <span id="clipDurationDisplay" class="clip-modal-duration-value" role="status">00:01:00</span>
             </div>
 
-                    <div class="vod-boundary-actions"><button type="button" class="btn-secondary" id="clipSeekStart" onclick="seekClipBoundary('start')">Zum Start</button><button type="button" class="btn-secondary" id="clipSeekEnd" onclick="seekClipBoundary('end')">Zum Ende</button></div>
-                    <div id="clipSelectionTools"></div>
+                    </div>
+                    <div class="vod-cut-controls"><div class="vod-boundary-actions"><button type="button" class="btn-secondary" id="clipSeekStart" onclick="seekClipBoundary('start')">Zum Start</button><button type="button" class="btn-secondary" id="clipSeekEnd" onclick="seekClipBoundary('end')">Zum Ende</button></div>
+                    <div id="clipSelectionTools"></div></div>
                     <details class="vod-filename-options"><summary id="clipFilenameOptionsTitle">Dateiname und Fortsetzung</summary>
             <div class="clip-modal-field">
                 <label class="clip-modal-label" id="clipDialogPartLabel" for="clipStartPart">Start Part-Nummer (optional, für Fortsetzung):</label>
@@ -126,8 +128,7 @@
             </div>
 
                     </details>
-                    </section>
-                </aside>
+                </section>
             </div>
             <footer class="vod-cut-footer"><span id="clipQueueHint">Der gewählte Ausschnitt wird zur Download-Queue hinzugefügt.</span><button type="button" class="btn-secondary" id="clipCancelBtn" onclick="closeClipDialog()">Schließen</button><button type="button" class="btn-pill success" id="clipDialogConfirmBtn" onclick="confirmClipDialog()">Zur Queue hinzufügen</button></footer>
         </div>
