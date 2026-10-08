@@ -11,3 +11,15 @@ tmp_*/
 .dev-program-data/
 .dev-user-data/
 .DS_Store
+PROJECT_MEMORY.md
+*MEMORY*.md
+*.test.*
+*.spec.*
+scripts/test-*
+scripts/smoke-test*
+scripts/e2e-test-environment.js
+scripts/file-capability-contract.js
+test/
+tests/
+fixtures/
+artifacts/

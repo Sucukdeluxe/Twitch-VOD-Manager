@@ -7,6 +7,8 @@ import { pathToFileURL } from 'node:url';
 import type { Transform } from 'node:stream';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
+import { remuxMp4 } from './main/domain/mp4-remux';
+import { VodPreviewService } from './main/domain/vod-preview-service';
 import { compareUpdateVersions, createUpdateCheckCoordinator, normalizeUpdateVersion, UpdateLifecycle } from './main/updates';
 import { writeFileAtomicSync } from './main/infra/fs-atomic';
 import { parseDuration, formatDuration, formatDurationDashed } from './main/infra/duration';
@@ -899,6 +901,7 @@ const currentCutterProbeProcesses = new Set<ChildProcess>();
 const currentCutterInfoProcesses = new Set<ChildProcess>();
 const currentCutterExportProcesses = new Set<ChildProcess>();
 const currentCutterPreviewProcesses = new Set<ChildProcess>();
+const vodPreviewService = new VodPreviewService();
 const currentCutterFrameProcesses = new Set<ChildProcess>();
 const currentCutterFrameFiles = new Set<string>();
 // Per-item cancellation lives in `cancelledItemIds`. The previous global
@@ -3973,7 +3976,41 @@ async function splitMergedFile(
 // ==========================================
 // DOWNLOAD FUNCTIONS
 // ==========================================
-function downloadVODPart(
+async function finalizeDownloadedMp4(partialFilename: string, filename: string, itemId: string | null, expectedDuration: number | null, clipTracking?: ActiveClipDownloadTracking): Promise<DownloadResult> {
+    const remuxFilename = partialDownloadRegistry.begin(`${filename}.remux`);
+    try {
+        if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) throw new Error('Download cancelled');
+        const diskCheck = ensureDiskSpace(path.dirname(filename), fs.statSync(partialFilename).size + 32 * 1024 * 1024, 'MP4');
+        if (!diskCheck.success) return diskCheck;
+        await remuxMp4({
+            inputPath: partialFilename,
+            outputPath: remuxFilename,
+            ffmpegPath: getFFmpegPath(),
+            ffprobePath: getFFprobePath(),
+            onProcess: (process) => {
+                if (clipTracking) clipTracking.process = process;
+                const remuxRegistration = itemId ? queueProcessRegistry.register(itemId, 'post-processing', createPhaseBoundaryProcessResource(
+                    process, () => waitForChildProcessExit(process),
+                )) : null;
+                if (appShutdownStarted) process.kill();
+                return () => remuxRegistration?.release();
+            },
+        });
+        if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) throw new Error('Download cancelled');
+        const integrity = validateDownloadedFileIntegrity(remuxFilename, expectedDuration);
+        if (!integrity.success) return integrity;
+        partialDownloadRegistry.commit(remuxFilename, filename);
+        return { success: true };
+    } catch (error) {
+        appendDebugLog('mp4-finalization-failed', { itemId, error: String(error) });
+        return { success: false, error: tBackend('mp4FinalizationFailed') };
+    } finally {
+        partialDownloadRegistry.discard(remuxFilename);
+        partialDownloadRegistry.discard(partialFilename);
+    }
+}
+
+async function downloadVODPart(
     url: string,
     filename: string,
     startTime: string | null,
@@ -3988,6 +4025,8 @@ function downloadVODPart(
         damit der Bar nicht in indeterminate haengt. 0 = unknown. */
     expectedTotalSec: number = 0
 ): Promise<DownloadResult> {
+    if (!(await ensureFfmpegInstalled())) return { success: false, error: tBackend('ffmpegAutoInstallFailed') };
+    if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) return { success: false, error: tBackend('downloadCancelled') };
     return new Promise((resolve) => {
         const streamlinkCmd = getStreamlinkCommand();
         const args = [...streamlinkCmd.prefixArgs, url, getStreamlinkStreamArg(), '--stdout'];
@@ -4211,13 +4250,9 @@ function downloadVODPart(
                     return;
                 }
 
-                try {
-                    partialDownloadRegistry.commit(partialFilename, filename);
-                } catch (error) {
-                    partialDownloadRegistry.discard(partialFilename);
-                    resolve({ success: false, error: String(error) });
-                    return;
-                }
+                onProgress({ id: itemId, progress: 99, speed: '', eta: '', status: tBackend('statusFinalizingMp4'), currentPart: partNum, totalParts });
+                const finalized = await finalizeDownloadedMp4(partialFilename, filename, itemId, expectedDurationSeconds);
+                if (!finalized.success) { resolve(finalized); return; }
                 runtimeMetrics.downloadedBytesTotal += stats.size;
                 appendDebugLog('download-part-success', { itemId, filename, bytes: stats.size });
                 resolve({ success: true });
@@ -8319,6 +8354,9 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
     const clipInfo = await getClipInfo(clipId);
     if (appShutdownStarted) return { success: false, error: 'shutting-down' };
     if (!clipInfo) return { success: false, error: tBackend('clipNotFound') };
+    if (!(await ensureStreamlinkInstalled())) return { success: false, error: tBackend('streamlinkAutoInstallFailed') };
+    if (!(await ensureFfmpegInstalled())) return { success: false, error: tBackend('ffmpegAutoInstallFailed') };
+    if (appShutdownStarted) return { success: false, error: 'shutting-down' };
 
     // Sanitize broadcaster_name for path safety — Twitch returns the display
     // name which can contain unicode, spaces, or punctuation that breaks
@@ -8419,13 +8457,8 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
                 return;
             }
 
-            try {
-                partialDownloadRegistry.commit(partialFilename, filename);
-            } catch (error) {
-                partialDownloadRegistry.discard(partialFilename);
-                finish({ success: false, error: String(error) });
-                return;
-            }
+            const finalized = await finalizeDownloadedMp4(partialFilename, filename, null, null, tracking);
+            if (!finalized.success) { finish(finalized); return; }
             appendDebugLog('clip-download-success', { clipId, bytes: stats.size, filename });
             finish({ success: true, filename });
         });
@@ -8441,6 +8474,26 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
 
 registerTrustedIpcHandler(ipcMain, 'run-preflight', isTrustedRendererEvent, () => Promise.resolve(null), async (_, autoFix: boolean = false) => {
     return await runPreflight(autoFix);
+});
+
+registerTrustedIpcHandler(ipcMain, 'preview-vod', isTrustedRendererEvent, () => Promise.resolve(null), async (_, request: unknown) => {
+    if (appShutdownStarted) return null;
+    try {
+        return await vodPreviewService.create(request, {
+            temporaryRoot: app.getPath('temp'),
+            prepare: async () => await ensureStreamlinkInstalled() && await ensureFfmpegInstalled(),
+            streamlink: getStreamlinkCommand,
+            ffmpeg: getFFmpegPath,
+            ffprobe: getFFprobePath,
+        });
+    } catch (error) {
+        appendDebugLog('vod-preview-failed', { error: String(error) });
+        return null;
+    }
+});
+
+registerTrustedIpcHandler(ipcMain, 'cancel-vod-preview', isTrustedRendererEvent, () => Promise.resolve(), async (_, id: unknown) => {
+    if (typeof id === 'string') await vodPreviewService.cancel(id);
 });
 
 ipcMain.handle('get-managed-tool-status', async (event) => {
@@ -9096,6 +9149,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
     let frameProcessesExited = frameProcesses.length === 0;
 
     await runResilientSteps([
+        ['vod-preview', () => vodPreviewService.cancel()],
         ['metadata-cache-timer', () => stopMetadataCacheCleanup()],
         ['metadata-cache-files', () => cleanupMetadataCaches('shutdown')],
         ['auto-update-poller', () => stopAutoUpdatePolling()],

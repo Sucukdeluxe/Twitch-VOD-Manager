@@ -468,6 +468,8 @@ interface ApiBridge {
     getStreamerProfile(login: string, forceRefresh?: boolean): Promise<StreamerProfile | null>;
     getStreamerDisplayNames(logins: string[]): Promise<Record<string, string>>;
     getVodStoryboard(vodId: string): Promise<VodStoryboard | null>;
+    previewVod(request: { id: string; url: string; start: number; duration: number }): Promise<{ sourceUrl: string; start: number; duration: number } | null>;
+    cancelVodPreview(id: string): Promise<void>;
     getLiveStatusSnapshot(): Promise<Record<string, boolean>>;
     onLiveStatusBatchUpdate(callback: (info: { changes: Array<{ login: string; isLive: boolean }> }) => void): void;
     searchArchive(filter: {

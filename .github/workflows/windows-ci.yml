@@ -102,9 +102,9 @@ jobs:
         timeout-minutes: 20
       - name: Cutter media matrix
         run: |
-          node scripts/smoke-test-cutter-media-matrix.js
+          node scripts/run-local-check.mjs scripts/smoke-test-cutter-media-matrix.js
           if ($LASTEXITCODE -ne 0) {
-            node scripts/smoke-test-cutter-media-matrix.js
+            node scripts/run-local-check.mjs scripts/smoke-test-cutter-media-matrix.js
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
         timeout-minutes: 20

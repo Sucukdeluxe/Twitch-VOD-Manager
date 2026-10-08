@@ -1655,6 +1655,7 @@ function parseTimeToSeconds(timeStr: string): number {
 }
 
 function openClipDialog(url: string, title: string, date: string, streamer: string, duration: string): void {
+    resetClipPreview();
     clipDialogData = { url, title, date, streamer, duration };
     clipTotalSeconds = parseDurationToSeconds(duration);
 
@@ -1677,8 +1678,49 @@ function openClipDialog(url: string, title: string, date: string, streamer: stri
 }
 
 function closeClipDialog(): void {
+    resetClipPreview();
     RendererAccessibility.closeDialog('clipModal');
     clipDialogData = null;
+}
+
+let clipPreviewRequestId: string | null = null;
+
+function resetClipPreview(): void {
+    const previousId = clipPreviewRequestId;
+    clipPreviewRequestId = null;
+    const video = byId<HTMLVideoElement>('clipPreviewVideo');
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    video.hidden = true;
+    byId('clipPreviewStatus').textContent = UI_TEXT.clips.previewHint;
+    if (previousId) void window.api.cancelVodPreview(previousId).catch(() => undefined);
+}
+
+async function loadClipPreview(boundary: 'start' | 'end'): Promise<void> {
+    if (!clipDialogData || clipTotalSeconds < 1) return;
+    const time = parseTimeToSeconds(byId<HTMLInputElement>(boundary === 'start' ? 'clipStartTime' : 'clipEndTime').value);
+    const start = Math.max(0, Math.min(clipTotalSeconds - 1, boundary === 'end' ? time - 10 : time));
+    const duration = Math.min(15, clipTotalSeconds - start);
+    resetClipPreview();
+    const id = crypto.randomUUID();
+    clipPreviewRequestId = id;
+    byId('clipPreviewStatus').textContent = UI_TEXT.clips.previewLoading;
+    try {
+        const result = await window.api.previewVod({ id, url: clipDialogData.url, start, duration });
+        if (clipPreviewRequestId !== id) return;
+        if (!result) throw new Error('Preview unavailable');
+        const video = byId<HTMLVideoElement>('clipPreviewVideo');
+        video.src = result.sourceUrl;
+        video.hidden = false;
+        video.onerror = () => {
+            if (clipPreviewRequestId === id) byId('clipPreviewStatus').textContent = UI_TEXT.clips.previewFailed;
+        };
+        byId('clipPreviewStatus').textContent = UI_TEXT.clips.previewReady.replace('{time}', formatSecondsToTime(result.start));
+        await video.play().catch(() => undefined);
+    } catch {
+        if (clipPreviewRequestId === id) byId('clipPreviewStatus').textContent = UI_TEXT.clips.previewFailed;
+    }
 }
 
 function updateFromSlider(which: string): void {

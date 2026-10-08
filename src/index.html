@@ -58,6 +58,16 @@
             <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="closeClipDialog()">x</button>
             <h2 class="clip-modal-title" id="clipDialogTitle">VOD zuschneiden</h2>
 
+            <div class="clip-preview">
+                <video id="clipPreviewVideo" controls preload="metadata" playsinline hidden></video>
+                <div class="clip-preview-actions">
+                    <button type="button" class="btn-secondary" id="clipPreviewStart" onclick="loadClipPreview('start')">Start ansehen</button>
+                    <button type="button" class="btn-secondary" id="clipPreviewEnd" onclick="loadClipPreview('end')">Ende ansehen</button>
+                </div>
+                <p id="clipPreviewStatus" class="clip-preview-hint" role="status" aria-live="polite"></p>
+                <p id="clipSourceQualityHint" class="clip-preview-hint"></p>
+            </div>
+
             <div class="clip-modal-field">
                 <label class="clip-modal-label" id="clipDialogStartLabel" for="clipStartSlider">Start:</label>
                 <input type="range" id="clipStartSlider" min="0" max="100" value="0" oninput="updateFromSlider('start')">
@@ -503,6 +513,7 @@
                                         <option value="0" id="cutterAudioStreamEmptyOption">Keine Audiospur</option>
                                     </select>
                                 </div>
+                                <p id="cutterEncodingHint" class="clip-preview-hint"></p>
                                 <div class="cutter-trim-card">
                                     <div class="cutter-card-title" id="cutterGlobalTrimLabel">Gesamtauswahl</div>
                                     <div class="cutter-time-field-row">

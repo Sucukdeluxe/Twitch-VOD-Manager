@@ -537,6 +537,13 @@ const UI_TEXT_EN = {
         ctxUnmarkDownloaded: 'Unmark downloaded'
     },
     clips: {
+        previewStart: 'Preview start',
+        previewEnd: 'Preview end',
+        previewHint: 'Load a short preview near the selected cut boundary without downloading the complete VOD.',
+        previewLoading: 'Loading preview …',
+        previewReady: 'Preview from approximately {time}',
+        previewFailed: 'Preview unavailable. You can still enter the cut times.',
+        sourceQualityHint: 'Downloads retain the selected stream quality. MP4 is saved without re-encoding; cut boundaries may align with stream segments.',
         dialogTitle: 'Trim VOD',
         dialogStart: 'Start:',
         dialogStartTime: 'Start time (HH:MM:SS):',
@@ -569,6 +576,7 @@ const UI_TEXT_EN = {
         startPartPlaceholder: 'e.g. 42'
     },
     cutter: {
+        encodingHint: 'The video cutter re-encodes exports. Quality, Balanced and Fast use H.264/AAC; Archive uses FFV1/FLAC in MKV. Use “Trim VOD” for downloads without re-encoding.',
         videoInfoFailed: 'Could not read video info. Is FFprobe installed?',
         previewLoading: 'Loading preview...',
         previewUnavailable: 'Preview unavailable',

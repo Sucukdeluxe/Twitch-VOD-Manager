@@ -161,6 +161,10 @@ function applyLanguageToStaticUI(): void {
     setText('clipDialogPartHint', UI_TEXT.clips.dialogPartHint);
     setText('clipDialogFormatLabel', UI_TEXT.clips.dialogFormatLabel);
     setText('clipDialogConfirmBtn', UI_TEXT.clips.dialogConfirm);
+    setText('clipPreviewStart', UI_TEXT.clips.previewStart);
+    setText('clipPreviewEnd', UI_TEXT.clips.previewEnd);
+    setText('clipSourceQualityHint', UI_TEXT.clips.sourceQualityHint);
+    setText('cutterEncodingHint', UI_TEXT.cutter.encodingHint);
     setPlaceholder('clipUrl', UI_TEXT.clips.urlPlaceholder);
     setText('btnClip', UI_TEXT.clips.downloadButton);
     setPlaceholder('clipStartPart', UI_TEXT.clips.startPartPlaceholder);

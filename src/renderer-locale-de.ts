@@ -537,6 +537,13 @@ const UI_TEXT_DE = {
         ctxUnmarkDownloaded: 'Markierung entfernen'
     },
     clips: {
+        previewStart: 'Start ansehen',
+        previewEnd: 'Ende ansehen',
+        previewHint: 'Kurze Vorschau nahe der gewählten Schnittgrenze. Der vollständige VOD wird nicht heruntergeladen.',
+        previewLoading: 'Vorschau wird geladen …',
+        previewReady: 'Vorschau ab etwa {time}',
+        previewFailed: 'Vorschau nicht verfügbar. Schnittzeiten können weiterhin eingegeben werden.',
+        sourceQualityHint: 'Downloads behalten die gewählte Streamqualität. MP4 wird ohne Neukodierung gespeichert; Schnittgrenzen können an Streamsegmenten liegen.',
         dialogTitle: 'VOD zuschneiden',
         dialogStart: 'Start:',
         dialogStartTime: 'Startzeit (HH:MM:SS):',
@@ -569,6 +576,7 @@ const UI_TEXT_DE = {
         startPartPlaceholder: 'z.B. 42'
     },
     cutter: {
+        encodingHint: 'Der Video-Cutter kodiert den Export neu. Qualität, Ausgewogen und Schnell verwenden H.264/AAC; Archiv verwendet FFV1/FLAC in MKV. Für Downloads ohne Neukodierung „VOD zuschneiden“ verwenden.',
         videoInfoFailed: 'Konnte Video-Informationen nicht lesen. FFprobe installiert?',
         previewLoading: 'Lade Vorschau...',
         previewUnavailable: 'Vorschau nicht verfügbar',

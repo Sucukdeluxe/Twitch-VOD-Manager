@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add playable previews near the selected start and end in the VOD trim dialog, with bounded downloads, cancellation and temporary-file cleanup.
+- Finalize VOD, trim, live and clip downloads as verified MP4 containers using stream copy, preserving the selected video and audio quality instead of saving raw stream data under an MP4 extension.
+- Explain the difference between downloads without re-encoding and re-encoded local video-cutter exports.
+- Keep project memory, tests, fixtures and test artifacts local; allow build and packaging from checkouts without local test files.
+
 ## 1.0.23 - 2026-09-07
 
 - Start pending downloads in the visible queue order, including manually reordered entries. Retire the automatic short-job prioritization, including for existing configurations.
