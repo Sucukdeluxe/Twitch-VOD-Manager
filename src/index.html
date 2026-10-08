@@ -78,6 +78,11 @@
                 </div>
             </div>
 
+            <div class="clip-modal-duration">
+                <span id="clipDialogDurationLabel" class="clip-modal-meta">Dauer: </span>
+                <span id="clipDurationDisplay" class="clip-modal-duration-value" role="status">00:01:00</span>
+            </div>
+
             <div class="clip-modal-field">
                 <label class="clip-modal-label" hidden id="clipDialogEndLabel" for="clipEndSlider">Ende:</label>
                 <input hidden step="0.1" type="range" id="clipEndSlider" min="0" max="100" value="60" oninput="updateFromSlider('end')">
@@ -87,11 +92,6 @@
                     <input type="text" id="clipEndTime" value="00:01:00" class="clip-modal-time-input" aria-describedby="clipTimeHint" spellcheck="false" autocomplete="off" oninput="updateFromInput('end')" onchange="normalizeClipTime('end')">
                     <button type="button" id="clipEndLater" onclick="nudgeClipTime('end', 0.1)">+</button></div>
                 </div>
-            </div>
-
-            <div class="clip-modal-duration">
-                <span id="clipDialogDurationLabel" class="clip-modal-meta">Dauer: </span>
-                <span id="clipDurationDisplay" class="clip-modal-duration-value" role="status">00:01:00</span>
             </div>
 
                     </div>

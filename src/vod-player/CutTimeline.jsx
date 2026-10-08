@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Maximize2, ZoomIn } from 'lucide-react';
 import { chapterColor } from './chapters.js';
 import { timeLabel } from './timeline.js';
 
@@ -76,8 +77,8 @@ export function CutTimeline({ duration, range, position, chapters, onChange, onS
   }
   return <div className="vod-selection">
     {createPortal(<div className="vod-timeline-view" role="group" aria-label={text.timelineView}>
-      <button type="button" aria-pressed={!view} onClick={() => setView(null)}>{text.overview}</button>
-      <button type="button" aria-pressed={Boolean(view)} onClick={() => setView(selectionView())}>{text.zoomSelection}</button>
+      <button type="button" aria-pressed={!view} onClick={() => setView(null)}><Maximize2 size={15} aria-hidden="true"/>{text.overview}</button>
+      <button type="button" aria-pressed={Boolean(view)} onClick={() => setView(selectionView())}><ZoomIn size={15} aria-hidden="true"/>{text.zoomSelection}</button>
     </div>, document.getElementById('clipTimelineView'))}
     <div ref={track} className="vod-selection-track" onClick={seekAt}>
       <div className="vod-selection-chapters" aria-hidden="true">{chapters.filter(chapter => chapter.end > from && chapter.start < to).map(chapter => {

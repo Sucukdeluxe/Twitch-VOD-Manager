@@ -23,8 +23,9 @@
 .vod-cut-heading { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
 .vod-cut-heading h3 { margin: 0; font-size: 16px; }
 .vod-cut-heading p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
-.vod-cut-fields { display: grid; grid-template-columns: minmax(220px, 320px) minmax(220px, 320px) minmax(180px, 1fr); gap: 24px; align-items: end; }
-.vod-cut-fields .clip-modal-field { margin: 0; min-width: 0; }
+.vod-cut-fields { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(140px, auto) minmax(220px, 1fr); gap: 24px; align-items: end; }
+.vod-cut-fields .clip-modal-field { margin: 0; min-width: 0; width: 100%; max-width: 320px; }
+.vod-cut-fields > .clip-modal-field:last-child { justify-self: end; }
 .vod-cut-fields .clip-modal-time-row { display: flex; flex-direction: column; align-items: stretch; gap: 7px; margin: 0; }
 .vod-time-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 26px; }
 .vod-time-heading label { display: inline-flex; align-items: center; gap: 7px; }
@@ -41,16 +42,21 @@
 .vod-time-entry > button:disabled, .vod-set-boundary:disabled { opacity: .4; cursor: default; }
 .vod-cut-fields .clip-modal-time-input { flex: 1; width: 0; min-width: 0; padding: 8px 4px; text-align: center; border: 0; border-radius: 0; background: transparent; font-size: 18px; line-height: 26px; font-variant-numeric: tabular-nums; }
 .vod-cut-fields .clip-modal-time-input:focus { outline: none; box-shadow: none; }
-.vod-cut-fields .clip-modal-duration { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 9px; margin: 0; padding: 0; min-height: 77px; background: transparent; border: 0; }
-.vod-cut-fields .clip-modal-duration-value { font-size: 20px; line-height: 1.3; overflow-wrap: anywhere; }
+.vod-cut-fields .clip-modal-duration { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 7px; margin: 0; padding: 0; min-height: 77px; background: transparent; border: 0; }
+.vod-cut-fields .clip-modal-duration > .clip-modal-meta { display: flex; align-items: center; min-height: 26px; }
+.vod-cut-fields .clip-modal-duration-value { display: flex; align-items: center; min-height: 44px; font-size: 20px; line-height: 1.3; overflow-wrap: anywhere; }
 .vod-cut-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
 #clipSelectionTools { display: contents; }
 .vod-selection { order: 0; flex: 1 1 100%; min-width: 0; }
 #clipTimelineView { margin-left: auto; }
 .vod-selection-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; margin-bottom: 12px; color: var(--text-secondary); }
-.vod-timeline-view { display: flex; gap: 3px; border: 1px solid var(--border-soft); border-radius: 6px; padding: 3px; }
-.vod-timeline-view button { padding: 5px 9px; border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary); font-size: 12px; user-select: none; }
-.vod-timeline-view button[aria-pressed="true"] { background: var(--bg-hover); color: var(--text); }
+.vod-timeline-view { display: flex; flex-wrap: wrap; gap: 8px; }
+.vod-timeline-view button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--text-secondary) 45%, var(--border-soft)); border-radius: 6px; background: var(--bg-elevated); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; }
+.vod-timeline-view button svg { flex: none; }
+.vod-timeline-view button[aria-pressed="true"] { background: var(--bg-hover); border-color: var(--text-secondary); }
+.vod-timeline-view button:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--text); }
+.vod-timeline-view button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.vod-timeline-view button:disabled { opacity: .45; cursor: default; }
 .vod-selection-track { height: 38px; position: relative; margin: 0 18px; background: var(--bg-elevated); border-radius: 4px; cursor: pointer; }
 .vod-selection-chapters { position: absolute; inset: 0; border-radius: 4px; overflow: hidden; }
 .vod-selection-chapters > span { position: absolute; top: 0; bottom: 0; border-top: 3px solid var(--chapter-color); background: color-mix(in srgb, var(--chapter-color) 12%, transparent); box-shadow: inset -1px 0 var(--border-soft); padding: 0; min-width: 0; overflow: hidden; container-type: inline-size; color: var(--text-secondary); user-select: none; }
@@ -107,7 +113,13 @@
 #clipModal [hidden] { display: none !important; }
 .player-panel input, .player-panel textarea { user-select: text; }
 @media (max-width: 1100px) { .vod-cut-layout { grid-template-columns: minmax(0, 1fr) 285px; gap: 14px; padding: 14px; } }
-@media (max-width: 800px) { .vod-cut-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(320px, 1fr) auto auto; } .vod-cut-sidebar { height: 320px; order: 2; } #clipCutPanel { order: 1; } .vod-cut-fields { grid-template-columns: 1fr 1fr; } .vod-cut-fields .clip-modal-duration { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; align-items: center; min-height: 46px; } }
+@media (max-width: 800px) { .vod-cut-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(320px, 1fr) auto auto; } .vod-cut-sidebar { height: 320px; order: 2; } #clipCutPanel { order: 1; } }
+@media (max-width: 760px) {
+  .vod-cut-fields { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .vod-cut-fields .clip-modal-field { max-width: none; }
+  .vod-cut-fields .clip-modal-duration { flex-direction: row; justify-content: center; min-height: 38px; gap: 12px; }
+  .vod-cut-fields .clip-modal-duration-value { min-height: 38px; }
+}
 @media (max-width: 600px) {
   #clipModal { padding: 8px; }
   #clipModal .clip-modal { height: calc(100dvh - 16px); max-height: calc(100dvh - 16px); border-radius: 10px; }
@@ -117,8 +129,6 @@
   .vod-cut-header .clip-modal-title { font-size: 18px; }
   .vod-cut-footer { flex-wrap: wrap; gap: 8px; }
   .vod-cut-footer > span { flex-basis: 100%; }
-  .vod-cut-fields { gap: 10px; }
-  .vod-cut-fields { grid-template-columns: minmax(0, 1fr); }
   .vod-cut-fields .clip-modal-time-input { font-size: 18px; }
   .vod-cut-fields .clip-modal-duration { min-height: 38px; }
   .vod-selection-heading { align-items: flex-start; flex-direction: column; gap: 7px; }
