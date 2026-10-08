@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.0.24 - 2026-10-09
+
+- Improve frame-accurate VOD trimming with immediate playback controls, current-position omission preview and visible excluded ranges in fine seeking.
+- Support multiple non-overlapping exclusions while keeping output parts at the configured length and preserving skipped original part numbers.
+- Refine the local cutter with sharper high-resolution audio waveforms, persistent export-profile selection, shared I/O controls and clearer trim-mode icons.
+- Clean up the VOD history and omission workspace with a single title presentation, clearer active-history state, compact controls and more readable output summaries.
+
 - Synchronize local cutter time displays with presented video frames, fix adjacent-frame seeking and fractional-rate timecode round-trips, and show frame labels when zoomed. Keep thumbnail widths uniform and render separate audio-channel peaks sharply at the current zoom.
 
 - Reuse the VOD trimming I/O markers and fine-seek preview in the local cutter, replacing duplicate marker rendering and input handling while preserving frame-aligned edits and undo/redo.
@@ -191,3 +198,4 @@
 - Streamer profiles, VOD previews, themes, localization and command palette.
 - Resumable downloads, integrity checks, secure local storage and SQLite migration.
 - Automatic update checks and downloads through GitHub Releases.
+
