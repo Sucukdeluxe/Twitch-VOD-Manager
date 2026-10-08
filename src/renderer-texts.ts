@@ -156,6 +156,14 @@ function applyLanguageToStaticUI(): void {
     setText('clipDialogStartTimeLabel', UI_TEXT.clips.dialogStartTime);
     setText('clipDialogEndLabel', UI_TEXT.clips.dialogEnd);
     setText('clipDialogEndTimeLabel', UI_TEXT.clips.dialogEndTime);
+    for (const which of ['Start', 'End']) {
+        const label = which === 'Start' ? UI_TEXT.clips.dialogStartTime : UI_TEXT.clips.dialogEndTime;
+        for (const direction of ['Earlier', 'Later']) {
+            const description = label + ': ' + (direction === 'Earlier' ? UI_TEXT.clips.timeEarlier : UI_TEXT.clips.timeLater);
+            setAriaLabel('clip' + which + direction, description);
+            setTitle('clip' + which + direction, description);
+        }
+    }
     setText('clipDialogDurationLabel', UI_TEXT.clips.dialogDuration);
     setText('clipDialogPartLabel', UI_TEXT.clips.dialogPartLabel);
     setText('clipDialogPartHint', UI_TEXT.clips.dialogPartHint);

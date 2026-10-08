@@ -1730,6 +1730,17 @@ function updateFromSlider(which: string): void {
     updateClipDuration();
 }
 
+function nudgeClipTime(which: 'start' | 'end', delta: number): void {
+    const start = parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value);
+    const end = parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end > clipTotalSeconds || start >= end) return;
+    const minimum = which === 'start' ? 0 : start + .001;
+    const maximum = which === 'start' ? end - .001 : clipTotalSeconds;
+    const next = Math.max(minimum, Math.min(maximum, Math.round(((which === 'start' ? start : end) + delta) * 1000) / 1000));
+    byId<HTMLInputElement>(which === 'start' ? 'clipStartTime' : 'clipEndTime').value = formatClipTime(next);
+    updateFromInput(which);
+}
+
 function normalizeClipTime(which: 'start' | 'end'): void {
     const input = byId<HTMLInputElement>(which === 'start' ? 'clipStartTime' : 'clipEndTime');
     const seconds = parseTimeToSeconds(input.value);
@@ -1753,6 +1764,10 @@ function updateClipDuration(syncPlayer: boolean = true): void {
     byId<HTMLButtonElement>('clipDialogConfirmBtn').disabled = !isValid;
     byId('clipStartTime').setAttribute('aria-invalid', String(!Number.isFinite(startSec) || startSec < 0 || startSec >= endSec || startSec >= clipTotalSeconds));
     byId('clipEndTime').setAttribute('aria-invalid', String(!Number.isFinite(endSec) || endSec <= startSec || endSec > clipTotalSeconds));
+    byId<HTMLButtonElement>('clipStartEarlier').disabled = !isValid || startSec <= 0;
+    byId<HTMLButtonElement>('clipStartLater').disabled = !isValid || endSec - startSec <= .001001;
+    byId<HTMLButtonElement>('clipEndEarlier').disabled = !isValid || endSec - startSec <= .001001;
+    byId<HTMLButtonElement>('clipEndLater').disabled = !isValid || endSec >= clipTotalSeconds;
     if (isValid && syncPlayer) clipPlayer?.updateRange(startSec, endSec);
     durationDisplay.classList.toggle('invalid', !isValid);
     durationDisplay.textContent = isValid

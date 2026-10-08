@@ -111,7 +111,7 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
     </svg>}
     <span className="timeline-title-markers" aria-hidden="true">{titleMarkers(titleEvents,total,trackWidth).map(marker=><i key={marker.id} className={marker.count>1?'is-grouped':undefined} style={{left:`${marker.fraction*100}%`}}/>)}</span>
     <ChapterRangePreview range={highlightedRange} suppressed={Boolean(preview)} chapters={chapters} fallback={t("categoryUnavailable")}/>
-    {cutRange && <RangeMarkers compact duration={total} range={cutRange} onChange={onCutRange} text={cutText} onInteraction={cancel}/>}
+    {cutRange && <RangeMarkers compact trackWidth={trackWidth - 14} duration={total} range={cutRange} onChange={onCutRange} text={cutText} onInteraction={cancel}/>}
     <span id={hintId} className="fine-seek-instructions">{t("fineSeekInstructions")}</span>
     <input ref={input} className={`archive-timeline${gradient?" has-chapters":""}`} type="range" aria-label={t("playbackPosition")} aria-describedby={hintId}
       aria-valuetext={`${timeLabel(value)} / ${timeLabel(total)}${currentTimestamp ? ` · ${currentTimestamp.label}` : ""} - ${chapterAt(chapters,value,endpoint)?.name || t("categoryUnavailable")}${currentTitle ? ` · ${currentTitle.title || t('historyEmptyTitle')}` : ''}${currentViewerGap ? ` · ${t("viewerMeasurementMissing")}` : currentViewerSample ? ` · ${currentViewerSample.viewers.toLocaleString(locale)} ${t("viewerCount")}` : ""}`} min="0" max={total||1} step="0.1" value={Math.min(value,total)} disabled={total<=0}

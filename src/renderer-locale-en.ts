@@ -537,6 +537,8 @@ const UI_TEXT_EN = {
         ctxUnmarkDownloaded: 'Unmark downloaded'
     },
     clips: {
+        timeEarlier: 'Decrease by 0.1 seconds',
+        timeLater: 'Increase by 0.1 seconds',
         timeInputHint: 'HH:MM:SS.mmm or seconds · Drag cut markers or enter times.',
         selectionTitle: 'Selected range',
         seekStart: 'Go to start',

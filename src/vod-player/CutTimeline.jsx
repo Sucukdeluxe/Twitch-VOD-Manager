@@ -8,19 +8,31 @@ export function cutTime(seconds) {
   return `${timeLabel(Math.floor(value / 1000))}.${String(value % 1000).padStart(3, '0')}`;
 }
 
-export function RangeMarkers({ duration, range, onChange, text, from = 0, to = duration, compact = false, onInteraction }) {
+export function RangeMarkers({ duration, range, onChange, text, from = 0, to = duration, compact = false, onInteraction, trackWidth = 1000 }) {
   const track = useRef(null), drag = useRef(null);
   const span = Math.max(.001, to - from);
+  const width = Math.max(62, trackWidth);
+  const clampCenter = value => Math.max(14, Math.min(width - 14, value));
+  const boundary = { start: (range.start - from) / span, end: (range.end - from) / span };
+  let startCenter = clampCenter(boundary.start * width), endCenter = clampCenter(boundary.end * width);
+  if (endCenter - startCenter < 34) {
+    const center = Math.max(31, Math.min(width - 31, (startCenter + endCenter) / 2));
+    startCenter = center - 17; endCenter = center + 17;
+  }
+  const grip = compact ? { start: startCenter / width, end: endCenter / width } : boundary;
   function update(which, value) {
     onChange(which === 'start' ? Math.max(0, Math.min(value, range.end - .001)) : range.start,
       which === 'end' ? Math.min(duration, Math.max(value, range.start + .001)) : range.end);
   }
   return <div ref={track} className={`vod-range-markers${compact ? ' is-compact' : ''}`}>
+    {compact && <svg className="vod-range-connectors" viewBox="0 0 1000 60" preserveAspectRatio="none" aria-hidden="true">
+      {['start', 'end'].map(which => <path key={which} d={`M ${grip[which] * 1000} 24 L ${boundary[which] * 1000} 34 V 54`}/>)}
+    </svg>}
     <span className="vod-range-band" style={{ left: `${(range.start - from) / span * 100}%`, width: `${(range.end - range.start) / span * 100}%` }}/>
     {['start', 'end'].map(which => <button key={which} type="button" role="slider" className={`vod-range-handle is-${which}`}
       aria-label={text[which]} aria-orientation="horizontal" aria-valuemin={which === 'start' ? 0 : range.start + .001}
       aria-valuemax={which === 'start' ? range.end - .001 : duration} aria-valuenow={range[which]} aria-valuetext={cutTime(range[which])}
-      title={`${text[which]}: ${cutTime(range[which])}`} style={{ left: `${(range[which] - from) / span * 100}%` }}
+      title={`${text[which]}: ${cutTime(range[which])}`} style={{ left: `${grip[which] * 100}%` }}
       onPointerDown={event => {
         if (event.button !== 0 || !event.isPrimary) return;
         event.preventDefault(); event.stopPropagation(); onInteraction?.();
@@ -70,7 +82,7 @@ export function CutTimeline({ duration, range, position, chapters, onChange, onS
     <div ref={track} className="vod-selection-track" onClick={seekAt}>
       <div className="vod-selection-chapters" aria-hidden="true">{chapters.filter(chapter => chapter.end > from && chapter.start < to).map(chapter => {
         const start = Math.max(from, chapter.start), end = Math.min(to, chapter.end);
-        return <span key={chapter.id} style={{ left: `${(start - from) / span * 100}%`, width: `${(end - start) / span * 100}%`, '--chapter-color': chapterColor(chapter, chapters) }} title={`${chapter.name} · ${cutTime(chapter.start)} – ${cutTime(chapter.end)}`}>{chapter.name}</span>;
+        return <span key={chapter.id} style={{ left: `${(start - from) / span * 100}%`, width: `${(end - start) / span * 100}%`, '--chapter-color': chapterColor(chapter, chapters) }} title={`${chapter.name} · ${cutTime(chapter.start)} – ${cutTime(chapter.end)}`}><span>{chapter.name}</span></span>;
       })}</div>
       <RangeMarkers duration={duration} range={range} onChange={onChange} text={text} from={from} to={to}/>
       {position >= from && position <= to && <i className="vod-selection-playhead" title={cutTime(position)} style={{ left: `${(position - from) / span * 100}%` }}/>} 

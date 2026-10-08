@@ -537,6 +537,8 @@ const UI_TEXT_DE = {
         ctxUnmarkDownloaded: 'Markierung entfernen'
     },
     clips: {
+        timeEarlier: 'Um 0,1 Sekunden verringern',
+        timeLater: 'Um 0,1 Sekunden erhöhen',
         timeInputHint: 'HH:MM:SS.mmm oder Sekunden · Schnittmarken ziehen oder Zeiten eingeben.',
         selectionTitle: 'Schnittbereich',
         seekStart: 'Zum Start',
