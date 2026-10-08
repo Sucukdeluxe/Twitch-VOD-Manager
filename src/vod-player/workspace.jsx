@@ -108,6 +108,7 @@ function Workspace({ options, bind }) {
         <TitleHistory id={options.url} chapters={chapters} history={metadata.titleHistory} parts={parts} started={started} seconds={position}
           onSeek={seek} onTitleSeek={title => seek(title.seconds)} onHover={setHoveredChapter} onFocus={setFocusedChapter}
           onSelectRange={chapter => { changeRange(chapter.start, chapter.end); seek(chapter.start); }} t={t}/>
+        {metadata.titlesStatus === 'streamrecorder' && <p className="vod-history-status">{t('historyStreamrecorderTitles')}</p>}
         {metadata.titlesStatus === 'local' && <p className="vod-history-status">{t('historyLocalTitles')}</p>}
         {metadata.chaptersStatus === 'unavailable' && <p className="vod-history-status">{t('historyNoChapterSource')}</p>}
       </>}

@@ -47,7 +47,6 @@ export const playerTexts = {
     "historyTitleAtStart": "Starttitel",
     "historyPending": "Noch nicht abspielbar",
     "historyGap": "Nicht aufgezeichneter Zeitraum",
-    "historyNoTitles": "Keine Titeländerungen erfasst.",
     "historyEmpty": "Kein Verlauf verfügbar.",
     "historyEventTime": "Zeitpunkt der Twitch-Meldung",
     "historyPollTime": "Zeitpunkt der Abfrage · Wechsel kann früher erfolgt sein",
@@ -60,6 +59,7 @@ export const playerTexts = {
     "selectChapterRange": "Kategorie zuschneiden",
     "historyLoading": "Verlauf wird geladen …",
     "historyUnavailable": "Der Verlauf konnte nicht geladen werden.",
+    "historyStreamrecorderTitles": "Titelverlauf: Streamrecorder",
     "historyLocalTitles": "Titelzeiten aus lokalen Aufzeichnungen. Änderungen können vor der Erfassung erfolgt sein.",
     "historyNoChapterSource": "Twitch-Kapitel sind derzeit nicht verfügbar."
   },
@@ -111,7 +111,6 @@ export const playerTexts = {
     "historyTitleAtStart": "Initial title",
     "historyPending": "Not playable yet",
     "historyGap": "Unrecorded interval",
-    "historyNoTitles": "No title changes recorded.",
     "historyEmpty": "No history available.",
     "historyEventTime": "Time of Twitch notification",
     "historyPollTime": "Time of poll · Change may have occurred earlier",
@@ -124,6 +123,7 @@ export const playerTexts = {
     "selectChapterRange": "Trim category",
     "historyLoading": "Loading history …",
     "historyUnavailable": "Could not load the history.",
+    "historyStreamrecorderTitles": "Title history: Streamrecorder",
     "historyLocalTitles": "Title times from local recordings. Changes may have occurred before they were observed.",
     "historyNoChapterSource": "Twitch chapters are currently unavailable."
   }

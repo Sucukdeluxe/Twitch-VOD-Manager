@@ -18,8 +18,11 @@ export interface VodTitleEvent {
     at: number;
     until: number;
     title: string;
-    kind: 'observed' | 'changed';
-    precision: 'observed';
+    kind: 'initial' | 'observed' | 'changed';
+    precision: 'observed' | 'eventsub' | 'source' | 'snapshot' | 'minute';
+    initialSnapshot?: boolean;
+    observedAt?: number | null;
+    previousObserved?: number | null;
     priority: number;
 }
 
@@ -32,7 +35,7 @@ export interface VodTimeline {
     chapters: VodChapter[];
     titleHistory: VodTitleEvent[];
     chaptersStatus: 'available' | 'empty' | 'unavailable';
-    titlesStatus: 'local' | 'unavailable';
+    titlesStatus: 'local' | 'streamrecorder' | 'unavailable';
 }
 
 export const VOD_TIMELINE_QUERY = `query($id:ID!,$after:Cursor){video(id:$id){id title createdAt lengthSeconds owner{login} moments(momentRequestType:VIDEO_CHAPTER_MARKERS,first:100,after:$after){edges{cursor node{id type description positionMilliseconds durationMilliseconds details{... on GameChangeMomentDetails{game{id displayName boxArtURL(width:144,height:192)}}}}} pageInfo{hasNextPage}}}}`;
@@ -120,10 +123,72 @@ export async function readLocalVodTitles(directory: string, timeline: VodTimelin
     } catch { return []; }
 }
 
+export function normalizeStreamrecorderTitles(value: unknown, timeline: VodTimeline): VodTitleEvent[] {
+    const data = record(value);
+    if (!data || data.source !== 'streamrecorder' || data.login !== timeline.login
+        || typeof data.streamId !== 'string' || !/^\d{1,30}$/.test(data.streamId)
+        || typeof data.started !== 'number' || !Number.isSafeInteger(data.started)
+        || Math.abs(data.started - timeline.started) > 60000
+        || typeof data.ended !== 'number' || !Number.isSafeInteger(data.ended)
+        || data.ended <= data.started || data.ended - data.started > 7 * 86400000
+        || !Array.isArray(data.titleHistory) || data.titleHistory.length > 512) return [];
+    const result: VodTitleEvent[] = [];
+    const ids = new Set<string>();
+    const end = timeline.started + timeline.duration * 1000;
+    for (const value of data.titleHistory) {
+        const row = record(value);
+        if (!row || typeof row.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(row.id) || ids.has(row.id)
+            || typeof row.at !== 'number' || !Number.isSafeInteger(row.at) || row.at < data.started
+            || typeof row.until !== 'number' || !Number.isSafeInteger(row.until) || row.until <= row.at || row.until > data.ended + 1
+            || typeof row.title !== 'string' || row.title.length > 4000
+            || !['initial', 'observed', 'changed'].includes(String(row.kind))
+            || !['observed', 'eventsub', 'source', 'snapshot', 'minute'].includes(String(row.precision))) return [];
+        ids.add(row.id);
+        if (row.at >= end || row.until <= timeline.started) continue;
+        result.push({ id: 'streamrecorder-' + row.id, at: row.at, until: Math.min(end, row.until), title: row.title,
+            kind: row.kind as VodTitleEvent['kind'], precision: row.precision as VodTitleEvent['precision'], priority: 3,
+            initialSnapshot: row.initialSnapshot === true,
+            observedAt: typeof row.observedAt === 'number' && Number.isSafeInteger(row.observedAt) ? row.observedAt : null,
+            previousObserved: typeof row.previousObserved === 'number' && Number.isSafeInteger(row.previousObserved) ? row.previousObserved : null });
+    }
+    result.sort((a, b) => a.at - b.at);
+    if (result.some((row, index) => index > 0 && result[index - 1].until > row.at)) return [];
+    return result;
+}
+
+export async function readStreamrecorderVodTitles(timeline: VodTimeline, signal: AbortSignal, fetchHistory: typeof fetch = fetch): Promise<VodTitleEvent[]> {
+    if (!/^[a-z0-9_]{1,25}$/.test(timeline.login)) return [];
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) controller.abort();
+    const timeout = setTimeout(abort, 4000);
+    try {
+        const response = await fetchHistory('https://streamrecorder.eu/api/streamers/' + timeline.login + '/title-history?started=' + timeline.started, {
+            method: 'GET', credentials: 'omit', redirect: 'error', signal: controller.signal, headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) { await response.body?.cancel(); return []; }
+        const reader = response.body?.getReader();
+        if (!reader) return [];
+        const chunks: Uint8Array[] = [];
+        let bytes = 0;
+        while (true) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            bytes += chunk.value.byteLength;
+            if (bytes > 2 * 1024 * 1024) { await reader.cancel(); return []; }
+            chunks.push(chunk.value);
+        }
+        controller.signal.throwIfAborted();
+        return normalizeStreamrecorderTitles(JSON.parse(Buffer.concat(chunks).toString('utf8')), timeline);
+    } catch { return []; }
+    finally { clearTimeout(timeout); signal.removeEventListener('abort', abort); controller.abort(); }
+}
+
 export class VodTimelineService {
     private current: { id: string; controller: AbortController } | null = null;
 
-    constructor(private readonly fetchMetadata: typeof fetch = fetch) {}
+    constructor(private readonly fetchMetadata: typeof fetch = fetch, private readonly fetchHistory: typeof fetch = fetchMetadata) {}
 
     close(id?: string): void {
         if (!this.current || (id !== undefined && id !== this.current.id)) return;
@@ -182,8 +247,13 @@ export class VodTimelineService {
             if (!result) return null;
             result.chapters = normalizeVodChapters(edges, result.duration);
             if (result.chapters.length) result.chaptersStatus = 'available';
-            result.titleHistory = await readLocalVodTitles(downloadDirectory, result, signal);
-            if (result.titleHistory.length) result.titlesStatus = 'local';
+            clearTimeout(timeout);
+            const [remote, local] = await Promise.all([
+                readStreamrecorderVodTitles(result, signal, this.fetchHistory),
+                readLocalVodTitles(downloadDirectory, result, signal),
+            ]);
+            result.titleHistory = remote.length ? remote : local;
+            result.titlesStatus = remote.length ? 'streamrecorder' : local.length ? 'local' : 'unavailable';
             signal.throwIfAborted();
             return result;
         } finally {

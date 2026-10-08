@@ -57,7 +57,7 @@ export function TitleHistory({id,chapters,history=[],parts=[],started,seconds,on
           })}
         </article>;
       })}
-      {!filtered.length&&<p className="muted">{t(filter==='titles'?'historyNoTitles':'historyEmpty')}</p>}
+      {!filtered.length&&filter!=='titles'&&<p className="muted">{t('historyEmpty')}</p>}
     </div>
   </div>;
 }
