@@ -194,6 +194,13 @@ const RendererAccessibility = (() => {
             if (id === 'clipModal' && (document.fullscreenElement || dialog.querySelector('.player-panel-position, .archive-player.cinema')
                 || (event.target instanceof HTMLElement && ((event.target.matches('.archive-timeline') && dialog.querySelector('.fine-seek-position'))
                     || event.target.closest('.vod-range-markers[data-dragging="true"]'))))) return;
+            const cancelRange = id === 'clipModal' ? dialog.querySelector<HTMLButtonElement>('.vod-omission-row.is-editing [data-action="cancel-range"]') : null;
+            if (cancelRange) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                cancelRange.click();
+                return;
+            }
             event.preventDefault();
             event.stopImmediatePropagation();
             closeTopmostDialog();

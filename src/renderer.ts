@@ -1680,7 +1680,7 @@ function updateClipOmissionState(): void {
     const plan = clipOmissionState?.plan;
     byId('clipDialogDurationLabel').textContent = isEditing ? (currentLanguage === 'de' ? 'Markierter Bereich' : 'Selected range') : UI_TEXT.clips.dialogDuration;
     byId('clipQueueHint').textContent = isEditing
-        ? plan && plan.parts.length ? (currentLanguage === 'de' ? `${formatUiNumber(plan.parts.length)} Dateien · ${formatClipTime(plan.duration)} · Auslassungen angewendet` : `${formatUiNumber(plan.parts.length)} files · ${formatClipTime(plan.duration)} · Exclusions applied`)
+        ? plan && plan.parts.length ? (currentLanguage === 'de' ? `${formatUiNumber(plan.parts.length)} ${plan.parts.length === 1 ? 'Datei' : 'Dateien'} · ${formatClipTime(plan.duration)} · Auslassungen angewendet` : `${formatUiNumber(plan.parts.length)} ${plan.parts.length === 1 ? 'file' : 'files'} · ${formatClipTime(plan.duration)} · Exclusions applied`)
             : (currentLanguage === 'de' ? 'Keine gültige Ausgabe geplant.' : 'No valid output planned.')
         : UI_TEXT.clips.queueHint;
     const start = parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value), end = parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
@@ -1689,7 +1689,7 @@ function updateClipOmissionState(): void {
     byId<HTMLButtonElement>('clipDialogConfirmBtn').disabled = clipQueueInFlight || invalidPart || Boolean(clipOmissionState?.editing)
         || (isEditing ? !plan?.parts.length : !(Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start && end <= clipTotalSeconds));
     if (invalidPart) byId('clipQueueHint').textContent = currentLanguage === 'de' ? 'Startnummer: eine ganze Zahl von 1 bis 100.000 eingeben.' : 'Starting number: enter a whole number from 1 to 100,000.';
-    else if (clipOmissionState?.editing) byId('clipQueueHint').textContent = currentLanguage === 'de' ? 'Bereich zuerst übernehmen oder die Bearbeitung abbrechen.' : 'Apply the range or cancel editing first.';
+    else if (clipOmissionState?.editing) byId('clipQueueHint').textContent = currentLanguage === 'de' ? 'Bereich zuerst bestätigen oder die Bearbeitung abbrechen.' : 'Confirm the range or cancel editing first.';
     else if (clipQueueError) byId('clipQueueHint').textContent = clipQueueError;
 }
 

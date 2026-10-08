@@ -314,8 +314,15 @@ export function ArchivePlayer({ id, userId, parts, live = false, seconds, poster
   useEffect(() => {
     if (!seekRequest || !sourceReady || waitingForCheckpoint || !started || appliedSeek.current === seekRequest) return;
     appliedSeek.current = seekRequest;
+    if (typeof seekRequest.playing === 'boolean') {
+      wanted.current = seekRequest.playing;
+      if (seekRequest.playing) { autoplayBlockedRef.current = false; setAutoplayBlocked(false); }
+      else { videos.current[active.current]?.pause(); setPlaying(false); }
+    }
     const target = seekRequest.title ? titlePosition(seekRequest.title,timeline(),broadcastStarted).seconds : seekRequest.seconds;
     if (target !== null && Number.isFinite(target)) requestSeek(target);
+    if (seekRequest.playing) resume(videos.current[active.current]);
+    if (typeof seekRequest.playing === 'boolean') persistCheckpoint(true, true);
     revealControls();
   }, [seekRequest, sourceReady, waitingForCheckpoint, started]);
   useEffect(() => {
