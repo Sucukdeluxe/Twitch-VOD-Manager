@@ -1646,20 +1646,29 @@ function updateTemplateGuidePreview(): void {
 }
 
 function parseTimeToSeconds(timeStr: string): number {
-    const parts = timeStr.split(':').map((p: string) => parseInt(p, 10) || 0);
-    if (parts.length === 3) {
-        return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    }
-
-    return 0;
+    const parts = timeStr.trim().replace(',', '.').split(':');
+    if (parts.length !== 3 || !/^\d{1,3}$/.test(parts[0]) || !/^[0-5]\d$/.test(parts[1])) return NaN;
+    const seconds = parts[2].split('.');
+    if (seconds.length > 2 || !/^[0-5]\d$/.test(seconds[0]) || (seconds.length === 2 && !/^\d{1,3}$/.test(seconds[1]))) return NaN;
+    return Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]);
 }
 
+function formatClipTime(seconds: number): string {
+    const rounded = Math.round(Math.max(0, seconds) * 1000);
+    const milliseconds = rounded % 1000;
+    return formatSecondsToTime(Math.floor(rounded / 1000)) + (milliseconds ? '.' + String(milliseconds).padStart(3, '0') : '');
+}
+
+let clipPlayer: ReturnType<Window['VodPlayer']['mount']> | null = null;
+
 function openClipDialog(url: string, title: string, date: string, streamer: string, duration: string): void {
-    resetClipPreview();
+    clipPlayer?.destroy();
+    clipPlayer = null;
     clipDialogData = { url, title, date, streamer, duration };
     clipTotalSeconds = parseDurationToSeconds(duration);
 
-    byId('clipDialogTitle').textContent = `${UI_TEXT.clips.dialogTitle} (${duration})`;
+    byId('clipDialogTitle').textContent = UI_TEXT.clips.dialogTitle;
+    byId('clipVodTitle').textContent = `${streamer} · ${title} · ${duration}`;
     byId<HTMLInputElement>('clipStartSlider').max = String(clipTotalSeconds);
     byId<HTMLInputElement>('clipEndSlider').max = String(clipTotalSeconds);
     byId<HTMLInputElement>('clipStartSlider').value = '0';
@@ -1675,52 +1684,34 @@ function openClipDialog(url: string, title: string, date: string, streamer: stri
     updateClipDuration();
     updateFilenameExamples();
     RendererAccessibility.openDialog('clipModal', { onEscape: closeClipDialog });
+    clipPlayer = window.VodPlayer.mount(byId('clipPlayer'), {
+        url, title, date, duration: clipTotalSeconds, language: config.language || 'de', start: 0, end: Math.min(60, clipTotalSeconds),
+        onRange(start, end) {
+            byId<HTMLInputElement>('clipStartTime').value = formatClipTime(start);
+            byId<HTMLInputElement>('clipEndTime').value = formatClipTime(end);
+            byId<HTMLInputElement>('clipStartSlider').value = String(start);
+            byId<HTMLInputElement>('clipEndSlider').value = String(end);
+            updateClipDuration(false);
+        },
+        onDuration(total) {
+            clipTotalSeconds = total;
+            byId<HTMLInputElement>('clipStartSlider').max = String(total);
+            byId<HTMLInputElement>('clipEndSlider').max = String(total);
+            updateClipDuration();
+        },
+    });
 }
 
 function closeClipDialog(): void {
-    resetClipPreview();
+    clipPlayer?.destroy();
+    clipPlayer = null;
     RendererAccessibility.closeDialog('clipModal');
     clipDialogData = null;
 }
 
-let clipPreviewRequestId: string | null = null;
-
-function resetClipPreview(): void {
-    const previousId = clipPreviewRequestId;
-    clipPreviewRequestId = null;
-    const video = byId<HTMLVideoElement>('clipPreviewVideo');
-    video.pause();
-    video.removeAttribute('src');
-    video.load();
-    video.hidden = true;
-    byId('clipPreviewStatus').textContent = UI_TEXT.clips.previewHint;
-    if (previousId) void window.api.cancelVodPreview(previousId).catch(() => undefined);
-}
-
-async function loadClipPreview(boundary: 'start' | 'end'): Promise<void> {
-    if (!clipDialogData || clipTotalSeconds < 1) return;
-    const time = parseTimeToSeconds(byId<HTMLInputElement>(boundary === 'start' ? 'clipStartTime' : 'clipEndTime').value);
-    const start = Math.max(0, Math.min(clipTotalSeconds - 1, boundary === 'end' ? time - 10 : time));
-    const duration = Math.min(15, clipTotalSeconds - start);
-    resetClipPreview();
-    const id = crypto.randomUUID();
-    clipPreviewRequestId = id;
-    byId('clipPreviewStatus').textContent = UI_TEXT.clips.previewLoading;
-    try {
-        const result = await window.api.previewVod({ id, url: clipDialogData.url, start, duration });
-        if (clipPreviewRequestId !== id) return;
-        if (!result) throw new Error('Preview unavailable');
-        const video = byId<HTMLVideoElement>('clipPreviewVideo');
-        video.src = result.sourceUrl;
-        video.hidden = false;
-        video.onerror = () => {
-            if (clipPreviewRequestId === id) byId('clipPreviewStatus').textContent = UI_TEXT.clips.previewFailed;
-        };
-        byId('clipPreviewStatus').textContent = UI_TEXT.clips.previewReady.replace('{time}', formatSecondsToTime(result.start));
-        await video.play().catch(() => undefined);
-    } catch {
-        if (clipPreviewRequestId === id) byId('clipPreviewStatus').textContent = UI_TEXT.clips.previewFailed;
-    }
+function seekClipBoundary(which: 'start' | 'end'): void {
+    const value = parseTimeToSeconds(byId<HTMLInputElement>(which === 'start' ? 'clipStartTime' : 'clipEndTime').value);
+    if (Number.isFinite(value)) clipPlayer?.seek(which === 'end' ? Math.max(0, value - 3) : value);
 }
 
 function updateFromSlider(which: string): void {
@@ -1749,16 +1740,18 @@ function updateFromInput(which: string): void {
     updateClipDuration();
 }
 
-function updateClipDuration(): void {
+function updateClipDuration(syncPlayer: boolean = true): void {
     const startSec = parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value);
     const endSec = parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
     const duration = endSec - startSec;
     const durationDisplay = byId('clipDurationDisplay');
 
-    const isValid = duration > 0;
+    const isValid = Number.isFinite(duration) && startSec >= 0 && duration > 0 && endSec <= clipTotalSeconds;
+    byId<HTMLButtonElement>('clipDialogConfirmBtn').disabled = !isValid;
+    if (isValid && syncPlayer) clipPlayer?.updateRange(startSec, endSec);
     durationDisplay.classList.toggle('invalid', !isValid);
     durationDisplay.textContent = isValid
-        ? formatSecondsToTime(duration)
+        ? formatClipTime(duration)
         : UI_TEXT.clips.invalidDuration;
 
     updateFilenameExamples();

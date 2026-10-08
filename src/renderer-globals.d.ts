@@ -468,8 +468,8 @@ interface ApiBridge {
     getStreamerProfile(login: string, forceRefresh?: boolean): Promise<StreamerProfile | null>;
     getStreamerDisplayNames(logins: string[]): Promise<Record<string, string>>;
     getVodStoryboard(vodId: string): Promise<VodStoryboard | null>;
-    previewVod(request: { id: string; url: string; start: number; duration: number }): Promise<{ sourceUrl: string; start: number; duration: number } | null>;
-    cancelVodPreview(id: string): Promise<void>;
+    openVodPlayback(request: { id: string; url: string }): Promise<{ id: string; sourceUrl: string; quality: string } | null>;
+    closeVodPlayback(id: string): Promise<void>;
     getLiveStatusSnapshot(): Promise<Record<string, boolean>>;
     onLiveStatusBatchUpdate(callback: (info: { changes: Array<{ login: string; isLive: boolean }> }) => void): void;
     searchArchive(filter: {
@@ -540,5 +540,11 @@ interface ApiBridge {
 }
 
 interface Window {
+    VodPlayer: {
+        mount(element: HTMLElement, options: {
+            url: string; title: string; duration: number; date: string; language: string;
+            start: number; end: number; onRange(start: number, end: number): void; onDuration(duration: number): void;
+        }): { destroy(): void; updateRange(start: number, end: number): void; seek(seconds: number): void };
+    };
     api: ApiBridge;
 }

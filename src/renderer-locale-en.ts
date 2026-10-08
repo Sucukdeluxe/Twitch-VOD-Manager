@@ -537,6 +537,12 @@ const UI_TEXT_EN = {
         ctxUnmarkDownloaded: 'Unmark downloaded'
     },
     clips: {
+        selectionTitle: 'Selected range',
+        seekStart: 'Go to start',
+        seekEnd: 'Go to end',
+        filenameOptions: 'File name and continuation',
+        queueHint: 'The selected range will be added to the download queue.',
+        close: 'Close',
         previewStart: 'Preview start',
         previewEnd: 'Preview end',
         previewHint: 'Load a short preview near the selected cut boundary without downloading the complete VOD.',

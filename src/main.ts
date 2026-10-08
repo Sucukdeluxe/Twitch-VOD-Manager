@@ -8,7 +8,7 @@ import type { Transform } from 'node:stream';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
 import { remuxMp4 } from './main/domain/mp4-remux';
-import { VodPreviewService } from './main/domain/vod-preview-service';
+import { VodPlaybackService } from './main/domain/vod-playback-service';
 import { compareUpdateVersions, createUpdateCheckCoordinator, normalizeUpdateVersion, UpdateLifecycle } from './main/updates';
 import { writeFileAtomicSync } from './main/infra/fs-atomic';
 import { parseDuration, formatDuration, formatDurationDashed } from './main/infra/duration';
@@ -901,7 +901,7 @@ const currentCutterProbeProcesses = new Set<ChildProcess>();
 const currentCutterInfoProcesses = new Set<ChildProcess>();
 const currentCutterExportProcesses = new Set<ChildProcess>();
 const currentCutterPreviewProcesses = new Set<ChildProcess>();
-const vodPreviewService = new VodPreviewService();
+const vodPlaybackService = new VodPlaybackService();
 const currentCutterFrameProcesses = new Set<ChildProcess>();
 const currentCutterFrameFiles = new Set<string>();
 // Per-item cancellation lives in `cancelledItemIds`. The previous global
@@ -8476,24 +8476,22 @@ registerTrustedIpcHandler(ipcMain, 'run-preflight', isTrustedRendererEvent, () =
     return await runPreflight(autoFix);
 });
 
-registerTrustedIpcHandler(ipcMain, 'preview-vod', isTrustedRendererEvent, () => Promise.resolve(null), async (_, request: unknown) => {
+registerTrustedIpcHandler(ipcMain, 'open-vod-playback', isTrustedRendererEvent, () => Promise.resolve(null), async (_, request: unknown) => {
     if (appShutdownStarted) return null;
     try {
-        return await vodPreviewService.create(request, {
-            temporaryRoot: app.getPath('temp'),
-            prepare: async () => await ensureStreamlinkInstalled() && await ensureFfmpegInstalled(),
+        return await vodPlaybackService.open(request, {
+            prepare: ensureStreamlinkInstalled,
             streamlink: getStreamlinkCommand,
-            ffmpeg: getFFmpegPath,
-            ffprobe: getFFprobePath,
+            quality: getStreamlinkStreamArg(),
         });
-    } catch (error) {
-        appendDebugLog('vod-preview-failed', { error: String(error) });
+    } catch {
+        appendDebugLog('vod-playback-unavailable');
         return null;
     }
 });
 
-registerTrustedIpcHandler(ipcMain, 'cancel-vod-preview', isTrustedRendererEvent, () => Promise.resolve(), async (_, id: unknown) => {
-    if (typeof id === 'string') await vodPreviewService.cancel(id);
+registerTrustedIpcHandler(ipcMain, 'close-vod-playback', isTrustedRendererEvent, () => Promise.resolve(), async (_, id: unknown) => {
+    if (typeof id === 'string') await vodPlaybackService.close(id);
 });
 
 ipcMain.handle('get-managed-tool-status', async (event) => {
@@ -9149,7 +9147,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
     let frameProcessesExited = frameProcesses.length === 0;
 
     await runResilientSteps([
-        ['vod-preview', () => vodPreviewService.cancel()],
+        ['vod-playback', () => vodPlaybackService.close()],
         ['metadata-cache-timer', () => stopMetadataCacheCleanup()],
         ['metadata-cache-files', () => cleanupMetadataCaches('shutdown')],
         ['auto-update-poller', () => stopAutoUpdatePolling()],

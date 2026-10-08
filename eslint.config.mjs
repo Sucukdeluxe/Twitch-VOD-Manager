@@ -11,6 +11,16 @@ export default [
     ...tseslint.configs.recommended,
     security.configs.recommended,
     {
+        files: ['src/vod-player/**/*.{js,jsx}'],
+        languageOptions: { globals: globals.browser, parserOptions: { ecmaFeatures: { jsx: true } } },
+        rules: {
+            'no-unused-vars': 'off',
+            '@typescript-eslint/no-unused-vars': 'off',
+            'no-empty': ['error', { allowEmptyCatch: true }],
+            'security/detect-object-injection': 'off'
+        }
+    },
+    {
         files: ['src/**/*.ts'],
         rules: {
             '@typescript-eslint/no-explicit-any': 'off',

@@ -191,6 +191,8 @@ const RendererAccessibility = (() => {
         const dialog = document.getElementById(id);
         if (!(dialog instanceof HTMLElement)) return;
         if (event.key === 'Escape') {
+            if (id === 'clipModal' && (document.fullscreenElement || dialog.querySelector('.player-panel-position, .archive-player.cinema')
+                || (event.target instanceof HTMLElement && event.target.matches('.archive-timeline') && dialog.querySelector('.fine-seek-position')))) return;
             event.preventDefault();
             event.stopImmediatePropagation();
             closeTopmostDialog();

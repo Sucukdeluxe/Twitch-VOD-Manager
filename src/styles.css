@@ -250,29 +250,6 @@ body {
     background: var(--bg-card);
 }
 
-.clip-preview {
-    margin-bottom: 18px;
-}
-
-.clip-preview video {
-    width: 100%;
-    max-height: 260px;
-    aspect-ratio: 16 / 9;
-    background: #000;
-    border-radius: 8px;
-    margin-bottom: 10px;
-}
-
-.clip-preview video[hidden] {
-    display: none;
-}
-
-.clip-preview-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-
 .clip-preview-hint {
     color: var(--text-secondary);
     font-size: 12px;

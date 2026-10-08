@@ -25,6 +25,7 @@ let electronProcess;
 let restarting = false;
 let restartTimer;
 let compiler;
+let playerCompiler;
 let outputWatcher;
 
 function run(command, args, options = {}) {
@@ -87,7 +88,7 @@ function stop(child) {
     if (child && !child.killed) child.kill();
 }
 
-const initialCompile = run(process.execPath, [typescriptCli]);
+const initialCompile = run(process.execPath, [resolve(rootDirectory, 'scripts', 'build.mjs')]);
 const initialExitCode = await waitForExit(initialCompile);
 if (initialExitCode !== 0) process.exit(initialExitCode);
 
@@ -107,6 +108,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
         outputWatcher?.close();
         clearTimeout(restartTimer);
         stop(compiler);
+        stop(playerCompiler);
         stop(electronProcess);
         process.exit();
     });
@@ -116,6 +118,7 @@ if (runOnce) {
     process.exitCode = await waitForExit(startElectron());
 } else {
     compiler = run(process.execPath, [typescriptCli, '--watch', '--preserveWatchOutput']);
+    playerCompiler = run(process.execPath, [resolve(rootDirectory, 'scripts', 'build-player.mjs'), '--watch']);
     outputWatcher = watch(outputDirectory, { recursive: true }, (_, fileName) => scheduleRestart(fileName));
     startElectron();
 }

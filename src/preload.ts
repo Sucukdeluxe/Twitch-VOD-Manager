@@ -111,8 +111,8 @@ contextBridge.exposeInMainWorld('api', {
     // Twitch API
     getUserId: (username: string) => ipcRenderer.invoke('get-user-id', username),
     getVODs: (userId: string, forceRefresh: boolean = false) => ipcRenderer.invoke('get-vods', userId, forceRefresh),
-    previewVod: (request: { id: string; url: string; start: number; duration: number }) => ipcRenderer.invoke('preview-vod', request),
-    cancelVodPreview: (id: string) => ipcRenderer.invoke('cancel-vod-preview', id),
+    openVodPlayback: (request: { id: string; url: string }) => ipcRenderer.invoke('open-vod-playback', request),
+    closeVodPlayback: (id: string) => ipcRenderer.invoke('close-vod-playback', id),
 
     // Queue
     getQueue: () => ipcRenderer.invoke('get-queue'),

@@ -537,6 +537,12 @@ const UI_TEXT_DE = {
         ctxUnmarkDownloaded: 'Markierung entfernen'
     },
     clips: {
+        selectionTitle: 'Schnittbereich',
+        seekStart: 'Zum Start',
+        seekEnd: 'Zum Ende',
+        filenameOptions: 'Dateiname und Fortsetzung',
+        queueHint: 'Der gewählte Ausschnitt wird zur Download-Queue hinzugefügt.',
+        close: 'Schließen',
         previewStart: 'Start ansehen',
         previewEnd: 'Ende ansehen',
         previewHint: 'Kurze Vorschau nahe der gewählten Schnittgrenze. Der vollständige VOD wird nicht heruntergeladen.',

@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Add playable previews near the selected start and end in the VOD trim dialog, with bounded downloads, cancellation and temporary-file cleanup.
+- Rebuild VOD trimming around the full Streamrecorder video player, including continuous HLS playback, seeking across the complete VOD, fine seeking, exact timestamps, speed, volume, keyboard controls, cinema mode, fullscreen and picture-in-picture.
+- Add draggable start/end markers, I/O shortcuts, selection playback and precise cut-time inputs in a responsive workspace. Keep filename and continuation settings together in the sidebar.
+- Fetch only the VOD segments needed for playback through a restricted local media endpoint and stop pending requests when the dialog closes.
 - Finalize VOD, trim, live and clip downloads as verified MP4 containers using stream copy, preserving the selected video and audio quality instead of saving raw stream data under an MP4 extension.
 - Explain the difference between downloads without re-encoding and re-encoded local video-cutter exports.
 - Keep project memory, tests, fixtures and test artifacts local; allow build and packaging from checkouts without local test files.
