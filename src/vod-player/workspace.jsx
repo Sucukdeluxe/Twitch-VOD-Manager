@@ -13,9 +13,15 @@ import './chapters.css';
 import './workspace.css';
 
 const labels = {
-  de: { loading: 'VOD wird geöffnet …', failed: 'Das VOD konnte nicht geladen werden. Schnittzeiten können weiterhin eingegeben werden.', retry: 'Erneut laden', range: 'Schnittbereich', timeline: 'Schnittzeitleiste', timelineView: 'Ansicht der Schnittzeitleiste', overview: 'Gesamtes VOD', zoomSelection: 'Auswahl vergrößern', start: 'Start', end: 'Ende', setHere: 'Hier setzen', markStart: 'Start hier setzen', markEnd: 'Ende hier setzen', playRange: 'Auswahl abspielen', stopRange: 'Auswahl anhalten', full: 'Gesamtes VOD wählen', source: 'Streamqualität', keyboard: 'Leertaste / K: Wiedergabe · ← / →: 10 Sekunden · I / O: Schnittmarken · F: Vollbild', active: 'Auswahl wird abgespielt', sourceBest: 'Beste verfügbare Qualität' },
-  en: { loading: 'Opening VOD …', failed: 'Could not load the VOD. You can still enter cut times.', retry: 'Retry', range: 'Selected range', timeline: 'Cut timeline', timelineView: 'Cut timeline view', overview: 'Entire VOD', zoomSelection: 'Zoom to selection', start: 'Start', end: 'End', setHere: 'Set here', markStart: 'Set start here', markEnd: 'Set end here', playRange: 'Play selection', stopRange: 'Pause selection', full: 'Select entire VOD', source: 'Stream quality', keyboard: 'Space / K: playback · ← / →: 10 seconds · I / O: cut markers · F: fullscreen', active: 'Playing selection', sourceBest: 'Best available quality' },
+  de: { loading: 'VOD wird geöffnet …', failed: 'Das VOD konnte nicht geladen werden. Schnittzeiten können weiterhin eingegeben werden.', retry: 'Erneut laden', range: 'Schnittbereich', excerpt: 'Download-Ausschnitt', timeline: 'Schnittzeitleiste', timelineView: 'Ansicht der Schnittzeitleiste', overview: 'Gesamtes VOD', zoomSelection: 'Auswahl vergrößern', start: 'Start', end: 'Ende', setHere: 'Hier setzen', markStart: 'Start hier setzen', markEnd: 'Ende hier setzen', playRange: 'Auswahl abspielen', stopRange: 'Auswahl anhalten', full: 'Gesamtes VOD wählen', source: 'Streamqualität', keyboard: 'Leertaste / K: Wiedergabe · ← / →: 10 Sekunden · I / O: Schnittmarken · F: Vollbild', active: 'Auswahl wird abgespielt', sourceBest: 'Beste verfügbare Qualität' },
+  en: { loading: 'Opening VOD …', failed: 'Could not load the VOD. You can still enter cut times.', retry: 'Retry', range: 'Selected range', excerpt: 'Download excerpt', timeline: 'Cut timeline', timelineView: 'Cut timeline view', overview: 'Entire VOD', zoomSelection: 'Zoom to selection', start: 'Start', end: 'End', setHere: 'Set here', markStart: 'Set start here', markEnd: 'Set end here', playRange: 'Play selection', stopRange: 'Pause selection', full: 'Select entire VOD', source: 'Stream quality', keyboard: 'Space / K: playback · ← / →: 10 seconds · I / O: cut markers · F: fullscreen', active: 'Playing selection', sourceBest: 'Best available quality' },
 };
+
+function boundedOmission(value, selection) {
+  const from = Math.round(selection.start * 1000), to = Math.round(selection.end * 1000);
+  const start = Math.max(from, Math.min(Math.round(value.start * 1000), to - 1));
+  return { start:start / 1000, end:Math.max(start + 1, Math.min(Math.round(value.end * 1000), to)) / 1000 };
+}
 
 function Workspace({ options, bind }) {
   const language = options.language === 'en' ? 'en' : 'de';
@@ -56,7 +62,8 @@ function Workspace({ options, bind }) {
     if (active === omitting) return;
     stopPreview();
     modeRanges.current[omitting ? 'omission' : 'excerpt'] = { ...range };
-    const next = modeRanges.current[active ? 'omission' : 'excerpt'];
+    const saved = modeRanges.current[active ? 'omission' : 'excerpt'];
+    const next = active ? boundedOmission(saved, modeRanges.current.excerpt) : saved;
     setOmitting(active); options.onMode?.(active); changeRange(next.start, next.end);
     setOutputRevision(value => value + 1);
   }
@@ -73,9 +80,10 @@ function Workspace({ options, bind }) {
   }
   function beginRange(index = -1, value) {
     if (editing !== null || (index === -1 && omissions.length >= 256)) return;
+    if (value && (value.end <= selection.start || value.start >= selection.end)) return;
     stopPreview();
     const start = Math.max(selection.start, Math.min(Math.round(position * 1000) / 1000, selection.end - Math.min(60, selection.end - selection.start)));
-    const next = value || (index === -1 ? { start, end:Math.min(selection.end, start + 60) } : omissions[index]);
+    const next = boundedOmission(value || (index === -1 ? { start, end:Math.min(selection.end, start + 60) } : omissions[index]), selection);
     setEditing(index); changeRange(next.start, next.end); setSeekRequest({ seconds:next.start, playing:false });
   }
   function preview() {
@@ -97,10 +105,11 @@ function Workspace({ options, bind }) {
   }, [hoveredChapter, focusedChapter, options.url]);
   const changeRange = useCallback((start, end, interaction) => {
     stopPreview();
+    if (omitting) ({ start, end } = boundedOmission({ start, end }, selection));
     selectedPlayback.current = false; setSelectionPlaying(false);
     setRange({ start, end }); options.onRange(start, end);
     if (interaction?.source === 'pointer' && interaction.boundary === 'start') setSeekRequest({ seconds: start });
-  }, [options]);
+  }, [options, omitting, selection.start, selection.end]);
   const seek = useCallback(seconds => { setSeekRequest({ seconds }); }, []);
   bind.current = { updateRange(start, end) { stopPreview(); setRange({ start, end }); selectedPlayback.current = false; setSelectionPlaying(false); }, seek, refreshOutput() { setOutputRevision(value => value + 1); }, setInputValid };
   useEffect(() => {
@@ -178,7 +187,7 @@ function Workspace({ options, bind }) {
   }}>
     {session ? <ArchivePlayer key={session.id} id={options.url} userId="tvm-local" parts={parts} seconds={range.start}
       broadcastStarted={started} started t={t} chapters={chapters} titleHistory={metadata?.titleHistory || []} vodTitle={metadata?.title || options.title} chapterPreview={chapterPreview} onProgress={() => {}} onError={() => setError(true)}
-      onPosition={onPosition} onTimeline={onTimeline} seekRequest={seekRequest} cutRange={omitting && editing === null ? null : range} onCutRange={changeRange} cutText={text} omissions={visibleOmissions}/>
+      onPosition={onPosition} onTimeline={onTimeline} seekRequest={seekRequest} excerptRange={omitting ? selection : null} cutRange={omitting && editing === null ? null : range} onCutRange={changeRange} cutText={text} omissions={visibleOmissions}/>
       : !error && <div className="vod-player-loading" role="status"><span className="vod-loading-symbol"/>{text.loading}</div>}
     {error && <div className="vod-player-error" role="status"><span>{text.failed}</span><button type="button" className="btn-secondary" onClick={() => setAttempt(value => value + 1)}>{text.retry}</button></div>}
     <div className="vod-player-source"><span>{text.source}: {session?.quality === 'best' ? text.sourceBest : session?.quality || '…'}</span>{selectionPlaying && <span>{text.active}</span>}</div>
@@ -196,7 +205,7 @@ function Workspace({ options, bind }) {
         {metadata.chaptersStatus === 'unavailable' && <p className="vod-history-status">{t('historyNoChapterSource')}</p>}
       </>}
     </div>, document.getElementById('clipHistory'))}
-    {createPortal(<OmissionModes active={omitting} onChange={changeMode} language={language} count={omissions.length}/>, document.getElementById('clipEditMode'))}
+    {createPortal(<OmissionModes active={omitting} onChange={changeMode} language={language} count={omissions.filter(value => value.end > selection.start && value.start < selection.end).length}/>, document.getElementById('clipEditMode'))}
     {createPortal(<OmissionEditor active={omitting} selection={selection} onSelection={() => changeMode(false)} ranges={omissions} plan={editedPlan} range={omitting ? range : modeRanges.current.omission} duration={duration} language={language} editing={editing}
       onNew={() => beginRange()} onEdit={beginRange} onRange={changeRange} onCancel={() => setEditing(null)}
       onApply={value => commitRanges(editing === -1 ? [...omissions, value] : omissions.map((item, index) => index === editing ? value : item))}

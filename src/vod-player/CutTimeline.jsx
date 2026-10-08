@@ -12,7 +12,7 @@ export function cutTime(seconds) {
   return `${timeLabel(Math.floor(value / 1000))}.${String(value % 1000).padStart(3, '0')}`;
 }
 
-export function RangeMarkers({ duration, range, onChange, text, from = 0, to = duration, compact = false, onInteraction, trackWidth = 1000, finePreview, onPreviewChange }) {
+export function RangeMarkers({ duration, range, onChange, text, from = 0, to = duration, compact = false, onInteraction, trackWidth = 1000, finePreview, onPreviewChange, limits }) {
   const track = useRef(null), drag = useRef(null);
   const [preview, setPreview] = useState(null), [dragging, setDragging] = useState(false);
   const alignPreview = useCallback(bounds => {
@@ -38,6 +38,7 @@ export function RangeMarkers({ duration, range, onChange, text, from = 0, to = d
     return () => onPreviewChange?.(false);
   }, [previewOpen, onPreviewChange]);
   const span = Math.max(.001, to - from);
+  const minimum = limits?.start ?? 0, maximum = limits?.end ?? duration;
   const width = Math.max(62, trackWidth);
   const clampCenter = value => Math.max(14, Math.min(width - 14, value));
   const boundary = { start: (range.start - from) / span, end: (range.end - from) / span };
@@ -48,8 +49,8 @@ export function RangeMarkers({ duration, range, onChange, text, from = 0, to = d
   }
   const grip = compact ? { start: startCenter / width, end: endCenter / width } : boundary;
   function update(which, value, source = 'keyboard') {
-    const start = which === 'start' ? Math.max(0, Math.min(value, range.end - .001)) : range.start;
-    const end = which === 'end' ? Math.min(duration, Math.max(value, range.start + .001)) : range.end;
+    const start = which === 'start' ? Math.max(minimum, Math.min(value, range.end - .001)) : range.start;
+    const end = which === 'end' ? Math.min(maximum, Math.max(value, range.start + .001)) : range.end;
     if (start === range.start && end === range.end) return;
     onChange(start, end, { source, boundary: which });
   }
@@ -59,8 +60,8 @@ export function RangeMarkers({ duration, range, onChange, text, from = 0, to = d
     </svg>}
     <span className="vod-range-band" style={{ left: `${(range.start - from) / span * 100}%`, width: `${(range.end - range.start) / span * 100}%` }}/>
     {['start', 'end'].map(which => <button key={which} type="button" role="slider" className={`vod-range-handle is-${which}`}
-      aria-label={text[which]} aria-orientation="horizontal" aria-valuemin={which === 'start' ? 0 : range.start + .001}
-      aria-valuemax={which === 'start' ? range.end - .001 : duration} aria-valuenow={range[which]} aria-valuetext={cutTime(range[which])}
+      aria-label={text[which]} aria-orientation="horizontal" aria-valuemin={which === 'start' ? minimum : range.start + .001}
+      aria-valuemax={which === 'start' ? range.end - .001 : maximum} aria-valuenow={range[which]} aria-valuetext={cutTime(range[which])}
       title={`${text[which]}: ${cutTime(range[which])}`} style={{ left: `${grip[which] * 100}%` }}
       onPointerDown={event => {
         if (event.button !== 0 || !event.isPrimary || drag.current) return;
@@ -79,13 +80,13 @@ export function RangeMarkers({ duration, range, onChange, text, from = 0, to = d
         if (which === 'start' && current.previewContext && (current.fineState.fine || current.fineState.y - event.clientY >= 28)) {
           const boundaries = current.previewContext.chapters.flatMap(chapter => [chapter.start, chapter.end]);
           const next = moveFineSeek(current.fineState, event.clientX, event.clientY, boundaries, event.altKey);
-          const value = Math.max(from, Math.min(to, range.end - .001, next.value));
+          const value = Math.max(from, minimum, Math.min(to, maximum, range.end - .001, next.value));
           current.fineState = { ...next, value, snapped:next.snapped && value === next.value };
           setPreview(current.fineState);
           update(which, value, 'pointer');
         } else {
           const raw = current.value + (event.clientX - current.x) / Math.max(1, current.width) * current.span;
-          const value = Math.max(from, Math.min(to, Math.round(raw * 10) / 10));
+          const value = Math.max(from, minimum, Math.min(to, maximum, Math.round(raw * 10) / 10));
           const anchor = which === 'start' ? Math.max(0, Math.min(value, range.end - .001)) : value;
           current.fineState = { ...current.fineState, value:anchor, anchor, window:fineWindow(anchor, duration) };
           update(which, value, 'pointer');
@@ -101,7 +102,7 @@ export function RangeMarkers({ duration, range, onChange, text, from = 0, to = d
         const delta = { ArrowLeft: -step, ArrowDown: -step, ArrowRight: step, ArrowUp: step }[event.key];
         if (delta === undefined && event.key !== 'Home' && event.key !== 'End') return;
         event.preventDefault(); event.stopPropagation(); onInteraction?.();
-        update(which, delta === undefined ? event.key === 'Home' ? 0 : duration : Math.round((range[which] + delta) * 1000) / 1000);
+        update(which, delta === undefined ? event.key === 'Home' ? minimum : maximum : Math.round((range[which] + delta) * 1000) / 1000);
       }}><span>{which === 'start' ? 'I' : 'O'}</span></button>)}
     {finePreview && <FineSeekPreview {...(drag.current?.previewContext || finePreview)} preview={preview} anchorRef={track} total={duration}
       onAlign={alignPreview} kind="cut-start"/>}

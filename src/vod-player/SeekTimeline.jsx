@@ -1,7 +1,7 @@
 import { OmissionBands } from './OmissionEditor.jsx';
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CategoryColors } from "./CategoryColors.jsx";
-import { RangeMarkers } from "./CutTimeline.jsx";
+import { RangeMarkers, cutTime } from "./CutTimeline.jsx";
 import { FineSeekPreview } from "./FineSeekPreview.jsx";
 import { ChapterRangePreview } from "./ChapterRangePreview.jsx";
 import { chapterAt, chapterGradient } from "./chapters.js";
@@ -14,7 +14,7 @@ import { ViewerHistory } from "./ViewerHistory.jsx";
 import { projectTitles, titleAt, titleMarkers } from "./title-history.js";
 import "./title-history.css";
 
-export function SeekTimeline({ total:availableTotal, position, parts, broadcastStarted, viewerHistory, viewerGaps, titleHistory:availableTitles = [], vodTitle, viewerCurves = [], chapters:availableChapters, endpoint:availableEndpoint, highlightedRange, root, onCommit, onScrub, onPreview, t, cutRange, onCutRange, cutText, omissions = [] }) {
+export function SeekTimeline({ total:availableTotal, position, parts, broadcastStarted, viewerHistory, viewerGaps, titleHistory:availableTitles = [], vodTitle, viewerCurves = [], chapters:availableChapters, endpoint:availableEndpoint, highlightedRange, root, onCommit, onScrub, onPreview, t, excerptRange, cutRange, onCutRange, cutText, omissions = [] }) {
   const locale = t("locale");
   const streamClock = useMemo(() => createStreamClock(locale), [locale]);
   const input = useRef(null), drag = useRef(null), callbacks = useRef(null);
@@ -79,10 +79,15 @@ export function SeekTimeline({ total:availableTotal, position, parts, broadcastS
   return <div className="archive-timeline-track" style={{"--category-track-height":`${Math.round(6 * pixelRatio) / pixelRatio}px`}}>
     <ViewerHistory curves={drag.current?.viewerCurves ?? viewerCurves}/>
     {gradient && <CategoryColors className="category-track" height={6} chapters={chapters} to={total} endpoint={endpoint} fallback="#777e8a"/>}
+    {excerptRange && total > 0 && <span className="vod-excerpt-scope" role="img" aria-label={cutText.excerpt + ": " + cutTime(excerptRange.start) + " – " + cutTime(excerptRange.end)}>
+      <i className="vod-excerpt-dim is-before" style={{ width:Math.max(0, Math.min(100, excerptRange.start / total * 100)) + "%" }}/>
+      <i className="vod-excerpt-dim is-after" style={{ width:Math.max(0, Math.min(100, (total - excerptRange.end) / total * 100)) + "%" }}/>
+      <span className="vod-excerpt-band" style={{ left:excerptRange.start / total * 100 + "%", width:(excerptRange.end - excerptRange.start) / total * 100 + "%" }}/>
+    </span>}
     <OmissionBands ranges={omissions} to={total} compact/>
     <span className="timeline-title-markers" aria-hidden="true">{titleMarkers(titleEvents,total,trackWidth).map(marker=><i key={marker.id} className={marker.count>1?'is-grouped':undefined} style={{left:`${marker.fraction*100}%`}}/>)}</span>
     <ChapterRangePreview range={highlightedRange} suppressed={Boolean(preview)} chapters={chapters} fallback={t("categoryUnavailable")}/>
-    {cutRange && <RangeMarkers compact trackWidth={trackWidth - 14} duration={total} range={cutRange} onChange={onCutRange} text={cutText} onInteraction={cancel} onPreviewChange={setRangePreviewOpen}
+    {cutRange && <RangeMarkers limits={excerptRange} compact trackWidth={trackWidth - 14} duration={total} range={cutRange} onChange={onCutRange} text={cutText} onInteraction={cancel} onPreviewChange={setRangePreviewOpen}
       finePreview={{root, parts:previewParts, broadcastStarted, chapters, endpoint, titleHistory, vodTitle, viewerHistory, viewerGaps, t}}/>}
     <span id={hintId} className="fine-seek-instructions">{t("fineSeekInstructions")}</span>
     <input ref={input} className={`archive-timeline${gradient?" has-chapters":""}`} type="range" aria-label={t("playbackPosition")} aria-describedby={hintId}

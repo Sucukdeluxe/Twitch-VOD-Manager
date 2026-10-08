@@ -287,3 +287,11 @@
 
 .vod-mode-count { min-width:18px; padding:1px 5px; border-radius:4px; background:var(--bg-hover); font-variant-numeric:tabular-nums; }
 .vod-omission-scope { font-variant-numeric:tabular-nums; }
+
+.vod-excerpt-scope { position:absolute; inset:0 7px; pointer-events:none; z-index:2; }
+.vod-excerpt-dim { position:absolute; inset-block:0; background:#0e1116b8; }
+.vod-excerpt-dim.is-before { left:0; }
+.vod-excerpt-dim.is-after { right:0; }
+.vod-excerpt-band { position:absolute; top:4px; bottom:0; border:2px solid #bda5ef; border-top:0; border-radius:0 0 2px 2px; }
+.vod-omission-actions .vod-omission-scope { border-color:#aa8cea; }
+.vod-omission-scope svg { color:#bda5ef; }
