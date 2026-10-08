@@ -44,7 +44,7 @@ function DraftRange({ range, duration, number, language, onRange, onApply, onCan
   </li>;
 }
 
-export function OmissionEditor({ ranges, plan, range, duration, language, editing, onNew, onEdit, onRange, onApply, onCancel, onRemove, onUndo, onRedo, canUndo, canRedo, previewing, onPreview, canPreview, filename, root }) {
+export function OmissionEditor({ active, ranges, plan, range, duration, language, editing, onNew, onEdit, onRange, onApply, onCancel, onRemove, onUndo, onRedo, canUndo, canRedo, previewing, onPreview, canPreview, filename, root }) {
   const t = messages[language], number = value => value.toLocaleString(language);
   const draft = index => <DraftRange key={'draft-'+index} range={range} duration={duration} number={index < 0 ? ranges.length + 1 : index + 1} language={language} onRange={onRange} onApply={onApply} onCancel={onCancel}/>;
   return <section className="vod-omission-editor" aria-label={t.excluded}>
@@ -53,14 +53,14 @@ export function OmissionEditor({ ranges, plan, range, duration, language, editin
       <button type="button" onClick={onPreview} disabled={!canPreview || editing !== null || !plan?.parts.length || !ranges.length} aria-pressed={previewing}>{previewing ? <Square size={14}/> : <Play size={14}/>}<span>{previewing ? t.stop : t.preview}</span></button>
       <div className="vod-omission-history"><button type="button" aria-label={t.undo} title={t.undo} onClick={onUndo} disabled={!canUndo || editing !== null}><Undo2 size={16}/></button><button type="button" aria-label={t.redo} title={t.redo} onClick={onRedo} disabled={!canRedo || editing !== null}><Redo2 size={16}/></button></div>
       <div className="vod-output-summary">{plan ? <><span>{t.removed} <b>{cutTime(plan.omittedDuration)}</b></span><span>{t.remaining} <b>{cutTime(plan.duration)}</b></span></> : <span role="status">{t.invalid}</span>}</div>
-      <PlayerPanel label={t.output} className="vod-output-trigger" root={root} trigger={<><Files size={16}/><span>{plan ? number(plan.parts.length)+' '+(plan.parts.length === 1 ? t.file : t.files) : t.output}</span></>}>
+      {active && <PlayerPanel label={t.output} className="vod-output-trigger" root={root} trigger={<><Files size={16}/><span>{plan ? number(plan.parts.length)+' '+(plan.parts.length === 1 ? t.file : t.files) : t.output}</span></>}>
         {close => <section className="vod-output-preview"><header><strong>{t.output}</strong><button type="button" aria-label={t.close} onClick={close}><X size={17}/></button></header>
           {plan?.parts.length === 0 && <p role="status">{t.noOutput}</p>}
           {!plan && <p role="status">{t.invalid}</p>}
           {Boolean(plan?.skippedNumbers.length) && <p>{t.skipped}: {plan.skippedNumbers.map(number).join(', ')}</p>}
           <ol>{plan?.parts.map(part => <li key={part.number}><div><strong>Part {String(part.number).padStart(2, '0')}</strong><time>{cutTime(part.duration)}</time></div><span className="vod-output-filename">{filename(part)}</span><span className="vod-output-sources">{t.source}: {part.ranges.map(source => cutTime(source.start)+'–'+cutTime(source.end)).join(' · ')}</span></li>)}</ol>
         </section>}
-      </PlayerPanel>
+      </PlayerPanel>}
     </div>
     <ol className="vod-omission-list" aria-label={t.excluded}>
       {editing === -1 && draft(-1)}

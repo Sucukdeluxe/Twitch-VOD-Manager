@@ -27,6 +27,7 @@ function Workspace({ options, bind }) {
   const [session, setSession] = useState(null), [error, setError] = useState(false), [attempt, setAttempt] = useState(0);
   const [duration, setDuration] = useState(options.duration), [position, setPosition] = useState(0);
   const [range, setRange] = useState({ start: options.start, end: options.end });
+  const modeRanges = useRef({ excerpt:{ start:options.start, end:options.end }, omission:{ start:0, end:options.duration } });
   const [omitting, setOmitting] = useState(false), [omissions, setOmissions] = useState([]), [editing, setEditing] = useState(null);
   const partMinutes = Number(options.partMinutes || 60);
   const [outputRevision, setOutputRevision] = useState(0), [, setInputValid] = useState(true);
@@ -49,7 +50,14 @@ function Workspace({ options, bind }) {
     if (previewPlayback.current) setSeekRequest({ playing:false });
     previewPlayback.current = false; setPreviewing(false);
   }
-  function changeMode(active) { if (active === omitting) return; stopPreview(); setOmitting(active); setEditing(null); options.onMode?.(active); setOutputRevision(value => value + 1); }
+  function changeMode(active) {
+    if (active === omitting) return;
+    stopPreview();
+    modeRanges.current[omitting ? 'omission' : 'excerpt'] = { ...range };
+    const next = modeRanges.current[active ? 'omission' : 'excerpt'];
+    setOmitting(active); options.onMode?.(active); changeRange(next.start, next.end);
+    setOutputRevision(value => value + 1);
+  }
   function commitRanges(next) {
     stopPreview(); setUndo(current => [...current.slice(-49), omissions]); setRedo([]); setOmissions(next); setEditing(null);
   }
@@ -119,6 +127,11 @@ function Workspace({ options, bind }) {
       const start = Math.min(current.start, Math.max(0, total - .001));
       const end = Math.abs(current.end - duration) < .0005 ? total : Math.min(total, Math.max(start + .001, current.end));
       rangeRef.current = { start, end };
+      for (const key of ['excerpt', 'omission']) {
+        const saved = modeRanges.current[key];
+        const savedStart = Math.min(saved.start, Math.max(0, total - .001));
+        modeRanges.current[key] = { start:savedStart, end:Math.abs(saved.end - duration) < .0005 ? total : Math.min(total, Math.max(savedStart + .001, saved.end)) };
+      }
       setDuration(total); setRange(rangeRef.current);
       setOmissions(current => current.map(value => ({ start: value.start, end: Math.abs(value.end - duration) < .0005 ? total : Math.min(total, value.end) })).filter(value => value.end > value.start));
       setUndo([]); setRedo([]);
@@ -178,7 +191,7 @@ function Workspace({ options, bind }) {
       </>}
     </div>, document.getElementById('clipHistory'))}
     {createPortal(<OmissionModes active={omitting} onChange={changeMode} language={language}/>, document.getElementById('clipEditMode'))}
-    {omitting && createPortal(<OmissionEditor ranges={omissions} plan={editedPlan} range={range} duration={duration} language={language} editing={editing}
+    {createPortal(<OmissionEditor active={omitting} ranges={omissions} plan={editedPlan} range={omitting ? range : modeRanges.current.omission} duration={duration} language={language} editing={editing}
       onNew={() => beginRange()} onEdit={beginRange} onRange={changeRange} onCancel={() => setEditing(null)}
       onApply={value => commitRanges(editing === -1 ? [...omissions, value] : omissions.map((item, index) => index === editing ? value : item))}
       onRemove={index => commitRanges(omissions.filter((_, at) => at !== index))} onUndo={() => restoreRanges('undo')} onRedo={() => restoreRanges('redo')}
