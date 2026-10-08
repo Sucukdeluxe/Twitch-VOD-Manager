@@ -119,6 +119,9 @@ export function CutTimeline({ duration, range, position, chapters, onChange, onS
   }, [range.start, range.end, duration]);
   const from = view?.from ?? 0, to = view?.to ?? duration, span = Math.max(.001, to - from);
   const ticks = Array.from({ length: 7 }, (_, index) => from + span * index / 6);
+  const visibleChapters = chapters.filter(chapter => chapter.end > from && chapter.start < to).map(chapter => ({
+    chapter, start: (Math.max(from, chapter.start) - from) / span, end: (Math.min(to, chapter.end) - from) / span,
+  }));
   function seekAt(event) {
     const bounds = track.current.getBoundingClientRect();
     onSeek(Math.max(from, Math.min(to, from + (event.clientX - bounds.left) / bounds.width * span)));
@@ -129,10 +132,16 @@ export function CutTimeline({ duration, range, position, chapters, onChange, onS
       <button type="button" aria-pressed={Boolean(view)} onClick={() => setView(selectionView())}><ZoomIn size={15} aria-hidden="true"/>{text.zoomSelection}</button>
     </div>, document.getElementById('clipTimelineView'))}
     <div ref={track} className="vod-selection-track" onClick={seekAt}>
-      <div className="vod-selection-chapters" aria-hidden="true">{chapters.filter(chapter => chapter.end > from && chapter.start < to).map(chapter => {
-        const start = Math.max(from, chapter.start), end = Math.min(to, chapter.end);
-        return <span key={chapter.id} style={{ left: `${(start - from) / span * 100}%`, width: `${(end - start) / span * 100}%`, '--chapter-color': chapterColor(chapter, chapters) }} title={`${chapter.name} · ${cutTime(chapter.start)} – ${cutTime(chapter.end)}`}><span>{chapter.name}</span></span>;
-      })}</div>
+      <div className="vod-selection-chapters" aria-hidden="true">
+        <svg className="vod-selection-colors" viewBox="0 0 1000 38" preserveAspectRatio="none" shapeRendering="crispEdges">
+          {visibleChapters.map(({ chapter, start, end }) => <g key={chapter.id} fill={chapterColor(chapter, chapters)}>
+            <rect x={start * 1000} width={(end - start) * 1000} height="38" fillOpacity=".12"/>
+            <rect x={start * 1000} width={(end - start) * 1000} height="3"/>
+          </g>)}
+        </svg>
+        {visibleChapters.map(({ chapter, start, end }) => <span key={chapter.id} style={{ left: `${start * 100}%`, width: `${(end - start) * 100}%` }}
+          title={`${chapter.name} · ${cutTime(chapter.start)} – ${cutTime(chapter.end)}`}><span>{chapter.name}</span></span>)}
+      </div>
       <RangeMarkers duration={duration} range={range} onChange={onChange} text={text} from={from} to={to} finePreview={finePreview}/>
       {position >= from && position <= to && <i className="vod-selection-playhead" title={cutTime(position)} style={{ left: `${(position - from) / span * 100}%` }}/>} 
     </div>
