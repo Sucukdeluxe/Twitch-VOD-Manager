@@ -115,7 +115,8 @@ function Workspace({ options, bind }) {
       </>}
     </div>, document.getElementById('clipHistory'))}
     {['start', 'end'].map(which => createPortal(<button type="button" className="vod-set-boundary" disabled={!session} aria-label={which === 'start' ? text.markStart : text.markEnd} title={which === 'start' ? text.markStart : text.markEnd} onClick={() => mark(which)}>{text.setHere}</button>, document.getElementById(which === 'start' ? 'clipMarkStart' : 'clipMarkEnd'), which))}
-    {createPortal(<><CutTimeline chapters={chapters} duration={Math.max(.1, duration)} range={range} position={position} onChange={changeRange} onSeek={seek} text={text}/>
+    {createPortal(<><CutTimeline chapters={chapters} duration={Math.max(.1, duration)} range={range} position={position} onChange={changeRange} onSeek={seek} text={text}
+      finePreview={{root:host, parts, broadcastStarted:started, chapters, titleHistory:metadata?.titleHistory || [], vodTitle:metadata?.title || options.title, t}}/>
     <div className="vod-mark-actions" title={text.keyboard}>
       <button type="button" className="btn-secondary" disabled={!session} onClick={playRange}>{selectionPlaying ? text.stopRange : text.playRange}</button>
       <button type="button" className="btn-secondary" onClick={() => changeRange(0, duration)}>{text.full}</button>

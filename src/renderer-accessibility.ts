@@ -192,7 +192,8 @@ const RendererAccessibility = (() => {
         if (!(dialog instanceof HTMLElement)) return;
         if (event.key === 'Escape') {
             if (id === 'clipModal' && (document.fullscreenElement || dialog.querySelector('.player-panel-position, .archive-player.cinema')
-                || (event.target instanceof HTMLElement && event.target.matches('.archive-timeline') && dialog.querySelector('.fine-seek-position')))) return;
+                || (event.target instanceof HTMLElement && ((event.target.matches('.archive-timeline') && dialog.querySelector('.fine-seek-position'))
+                    || event.target.closest('.vod-range-markers[data-dragging="true"]'))))) return;
             event.preventDefault();
             event.stopImmediatePropagation();
             closeTopmostDialog();

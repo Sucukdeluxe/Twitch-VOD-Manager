@@ -1,16 +1,41 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, ZoomIn } from 'lucide-react';
 import { chapterColor } from './chapters.js';
 import { timeLabel } from './timeline.js';
+import { beginFineSeek, alignFineSeek, moveFineSeek, fineWindow } from './fine-seek.js';
+import { FineSeekPreview } from './FineSeekPreview.jsx';
 
 export function cutTime(seconds) {
   const value = Math.round(Math.max(0, seconds) * 1000);
   return `${timeLabel(Math.floor(value / 1000))}.${String(value % 1000).padStart(3, '0')}`;
 }
 
-export function RangeMarkers({ duration, range, onChange, text, from = 0, to = duration, compact = false, onInteraction, trackWidth = 1000 }) {
+export function RangeMarkers({ duration, range, onChange, text, from = 0, to = duration, compact = false, onInteraction, trackWidth = 1000, finePreview, onPreviewChange }) {
   const track = useRef(null), drag = useRef(null);
+  const [preview, setPreview] = useState(null), [dragging, setDragging] = useState(false);
+  const alignPreview = useCallback(bounds => {
+    if (!drag.current?.fineState?.fine) return;
+    const aligned = alignFineSeek(drag.current.fineState, bounds);
+    if (aligned !== drag.current.fineState) { drag.current.fineState = aligned; setPreview(aligned); }
+  }, []);
+  const cancelDrag = useCallback(() => {
+    const current = drag.current;
+    drag.current = null;
+    setDragging(false);
+    setPreview(null);
+    if (current?.element.hasPointerCapture(current.id)) current.element.releasePointerCapture(current.id);
+  }, []);
+  useEffect(() => {
+    window.addEventListener('blur', cancelDrag);
+    window.addEventListener('resize', cancelDrag);
+    return () => { window.removeEventListener('blur', cancelDrag); window.removeEventListener('resize', cancelDrag); };
+  }, [cancelDrag]);
+  const previewOpen = Boolean(preview);
+  useEffect(() => {
+    onPreviewChange?.(previewOpen);
+    return () => onPreviewChange?.(false);
+  }, [previewOpen, onPreviewChange]);
   const span = Math.max(.001, to - from);
   const width = Math.max(62, trackWidth);
   const clampCenter = value => Math.max(14, Math.min(width - 14, value));
@@ -27,7 +52,7 @@ export function RangeMarkers({ duration, range, onChange, text, from = 0, to = d
     if (start === range.start && end === range.end) return;
     onChange(start, end, { source, boundary: which });
   }
-  return <div ref={track} className={`vod-range-markers${compact ? ' is-compact' : ''}`}>
+  return <div ref={track} className={`vod-range-markers${compact ? ' is-compact' : ''}`} data-dragging={dragging || undefined}>
     {compact && <svg className="vod-range-connectors" viewBox="0 0 1000 60" preserveAspectRatio="none" aria-hidden="true">
       {['start', 'end'].map(which => <path key={which} d={`M ${grip[which] * 1000} 24 L ${boundary[which] * 1000} 34 V 54`}/>)}
     </svg>}
@@ -37,31 +62,52 @@ export function RangeMarkers({ duration, range, onChange, text, from = 0, to = d
       aria-valuemax={which === 'start' ? range.end - .001 : duration} aria-valuenow={range[which]} aria-valuetext={cutTime(range[which])}
       title={`${text[which]}: ${cutTime(range[which])}`} style={{ left: `${grip[which] * 100}%` }}
       onPointerDown={event => {
-        if (event.button !== 0 || !event.isPrimary) return;
+        if (event.button !== 0 || !event.isPrimary || drag.current) return;
         event.preventDefault(); event.stopPropagation(); onInteraction?.();
         event.currentTarget.focus({ preventScroll: true }); event.currentTarget.setPointerCapture(event.pointerId);
-        drag.current = { id: event.pointerId, x: event.clientX, value: range[which], span, width: track.current.getBoundingClientRect().width };
+        setDragging(true);
+        const bounds = track.current.getBoundingClientRect();
+        const fineState = { ...beginFineSeek({ x:event.clientX, y:event.clientY, bounds, total:duration, position:range[which], width:480 }),
+          value:range[which], initialValue:range[which], anchor:range[which], window:fineWindow(range[which], duration) };
+        drag.current = { id:event.pointerId, element:event.currentTarget, x:event.clientX, value:range[which], span, width:bounds.width, fineState, previewContext:finePreview };
       }}
       onPointerMove={event => {
         if (drag.current?.id !== event.pointerId) return;
         event.stopPropagation();
-        const value = drag.current.value + (event.clientX - drag.current.x) / Math.max(1, drag.current.width) * drag.current.span;
-        update(which, Math.max(from, Math.min(to, Math.round(value * 10) / 10)), 'pointer');
+        const current = drag.current;
+        if (which === 'start' && current.previewContext && (current.fineState.fine || current.fineState.y - event.clientY >= 28)) {
+          const boundaries = current.previewContext.chapters.flatMap(chapter => [chapter.start, chapter.end]);
+          const next = moveFineSeek(current.fineState, event.clientX, event.clientY, boundaries, event.altKey);
+          const value = Math.max(from, Math.min(to, range.end - .001, next.value));
+          current.fineState = { ...next, value, snapped:next.snapped && value === next.value };
+          setPreview(current.fineState);
+          update(which, value, 'pointer');
+        } else {
+          const raw = current.value + (event.clientX - current.x) / Math.max(1, current.width) * current.span;
+          const value = Math.max(from, Math.min(to, Math.round(raw * 10) / 10));
+          const anchor = which === 'start' ? Math.max(0, Math.min(value, range.end - .001)) : value;
+          current.fineState = { ...current.fineState, value:anchor, anchor, window:fineWindow(anchor, duration) };
+          update(which, value, 'pointer');
+        }
       }}
-      onPointerUp={event => { event.stopPropagation(); drag.current = null; }}
-      onPointerCancel={() => { drag.current = null; }} onLostPointerCapture={() => { drag.current = null; }}
+      onPointerUp={event => { event.stopPropagation(); if (drag.current?.id === event.pointerId) cancelDrag(); }}
+      onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag}
       onClick={event => event.stopPropagation()}
       onKeyDown={event => {
+        if (event.key === 'Escape' && drag.current) { event.preventDefault(); event.stopPropagation(); cancelDrag(); return; }
+        if (drag.current) return;
         const step = event.shiftKey ? 10 : event.altKey ? .001 : .1;
         const delta = { ArrowLeft: -step, ArrowDown: -step, ArrowRight: step, ArrowUp: step }[event.key];
         if (delta === undefined && event.key !== 'Home' && event.key !== 'End') return;
         event.preventDefault(); event.stopPropagation(); onInteraction?.();
         update(which, delta === undefined ? event.key === 'Home' ? 0 : duration : Math.round((range[which] + delta) * 1000) / 1000);
       }}><span>{which === 'start' ? 'I' : 'O'}</span></button>)}
+    {finePreview && <FineSeekPreview {...(drag.current?.previewContext || finePreview)} preview={preview} anchorRef={track} total={duration}
+      onAlign={alignPreview} kind="cut-start"/>}
   </div>;
 }
 
-export function CutTimeline({ duration, range, position, chapters, onChange, onSeek, text }) {
+export function CutTimeline({ duration, range, position, chapters, onChange, onSeek, text, finePreview }) {
   const track = useRef(null);
   const [view, setView] = useState(null);
   function selectionView() {
@@ -87,7 +133,7 @@ export function CutTimeline({ duration, range, position, chapters, onChange, onS
         const start = Math.max(from, chapter.start), end = Math.min(to, chapter.end);
         return <span key={chapter.id} style={{ left: `${(start - from) / span * 100}%`, width: `${(end - start) / span * 100}%`, '--chapter-color': chapterColor(chapter, chapters) }} title={`${chapter.name} · ${cutTime(chapter.start)} – ${cutTime(chapter.end)}`}><span>{chapter.name}</span></span>;
       })}</div>
-      <RangeMarkers duration={duration} range={range} onChange={onChange} text={text} from={from} to={to}/>
+      <RangeMarkers duration={duration} range={range} onChange={onChange} text={text} from={from} to={to} finePreview={finePreview}/>
       {position >= from && position <= to && <i className="vod-selection-playhead" title={cutTime(position)} style={{ left: `${(position - from) / span * 100}%` }}/>} 
     </div>
     <div className="vod-selection-labels" aria-hidden="true">{ticks.map((value, index) => <span key={index}>{view && span < 10 ? cutTime(value) : timeLabel(value)}</span>)}</div>
