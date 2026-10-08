@@ -104,6 +104,8 @@ npm run dev
 
 Renderer changes reload automatically. Main-process changes restart the development application.
 
+On Windows, double-click `scripts/start-development.vbs` to build and open the current development version without a terminal window. It uses the separate development data directories and exits when the application closes.
+
 The VOD trim dialog can load short previews near the selected start and end. Downloads preserve the selected stream quality and are remuxed into MP4 without re-encoding. The local video cutter re-encodes edited exports according to the selected export profile.
 
 Project memory, test sources, fixtures and test artifacts are kept locally and are excluded from the repository. Test commands run the local checks when available and report their absence in a fresh checkout. Build, lint, security scanning and packaging remain available without local tests.

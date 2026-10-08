@@ -18,6 +18,7 @@
     "scripts/public-release-files.json",
     "scripts/run-local-check.mjs",
     "scripts/security-check.js",
+    "scripts/start-development.vbs",
     "src/index.html",
     "src/main.ts",
     "src/main/cutter/index.ts",

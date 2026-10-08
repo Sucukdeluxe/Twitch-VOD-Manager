@@ -28,7 +28,7 @@ let compiler;
 let outputWatcher;
 
 function run(command, args, options = {}) {
-    return spawn(command, args, { cwd: rootDirectory, stdio: 'inherit', ...options });
+    return spawn(command, args, { cwd: rootDirectory, stdio: 'inherit', windowsHide: true, ...options });
 }
 
 function waitForExit(child) {
@@ -40,6 +40,7 @@ function waitForExit(child) {
 
 function startElectron() {
     electronProcess = run(electronExecutable, [`--user-data-dir=${developmentUserData}`, '.'], {
+        windowsHide: false,
         env: {
             ...process.env,
             PROGRAMDATA: developmentProgramData,
