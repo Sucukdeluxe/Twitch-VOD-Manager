@@ -60,7 +60,6 @@ export const playerTexts = {
     "selectChapterRange": "Kategorie zuschneiden",
     "historyLoading": "Verlauf wird geladen …",
     "historyUnavailable": "Der Verlauf konnte nicht geladen werden.",
-    "historyNoTitleSource": "Für dieses VOD liegt keine aufgezeichnete Titelhistorie vor.",
     "historyLocalTitles": "Titelzeiten aus lokalen Aufzeichnungen. Änderungen können vor der Erfassung erfolgt sein.",
     "historyNoChapterSource": "Twitch-Kapitel sind derzeit nicht verfügbar."
   },
@@ -125,7 +124,6 @@ export const playerTexts = {
     "selectChapterRange": "Trim category",
     "historyLoading": "Loading history …",
     "historyUnavailable": "Could not load the history.",
-    "historyNoTitleSource": "No recorded title history is available for this VOD.",
     "historyLocalTitles": "Title times from local recordings. Changes may have occurred before they were observed.",
     "historyNoChapterSource": "Twitch chapters are currently unavailable."
   }
