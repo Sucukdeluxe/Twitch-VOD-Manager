@@ -1878,6 +1878,18 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
     max-width: 760px;
 }
 
+.workspace-main #mergeTab.active {
+    display: flex;
+    flex-direction: column;
+    scrollbar-gutter: stable both-edges;
+}
+
+.merge-container {
+    flex: 0 0 auto;
+    width: 100%;
+    margin: auto;
+}
+
 .cutter-container {
     max-width: none;
 }
