@@ -7,7 +7,7 @@ import { parseTwitchClipId } from './main/twitch/clip-url';
 import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, Notification, type IpcMainInvokeEvent } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { spawn, ChildProcess, execSync, spawnSync } from 'child_process';
+import { spawn, ChildProcess, spawnSync } from 'child_process';
 import { connect as tlsConnect, TLSSocket } from 'node:tls';
 import { pathToFileURL } from 'node:url';
 import type { Transform } from 'node:stream';
@@ -61,7 +61,7 @@ import {
     DEFAULT_PERFORMANCE_MODE,
     type PerformanceMode,
 } from './main/domain/config-normalize';
-import { CustomClip, MergeGroupItem, MergeGroup, QueueItem, DownloadProgress, DownloadResult } from './types';
+import { CustomClip, MergeGroupItem, MergeGroup, QueueItem, DownloadProgress, DownloadResult, AutomationScanResult } from './types';
 import {
     buildVodPreviewFrameUrls,
     parseGraphqlUser,
@@ -2005,9 +2005,9 @@ async function getUserId(username: string): Promise<string | null> {
     });
 }
 
-async function getVODs(userId: string, forceRefresh = false): Promise<VOD[]> {
+async function getVODs(userId: string, forceRefresh = false, requireFresh = false): Promise<VOD[]> {
     const cacheKey = `user:${userId}`;
-    if (!forceRefresh) {
+    if (!forceRefresh && !requireFresh) {
         const cachedVods = getCachedValue(vodListCache, cacheKey);
         if (cachedVods !== undefined) {
             runtimeMetrics.cacheHits += 1;
@@ -2015,8 +2015,8 @@ async function getVODs(userId: string, forceRefresh = false): Promise<VOD[]> {
         }
     }
 
-    return await withInFlightDedup(inFlightVodRequests, cacheKey, async () => {
-        if (!forceRefresh) {
+    return await withInFlightDedup(inFlightVodRequests, requireFresh ? cacheKey + ':fresh' : cacheKey, async () => {
+        if (!forceRefresh && !requireFresh) {
             const refreshedCachedVods = getCachedValue(vodListCache, cacheKey);
             if (refreshedCachedVods !== undefined) {
                 runtimeMetrics.cacheHits += 1;
@@ -2060,6 +2060,7 @@ async function getVODs(userId: string, forceRefresh = false): Promise<VOD[]> {
             vodListCache.delete(cacheKey);
             return [];
         }
+        if (requireFresh) throw new Error('VOD refresh unavailable');
         if (refreshed.source === 'last-good') appendDebugLog('vod-refresh-kept-last-good', { userId });
         return refreshed.value ?? [];
     });
@@ -4298,10 +4299,10 @@ function restartAutoRecordPoller(): void {
     }, 1500);
 }
 
-async function runAutoRecordPoll(): Promise<number> {
-    if (appShutdownStarted || autoRecordPollInFlight) return 0;
+async function runAutoRecordPoll(): Promise<AutomationScanResult> {
+    const result: AutomationScanResult = { addedCount: 0, checkedCount: 0, failedCount: 0, skipped: null };
+    if (appShutdownStarted || autoRecordPollInFlight) return { ...result, skipped: appShutdownStarted ? 'shutdown' : 'busy' };
     autoRecordPollInFlight = true;
-    let triggered = 0;
     try {
         const list = Array.isArray(config.auto_record_streamers) ? [...config.auto_record_streamers] : [];
         for (const streamer of list) {
@@ -4311,12 +4312,14 @@ async function runAutoRecordPoll(): Promise<number> {
 
             const info = await getLiveStreamInfo(streamer);
             if (info === null) {
+                result.failedCount++;
                 // Couldn't determine live state — skip this streamer this
                 // round. Don't update lastLiveState so a subsequent successful
                 // poll can still detect an offline->live transition cleanly.
                 continue;
             }
 
+            result.checkedCount++;
             const wasLive = autoRecordLastLiveState.get(streamer) === true;
             autoRecordLastLiveState.set(streamer, info.isLive);
 
@@ -4347,10 +4350,14 @@ async function runAutoRecordPoll(): Promise<number> {
             };
             const addition = commitQueueItemWithResult(liveItem, false);
             if (!addition.accepted) {
-                if (addition.reason === 'shutting-down' || addition.reason === 'persistence-failed') return triggered;
+                if (addition.reason === 'shutting-down' || addition.reason === 'persistence-failed') {
+                    autoRecordLastLiveState.set(streamer, wasLive);
+                    result.failedCount++;
+                    return result;
+                }
                 continue;
             }
-            triggered++;
+            result.addedCount++;
             appendDebugLog('auto-record-triggered', { streamer, title: liveItem.title });
 
             if (!isDownloading) {
@@ -4358,15 +4365,16 @@ async function runAutoRecordPoll(): Promise<number> {
             }
         }
     } catch (e) {
+        result.failedCount++;
         appendDebugLog('auto-record-poll-failed', String(e));
     } finally {
         autoRecordPollInFlight = false;
         autoRecordLastRunAt = Date.now();
-        autoRecordLastTriggerCount = triggered;
+        autoRecordLastTriggerCount = result.addedCount;
         const seconds = normalizeAutoRecordPollSeconds(config.auto_record_poll_seconds);
         autoRecordNextRunAt = Date.now() + seconds * 1000;
     }
-    return triggered;
+    return result;
 }
 
 // ==========================================
@@ -4418,13 +4426,13 @@ function restartAutoVodPoller(): void {
     }, 5000);
 }
 
-async function runAutoVodPoll(): Promise<number> {
-    if (appShutdownStarted || autoVodPollInFlight) return 0;
+async function runAutoVodPoll(): Promise<AutomationScanResult> {
+    const result: AutomationScanResult = { addedCount: 0, checkedCount: 0, failedCount: 0, skipped: null };
+    if (appShutdownStarted || autoVodPollInFlight) return { ...result, skipped: appShutdownStarted ? 'shutdown' : 'busy' };
     autoVodPollInFlight = true;
-    let queuedCount = 0;
     try {
         const list = Array.isArray(config.auto_vod_download_streamers) ? [...config.auto_vod_download_streamers] : [];
-        if (list.length === 0) return 0;
+        if (list.length === 0) return result;
 
         const maxAgeHours = (() => {
             const n = Number(config.auto_vod_max_age_hours);
@@ -4439,17 +4447,20 @@ async function runAutoVodPoll(): Promise<number> {
 
             const userId = await getUserId(streamer);
             if (!userId) {
+                result.failedCount++;
                 appendDebugLog('auto-vod-skip-no-user', { streamer });
                 continue;
             }
 
             let vods: VOD[] = [];
             try {
-                vods = await getVODs(userId, true);
+                vods = await getVODs(userId, true, true);
             } catch (e) {
+                result.failedCount++;
                 appendDebugLog('auto-vod-list-failed', { streamer, error: String(e) });
                 continue;
             }
+            result.checkedCount++;
             if (!Array.isArray(vods) || vods.length === 0) continue;
 
             for (const vod of vods) {
@@ -4472,10 +4483,10 @@ async function runAutoVodPoll(): Promise<number> {
                 };
                 const addition = commitQueueItemWithResult(queueItem, false);
                 if (!addition.accepted) {
-                    if (addition.reason === 'shutting-down' || addition.reason === 'persistence-failed') return queuedCount;
+                    if (addition.reason === 'shutting-down' || addition.reason === 'persistence-failed') { result.failedCount++; return result; }
                     continue;
                 }
-                queuedCount++;
+                result.addedCount++;
                 appendDebugLog('auto-vod-queued', { streamer, vodId: vod.id, title: queueItem.title });
 
                 if (config.discord_notify_vod_auto_queued) {
@@ -4499,22 +4510,23 @@ async function runAutoVodPoll(): Promise<number> {
             scheduleQueueProcessing();
         }
     } catch (e) {
+        result.failedCount++;
         appendDebugLog('auto-vod-poll-failed', String(e));
     } finally {
         autoVodPollInFlight = false;
         autoVodLastRunAt = Date.now();
-        autoVodLastQueuedCount = queuedCount;
+        autoVodLastQueuedCount = result.addedCount;
         const minutes = (() => {
             const n = Number(config.auto_vod_download_poll_minutes);
             if (!Number.isFinite(n)) return 15;
             return Math.max(5, Math.min(360, Math.floor(n)));
         })();
         autoVodNextRunAt = Date.now() + minutes * 60 * 1000;
-        if (queuedCount > 0 && mainWindow) {
-            mainWindow.webContents.send('auto-vod-scan-completed', { queuedCount });
+        if (result.addedCount > 0 && mainWindow) {
+            mainWindow.webContents.send('auto-vod-scan-completed', { queuedCount: result.addedCount });
         }
     }
-    return queuedCount;
+    return result;
 }
 
 // ==========================================
@@ -7327,14 +7339,14 @@ ipcMain.handle('get-automation-status', () => ({
 
 ipcMain.handle('trigger-auto-record-scan', async (event) => {
     if (!isTrustedRendererEvent(event)) return { triggered: 0 };
-    const triggered = await runAutoRecordPoll();
-    return { triggered };
+    const result = await runAutoRecordPoll();
+    return { ...result, triggered: result.addedCount };
 });
 
 ipcMain.handle('trigger-auto-vod-scan', async (event) => {
     if (!isTrustedRendererEvent(event)) return { queuedCount: 0 };
-    const queuedCount = await runAutoVodPoll();
-    return { queuedCount };
+    const result = await runAutoVodPoll();
+    return { ...result, queuedCount: result.addedCount };
 });
 
 function applyConfigTransition(previousConfig: Config, nextConfig: Config): Config {

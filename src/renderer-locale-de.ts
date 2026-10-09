@@ -458,7 +458,7 @@ const UI_TEXT_DE = {
         autoVodScanQueued: '{count} neue VOD(s) automatisch eingereiht.',
         autoVodScanEmpty: 'Keine neuen VODs gefunden.',
         autoRecordScanTriggered: "{count} Aufnahmen gestartet.",
-        autoRecordScanEmpty: "Kein Streamer live.",
+        autoRecordScanEmpty: "Keine neue Aufnahme gestartet.",
         liveNowTooltip: 'Aktuell live auf Twitch',
         modalCloseAria: 'Dialog schließen',
         sidebarEmpty: "Keine Streamer.",

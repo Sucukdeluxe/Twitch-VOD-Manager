@@ -2081,7 +2081,7 @@ async function restoreWorkspace(): Promise<void> {
     try {
         const session = await window.api.getWorkspaceSession();
         if (session) {
-            clipBatchItems = session.clips;
+            clipBatchItems = session.clips.map(item => ({ ...item, metadataState: item.metadataState === 'loading' ? 'pending' : item.metadataState }));
             byId<HTMLTextAreaElement>('clipUrl').value = clipBatchItems.map(item => item.url).join('\n');
             mergeFiles = session.mergeFiles;
             isMerging = restoredMergeDownload = Boolean(session.mergeActive && !latestMergeFinish);

@@ -52,12 +52,12 @@
 #cutterTab .cutter-timeline-timecode { color: #e6e3ff; font-size: 12px; }
 #cutterTab .cutter-zoom-controls .cutter-icon-button { color: #e7e8ec; width: 28px; height: 28px; }
 #cutterTab .cutter-timeline-scroll { margin: 0 14px; padding: 0; overflow-x: auto; overflow-y: hidden; scrollbar-color: #626773 #101318; }
-#cutterTab .timeline { height: 164px; background: #101318; }
+#cutterTab .timeline { height: 180px; background: #101318; }
 #cutterTab .cutter-ruler { height: 32px; border: 0; }
-#cutterTab .cutter-ruler-tick { color: #b9bec8; font-size: 11px; top: 146px; bottom: auto; }
+#cutterTab .cutter-ruler-tick { color: #b9bec8; font-size: 11px; top: 162px; bottom: auto; }
 #cutterTab .cutter-ruler-tick::after { top: -4px; bottom: auto; }
 #cutterTab .cutter-track { height: 64px; }
-#cutterTab .cutter-audio-track { height: 48px; }
+#cutterTab .cutter-audio-track { height: 64px; }
 #cutterTab #cutterWaveform { position: absolute; top: 0; height: 100%; width: auto; }
 #cutterTab .cutter-track-label { left: 6px; font-size: 10px; padding: 2px 4px; }
 #cutterTab .cutter-outside-shade { top: 32px; bottom: 20px; }
@@ -183,6 +183,5 @@ body:has(#cutterTab.active) :is(#cutterTab, .top-nav, .context-sidebar, .workspa
 #cutterTab .cutter-export-field select:focus { outline:none; border-color:#bda5ef; box-shadow:inset 0 0 0 1px #bda5ef55; }
 #cutterTab .cutter-modes button { display:inline-flex; align-items:center; gap:7px; }
 #cutterTab .cutter-mode-icon { display:inline-grid; place-items:center; width:18px; height:18px; color:#d7c8ff; font-size:16px; line-height:1; }
-#cutterTab .cutter-audio-track { height:64px; }
 #cutterTab #cutterWaveform { image-rendering:crisp-edges; }
 #cutterPreviewPlaceholder { font-size: 14px; }

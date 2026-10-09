@@ -523,8 +523,8 @@ interface ApiBridge {
         autoRecord: { watching: number; lastRunAt: number; nextRunAt: number; lastTriggeredCount: number; inFlight: boolean };
         autoVod: { watching: number; lastRunAt: number; nextRunAt: number; lastQueuedCount: number; inFlight: boolean };
     }>;
-    triggerAutoVodScan(): Promise<{ queuedCount: number }>;
-    triggerAutoRecordScan(): Promise<{ triggered: number }>;
+    triggerAutoVodScan(): Promise<import('./types').AutomationScanResult & { queuedCount: number }>;
+    triggerAutoRecordScan(): Promise<import('./types').AutomationScanResult & { triggered: number }>;
     onAutoVodScanCompleted(callback: (info: { queuedCount: number }) => void): void;
     getVideoInfo(capability: string): Promise<VideoInfo | null>;
     extractFrame(capability: string, timeSeconds: number): Promise<string | null>;

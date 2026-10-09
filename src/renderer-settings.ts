@@ -1,5 +1,5 @@
 let lastRuntimeMetricsOutput = '';
-let lastDebugLogOutput = '';
+let lastDebugLogOutput: string | null = null;
 let settingsAutoSaveBound = false;
 let settingsAutoSaveInFlight = false;
 let pendingSettingsAutoSave = false;
@@ -796,6 +796,7 @@ async function refreshDebugLog(): Promise<void> {
         if (text !== lastDebugLogOutput) { panel.textContent = text; lastDebugLogOutput = text; }
         if (keepAtBottom) panel.scrollTop = panel.scrollHeight;
     } catch {
+        lastDebugLogOutput = null;
         panel.textContent = currentLanguage === 'de' ? 'Protokoll konnte nicht geladen werden.' : 'Could not load the log.';
     } finally { debugRefreshInFlight = false; }
 }
@@ -1396,16 +1397,12 @@ function changeTheme(theme: string): void {
     void flushSettingsAutoSave();
 }
 
-function formatRelativeTime(ms: number, future: boolean): string {
-    if (!Number.isFinite(ms) || ms <= 0) {
-        return future ? UI_TEXT.streamers.autoVodScanEmpty || '' : '-';
-    }
-    const seconds = Math.max(0, Math.floor(ms / 1000));
-    if (seconds < 60) return `${seconds}s`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m`;
-    const hours = Math.floor(minutes / 60);
-    return `${hours}h ${minutes % 60}m`;
+function formatRelativeTime(ms: number): string {
+    const seconds = Math.max(0, Math.ceil(ms / 1000));
+    if (seconds < 60) return `${seconds} s`;
+    const minutes = Math.ceil(seconds / 60);
+    if (minutes < 60) return `${minutes} min`;
+    return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
 async function refreshAutomationStatusLine(): Promise<void> {
@@ -1415,37 +1412,49 @@ async function refreshAutomationStatusLine(): Promise<void> {
     try {
         const status = await window.api.getAutomationStatus();
         const now = Date.now();
+        const de = currentLanguage === 'de';
         const parts: string[] = [];
-
-        if (status.autoVod.watching > 0) {
-            const lastAgo = status.autoVod.lastRunAt > 0 ? formatRelativeTime(now - status.autoVod.lastRunAt, false) : '-';
-            const nextIn = status.autoVod.nextRunAt > now ? formatRelativeTime(status.autoVod.nextRunAt - now, true) : '-';
-            parts.push(`VOD: ${status.autoVod.watching} watched · last ${lastAgo} ago · next in ${nextIn} · last run +${status.autoVod.lastQueuedCount}`);
+        for (const [label, scan] of [['VODs', status.autoVod], [de ? 'Aufnahmen' : 'Recordings', status.autoRecord]] as const) {
+            if (scan.watching <= 0) continue;
+            const count = formatUiNumber(scan.watching);
+            const channels = de ? (scan.watching === 1 ? 'Kanal' : 'Kanäle') : (scan.watching === 1 ? 'channel' : 'channels');
+            const next = scan.inFlight ? (de ? 'Prüfung läuft' : 'Checking')
+                : scan.nextRunAt > now ? (de ? 'nächste Prüfung in ' : 'next check in ') + formatRelativeTime(scan.nextRunAt - now)
+                    : (de ? 'Prüfung ausstehend' : 'Check pending');
+            parts.push(`${label}: ${count} ${channels} · ${next}`);
         }
-        if (status.autoRecord.watching > 0) {
-            const lastAgo = status.autoRecord.lastRunAt > 0 ? formatRelativeTime(now - status.autoRecord.lastRunAt, false) : '-';
-            const nextIn = status.autoRecord.nextRunAt > now ? formatRelativeTime(status.autoRecord.nextRunAt - now, true) : '-';
-            parts.push(`REC: ${status.autoRecord.watching} watched · last ${lastAgo} ago · next in ${nextIn}`);
-        }
-        if (parts.length === 0) parts.push('No streamers watched.');
-        lineEl.textContent = parts.join(' · ');
-    } catch (_) {
-        lineEl.textContent = '';
+        lineEl.textContent = parts.join(' · ') || (de ? 'Keine Kanäle ausgewählt.' : 'No channels selected.');
+    } catch {
+        lineEl.textContent = currentLanguage === 'de' ? 'Status nicht verfügbar.' : 'Status unavailable.';
     } finally { automationRefreshInFlight = false; }
 }
 
+function showAutomationScanResult(result: import('./types').AutomationScanResult, addedText: string, emptyText: string): void {
+    const de = currentLanguage === 'de';
+    if (result.skipped) {
+        showAppToast(result.skipped === 'busy'
+            ? (de ? 'Prüfung läuft bereits.' : 'A check is already running.')
+            : (de ? 'Prüfung nicht verfügbar.' : 'Check unavailable.'), 'warn');
+    } else if (result.failedCount > 0) {
+        const partial = result.checkedCount > 0 || result.addedCount > 0;
+        const failure = partial ? (de ? 'Prüfung unvollständig.' : 'Check incomplete.')
+            : (de ? 'Prüfung fehlgeschlagen.' : 'Check failed.');
+        showAppToast(result.addedCount > 0 ? addedText + ' ' + failure : failure, 'warn');
+    } else if (result.checkedCount === 0) {
+        showAppToast(de ? 'Keine Kanäle ausgewählt.' : 'No channels selected.', 'info');
+    } else {
+        showAppToast(result.addedCount > 0 ? addedText : emptyText, 'info');
+    }
+}
+
 async function triggerManualAutoVodScan(): Promise<void> {
-    const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
     const btn = document.getElementById('btnAutoVodScanNow') as HTMLButtonElement | null;
     if (btn) btn.disabled = true;
     try {
         const result = await window.api.triggerAutoVodScan();
-        if (toast) {
-            const tmpl = result.queuedCount > 0
-                ? UI_TEXT.streamers.autoVodScanQueued
-                : UI_TEXT.streamers.autoVodScanEmpty;
-            toast((tmpl || '').replace('{count}', String(result.queuedCount)), 'info');
-        }
+        showAutomationScanResult(result, UI_TEXT.streamers.autoVodScanQueued.replace('{count}', formatUiNumber(result.queuedCount)), UI_TEXT.streamers.autoVodScanEmpty);
+    } catch {
+        showAppToast(currentLanguage === 'de' ? 'Prüfung fehlgeschlagen.' : 'Check failed.', 'warn');
     } finally {
         if (btn) btn.disabled = false;
         void refreshAutomationStatusLine();
@@ -1453,17 +1462,13 @@ async function triggerManualAutoVodScan(): Promise<void> {
 }
 
 async function triggerManualAutoRecordScan(): Promise<void> {
-    const toast = (window as unknown as { showAppToast?: (msg: string, kind?: 'info' | 'warn') => void }).showAppToast;
     const btn = document.getElementById('btnAutoRecordScanNow') as HTMLButtonElement | null;
     if (btn) btn.disabled = true;
     try {
         const result = await window.api.triggerAutoRecordScan();
-        if (toast) {
-            const tmpl = result.triggered > 0
-                ? UI_TEXT.streamers.autoRecordScanTriggered
-                : UI_TEXT.streamers.autoRecordScanEmpty;
-            toast((tmpl || '').replace('{count}', String(result.triggered)), 'info');
-        }
+        showAutomationScanResult(result, UI_TEXT.streamers.autoRecordScanTriggered.replace('{count}', formatUiNumber(result.triggered)), UI_TEXT.streamers.autoRecordScanEmpty);
+    } catch {
+        showAppToast(currentLanguage === 'de' ? 'Prüfung fehlgeschlagen.' : 'Check failed.', 'warn');
     } finally {
         if (btn) btn.disabled = false;
         void refreshAutomationStatusLine();

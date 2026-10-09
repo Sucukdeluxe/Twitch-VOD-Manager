@@ -91,3 +91,10 @@ export interface DownloadResult {
 
 export type QueueAdditionRejectionReason = import('./main/domain/queue-addition').QueueAdditionRejectionReason;
 export type QueueAdditionResult = import('./main/domain/queue-addition').QueueAdditionResult<QueueItem>;
+
+export interface AutomationScanResult {
+    addedCount: number;
+    checkedCount: number;
+    failedCount: number;
+    skipped: 'busy' | 'shutdown' | null;
+}
