@@ -44,10 +44,13 @@
     "test:e2e:release": "npm run build && npm run test:unit && npm run test:installer-contract && npm run test:managed-tools-contract && npm run test:cutter-matrix-contract && npm run test:live-integration-contract && npm run test:capability-contract && npm run test:e2e:update-logic && npm run test:merge-split && npm run test:e2e:public-release && npm run test:e2e:workspace-ui && node scripts/run-local-check.mjs scripts/smoke-test-cutter.js && node scripts/run-local-check.mjs scripts/smoke-test-cutter-media-matrix.js && npm run test:e2e:isolation && npm run test:e2e && npm run test:e2e:guide && npm run test:e2e:full && npm run test:e2e:settings-autosave",
     "test:e2e:stress": "npm run test:e2e:release && npm run test:e2e:release && npm run test:e2e:release",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
-    "dist:win": "npm run test:e2e:release && electron-builder --win",
-    "dist:ci": "electron-builder --win nsis",
-    "test:merge-split": "node scripts/run-local-check.mjs scripts/smoke-test-merge-split-logic.js"
+    "dist": "npm run release:build",
+    "dist:win": "npm run release:build",
+    "dist:ci": "node scripts/package-release.mjs --ci-candidate",
+    "test:merge-split": "node scripts/run-local-check.mjs scripts/smoke-test-merge-split-logic.js",
+    "release:verify": "node scripts/release-gate.mjs",
+    "release:package": "node scripts/package-release.mjs",
+    "release:build": "npm run release:verify && npm run release:package"
   },
   "dependencies": {
     "axios": "^1.16.1",

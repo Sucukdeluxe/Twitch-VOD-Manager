@@ -168,6 +168,9 @@
     "src/main/infra/download-history-schema.ts",
     "src/main/twitch/clip-info.ts",
     "src/main/twitch/clip-url.ts",
-    "src/workspace-insights.css"
+    "src/workspace-insights.css",
+    "scripts/release-tools.mjs",
+    "scripts/release-gate.mjs",
+    "scripts/package-release.mjs"
   ]
 }
