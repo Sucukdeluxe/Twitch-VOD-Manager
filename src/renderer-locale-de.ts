@@ -181,7 +181,7 @@ const UI_TEXT_DE = {
         archiveSearchBtn: "Suchen",
         archiveSearching: "Archiv wird durchsucht…",
         archiveSummary: "{matchCount} Aufnahmen",
-        archiveSummaryTruncated: "{shown} von {matchCount} Aufnahmen · Suche eingrenzen",
+        archiveSummaryTruncated: "{first}–{last} von {matchCount} Aufnahmen",
         archiveNoMatches: "Keine Treffer.",
         archiveNoRoot: "Download-Ordner nicht erreichbar.",
         archiveSearchPlaceholder: "Dateiname oder Streamer",
@@ -477,8 +477,8 @@ const UI_TEXT_DE = {
         noResultsText: 'Dieser Streamer hat keine VODs.',
         untitled: 'Unbenanntes VOD',
         views: 'Aufrufe',
-        addQueue: '+ Warteschlange',
-        trimButton: 'VOD zuschneiden',
+        addQueue: "+ Queue",
+        trimButton: "Zuschneiden",
         filterPlaceholder: "Titel filtern…",
         filterAria: 'VOD-Titel filtern',
         filterClearTitle: 'Filter löschen (Esc)',
@@ -529,6 +529,7 @@ const UI_TEXT_DE = {
         ctxUnmarkDownloaded: 'Markierung entfernen'
     },
     clips: {
+        notAvailable: "Nicht verfügbar",
         listEmpty: "Keine Clips.",
         batchHint: "Ein Link pro Zeile.",
         linksLabel: "Twitch-Links",
@@ -693,6 +694,7 @@ const UI_TEXT_DE = {
         discardConfirm: 'Verwerfen und öffnen'
     },
     merge: {
+        selectFailed: "Videos konnten nicht geöffnet werden.",
         empty: 'Keine Videos ausgewählt',
         merging: 'Zusammenfügen...',
         merge: 'Zusammenfügen',

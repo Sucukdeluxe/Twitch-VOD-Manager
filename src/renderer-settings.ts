@@ -7,6 +7,26 @@ let settingsAutoSaveTimer: number | null = null;
 let pendingCredentialsReconnect = false;
 let lastPersistedSettingsFingerprint = '';
 let settingsInputGeneration = 0;
+let settingsSaveFailed = false;
+
+function renderSettingsSaveStatus(): void {
+    const notice = document.getElementById('settingsSaveNotice');
+    if (!notice) return;
+    notice.hidden = !settingsSaveFailed;
+    byId('settingsSaveMessage').textContent = currentLanguage === 'de' ? 'Änderungen nicht gespeichert.' : 'Changes were not saved.';
+    byId('settingsSaveRetry').textContent = currentLanguage === 'de' ? 'Erneut speichern' : 'Retry saving';
+}
+
+function setSettingsSaveFailed(failed: boolean): void {
+    if (failed && !settingsSaveFailed) showAppToast(currentLanguage === 'de' ? 'Einstellungen konnten nicht gespeichert werden.' : 'Settings could not be saved.', 'warn');
+    settingsSaveFailed = failed;
+    renderSettingsSaveStatus();
+}
+
+async function reconnectSettings(): Promise<void> {
+    try { await connect(); }
+    catch { updateStatus(UI_TEXT.status.connectFailedPublic, false, 'public'); }
+}
 let lastPreflightResult: PreflightResult | null = null;
 let preflightFailed = false;
 let preflightGeneration = 0;
@@ -49,11 +69,7 @@ async function connect(): Promise<void> {
 }
 
 function formatBytesForMetrics(bytes: number): string {
-    const value = Math.max(0, Number(bytes) || 0);
-    if (value < 1024) return `${value.toFixed(0)} B`;
-    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-    if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    return formatBytes(bytes);
 }
 
 function formatRuntimeMetricSummary(template: string, values: Record<string, string | number>): string {
@@ -298,6 +314,7 @@ const SETTINGS_GROUPS: Record<string, { de: string; en: string }> = {
 };
 
 function refreshSettingsGroupLabels(): void {
+    renderSettingsSaveStatus();
     const language = currentLanguage === 'en' ? 'en' : 'de';
     const pane = byId<HTMLElement>('settingsTab').dataset.settingsPane || 'general';
     const labels = SETTINGS_GROUPS[pane] || SETTINGS_GROUPS.general;
@@ -332,8 +349,9 @@ function setSettingsPane(pane: string, source?: HTMLElement): void {
 }
 
 function changeLanguage(lang: string): void {
-    const normalized = applyRendererLanguage(lang);
-    void window.api.saveConfig({ language: normalized });
+    applyRendererLanguage(lang);
+    markSettingsInputChanged();
+    void flushSettingsAutoSave();
 }
 
 function applyRendererLanguage(lang: string): LanguageCode {
@@ -915,6 +933,8 @@ function collectDownloadSettingsPayload(): Partial<AppConfig> {
     );
     updateDownloadPolicyValidation(parsedPolicy.error);
     return {
+        language: byId<HTMLSelectElement>('languageSelect').value as LanguageCode,
+        theme: byId<HTMLSelectElement>('themeSelect').value,
         sidebar_split_view: byId<HTMLInputElement>('sidebarSplitViewToggle').checked,
         download_mode: byId<HTMLSelectElement>('downloadMode').value as 'parts' | 'full',
         part_minutes: parseInt(byId<HTMLInputElement>('partMinutes').value, 10) || 120,
@@ -977,6 +997,8 @@ function collectAutoSavePayload(): Partial<AppConfig> {
 function getSettingsFingerprint(payload: Partial<AppConfig>): string {
     const effective = { ...config, ...payload };
     return JSON.stringify([
+        effective.language ?? currentLanguage,
+        effective.theme ?? 'twitch',
         effective.client_id ?? '',
         byId<HTMLInputElement>('clientSecret').value,
         effective.sidebar_split_view !== false,
@@ -1049,7 +1071,7 @@ function syncSettingsFormFromConfig(syncSecrets = true): void {
     byId<HTMLInputElement>('autoCleanupDays').value = String((config.auto_cleanup_days as number) || 30);
     byId<HTMLSelectElement>('autoCleanupTarget').value = (config.auto_cleanup_target as string) === 'all' ? 'all' : 'live_only';
     byId<HTMLSelectElement>('autoCleanupAction').value = (config.auto_cleanup_action as string) === 'delete' ? 'delete' : 'archive';
-    byId<HTMLInputElement>('streamlinkQuality').value = 'Source';
+    byId('streamlinkQuality').textContent = 'Source';
     byId<HTMLInputElement>('metadataCacheMinutes').value = String((config.metadata_cache_minutes as number) || 10);
     byId<HTMLInputElement>('vodFilenameTemplate').value = (config.filename_template_vod as string) || '{title}.mp4';
     byId<HTMLInputElement>('partsFilenameTemplate').value = (config.filename_template_parts as string) || '{date}_Part{part_padded}.mp4';
@@ -1082,13 +1104,21 @@ async function persistSettings(options: {
         Object.assign(payload, templatePayload);
     }
 
-    await persistSecretInputs();
-    config = await window.api.saveConfig(payload);
-    syncSettingsFormFromConfig(false);
+    const inputGeneration = settingsInputGeneration;
+    try {
+        await persistSecretInputs();
+        config = await window.api.saveConfig(payload);
+        setSettingsSaveFailed(false);
+    } catch {
+        setSettingsSaveFailed(true);
+        return false;
+    }
+    if (settingsInputGeneration === inputGeneration) syncSettingsFormFromConfig(false);
+    else scheduleSettingsAutoSave(0);
     pendingCredentialsReconnect = false;
 
     if (options.reconnectAfterSave) {
-        await connect();
+        await reconnectSettings();
     }
 
     if (canRunSettingsAutoRefresh()) {
@@ -1111,8 +1141,9 @@ async function flushSettingsAutoSave(reconnectAfterSave = false): Promise<void> 
     if (fingerprint === lastPersistedSettingsFingerprint) {
         if (reconnectAfterSave && pendingCredentialsReconnect) {
             pendingCredentialsReconnect = false;
-            await connect();
+            await reconnectSettings();
         }
+        setSettingsSaveFailed(false);
         return;
     }
 
@@ -1122,22 +1153,29 @@ async function flushSettingsAutoSave(reconnectAfterSave = false): Promise<void> 
     }
 
     settingsAutoSaveInFlight = true;
+    let saved = false;
     try {
         await persistSecretInputs();
         config = await window.api.saveConfig(payload);
+        saved = true;
+        setSettingsSaveFailed(false);
         if (settingsInputGeneration === inputGeneration) {
             lastPersistedSettingsFingerprint = getSettingsFingerprint({});
         } else {
+            lastPersistedSettingsFingerprint = '';
             pendingSettingsAutoSave = true;
         }
         if (reconnectAfterSave && pendingCredentialsReconnect) {
             pendingCredentialsReconnect = false;
-            await connect();
+            await reconnectSettings();
         }
+    } catch {
+        setSettingsSaveFailed(true);
     } finally {
         settingsAutoSaveInFlight = false;
-        if (pendingSettingsAutoSave) {
-            pendingSettingsAutoSave = false;
+        const retry = pendingSettingsAutoSave && (saved || settingsInputGeneration !== inputGeneration);
+        pendingSettingsAutoSave = false;
+        if (retry) {
             void flushSettingsAutoSave(pendingCredentialsReconnect);
         }
     }
@@ -1185,8 +1223,7 @@ function initSettingsAutoSave(): void {
         'discordNotifyVodAutoQueuedToggle',
         'autoCleanupEnabledToggle',
         'autoCleanupTarget',
-        'autoCleanupAction',
-        'streamlinkQuality'
+        'autoCleanupAction'
     ] as const;
 
     const debouncedSaveIds = [
@@ -1287,13 +1324,16 @@ async function saveSettings(): Promise<void> {
 }
 
 async function selectFolder(): Promise<void> {
-    const folder = await window.api.selectFolder();
-    if (!folder) {
+    let folder: (FileCapabilityReference & { displayPath: string }) | null;
+    try {
+        folder = await window.api.selectFolder();
+        if (!folder) return;
+        config = await window.api.saveConfig({ download_path: folder.displayPath }, folder.token);
+        byId<HTMLInputElement>('downloadPath').value = folder.displayPath;
+    } catch {
+        showAppToast(currentLanguage === 'de' ? 'Download-Ordner konnte nicht gespeichert werden.' : 'Download folder could not be saved.', 'warn');
         return;
     }
-
-    byId<HTMLInputElement>('downloadPath').value = folder.displayPath;
-    config = await window.api.saveConfig({ download_path: folder.displayPath }, folder.token);
     invalidatePreflightResult();
 
     // Warn-only validation — the user explicitly chose this folder, so don't
@@ -1344,7 +1384,8 @@ function selectWorkspaceTheme(theme: string): void {
 
 function changeTheme(theme: string): void {
     applyRendererTheme(theme);
-    void window.api.saveConfig({ theme });
+    markSettingsInputChanged();
+    void flushSettingsAutoSave();
 }
 
 function formatRelativeTime(ms: number, future: boolean): string {

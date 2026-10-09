@@ -1694,7 +1694,7 @@ input[type="range"] {
 
 .vod-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
     gap: 12px;
 }
 
@@ -1753,16 +1753,19 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
 }
 
 .vod-title {
-    display: block;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     min-width: 0;
-    margin-bottom: 7px;
+    height: 2.8em;
+    margin-bottom: 8px;
     overflow: hidden;
     color: var(--workspace-text);
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 600;
     line-height: 1.4;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .vod-meta {
@@ -1781,7 +1784,7 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
     gap: 5px;
     overflow: hidden;
     color: var(--workspace-text-muted);
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
     text-overflow: ellipsis;
 }
@@ -1888,7 +1891,25 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
     flex: 0 0 auto;
     width: 100%;
     margin: auto;
+    padding: 22px;
+    border: 1px solid var(--workspace-border);
+    border-radius: 12px;
+    background: var(--workspace-panel-raised);
 }
+
+.merge-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 18px; }
+.merge-header h3 { margin: 0; font-size: 18px; }
+#mergeTab button, #mergeTab .file-name, #mergeTab .empty-state p { font-size: 14px; }
+#mergeTab .file-list { height: clamp(180px, 38vh, 440px); min-height: 180px; padding: 8px; overflow-y: auto; scrollbar-gutter: stable; margin-bottom: 18px; }
+#mergeTab .file-order { flex: 0 0 32px; width: 32px; height: 32px; border-radius: 6px; color: var(--workspace-primary-text); background: var(--workspace-primary); font-variant-numeric: tabular-nums; }
+#mergeTab .file-item { gap: 12px; padding: 10px; }
+#mergeTab .file-item:last-child { margin-bottom: 0; }
+#mergeTab .file-actions { flex-shrink: 0; gap: 4px; }
+#mergeTab .file-btn { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 5px; }
+#mergeTab .file-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#mergeTab .file-btn:hover:not(:disabled), #mergeTab .file-btn:focus-visible { background: var(--workspace-control-hover); box-shadow: none; }
+#mergeTab .file-btn:disabled { opacity: .4; cursor: default; }
+#mergeTab .merge-actions { justify-content: flex-end; }
 
 .cutter-container {
     max-width: none;

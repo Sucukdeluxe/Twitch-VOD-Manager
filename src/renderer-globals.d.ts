@@ -390,6 +390,7 @@ interface ArchiveSearchHit {
     eventsPath: string | null;
 }
 interface ArchiveSearchResult {
+    offset?: number;
     streamers?: string[];
     totalScanned: number;
     matchCount: number;
@@ -473,7 +474,7 @@ interface ApiBridge {
     pauseDownload(): Promise<boolean>;
     cancelDownload(): Promise<boolean>;
     isDownloading(): Promise<boolean>;
-    downloadClip(url: string): Promise<{ success: boolean; error?: string }>;
+    downloadClip(url: string): Promise<{ success: boolean; error?: string; filename?: string }>;
     getClipInfo(url: string): Promise<{ title: string; broadcaster_name: string } | null>;
     selectFolder(): Promise<(FileCapabilityReference & { displayPath: string }) | null>;
     selectVideoFile(): Promise<FileCapabilityReference | null>;
@@ -503,6 +504,8 @@ interface ApiBridge {
         untilMs?: number | null;
         sort?: 'date_desc' | 'date_asc' | 'size_desc' | 'size_asc' | 'name_asc';
         limit?: number;
+        offset?: number;
+        refresh?: boolean;
     }): Promise<ArchiveSearchResult>;
     runStorageCleanup(options?: { dryRun?: boolean }): Promise<CleanupReport>;
     readChatFile(filePath: string, signal?: AbortSignal): Promise<{ success: boolean; error?: string; cancelled?: boolean; format?: 'replay' | 'live'; messages?: Array<Record<string, unknown>>; truncated?: boolean; total?: number }>;

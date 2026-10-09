@@ -863,16 +863,11 @@ function closeTopmostOpenModal(): boolean {
 }
 
 function formatBytesRenderer(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    return formatBytes(bytes);
 }
 
 function formatSpeedRenderer(bytesPerSec: number): string {
-    if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
-    if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
-    return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+    return formatBytes(bytesPerSec) + '/s';
 }
 
 function updateStatusBarQueueSummary(): void {
@@ -1996,6 +1991,7 @@ interface ClipBatchItem {
     streamer: string;
     metadataState: ClipMetadataState;
     state: ClipBatchState;
+    filename?: string;
     error?: string;
 }
 interface ClipBatchRow {
@@ -2005,6 +2001,9 @@ interface ClipBatchRow {
     streamer: HTMLSpanElement;
     status: HTMLSpanElement;
     symbol: HTMLSpanElement;
+    open: HTMLButtonElement;
+    folder: HTMLButtonElement;
+    remove: HTMLButtonElement;
     symbolKind?: string;
 }
 let clipDownloadInFlight = false;
@@ -2014,6 +2013,70 @@ let clipBatchLimitExceeded = false;
 let clipNoticeTimer: ReturnType<typeof setTimeout> | undefined;
 const clipMetadataRequests = new Set<string>();
 const clipBatchRows = new Map<string, ClipBatchRow>();
+let clipBatchRenderFrame: number | null = null;
+
+function scheduleClipBatchRender(): void {
+    if (clipBatchRenderFrame !== null) return;
+    clipBatchRenderFrame = requestAnimationFrame(() => { clipBatchRenderFrame = null; renderClipBatch(); });
+}
+
+function canonicalClipLink(line: string): { url: string; valid: boolean } {
+    try {
+        const url = new URL(line);
+        if (['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.port && line.length <= 4096) {
+            const parts = url.pathname.split('/').filter(Boolean);
+            const slug = url.hostname === 'clips.twitch.tv' && parts.length === 1 ? parts[0]
+                : ['twitch.tv', 'www.twitch.tv', 'm.twitch.tv'].includes(url.hostname) && parts.length === 3 && parts[1] === 'clip' && /^[A-Za-z0-9_]+$/.test(parts[0]) ? parts[2] : '';
+            if (/^[A-Za-z0-9_-]+$/.test(slug)) return { url: 'https://clips.twitch.tv/' + slug, valid: true };
+        }
+    } catch {}
+    return { url: line, valid: false };
+}
+
+function removeClipLink(url: string): void {
+    if (clipDownloadInFlight) return;
+    const input = byId<HTMLTextAreaElement>('clipUrl');
+    input.value = input.value.split(/\r?\n/).filter(line => canonicalClipLink(line.trim()).url !== url).join('\n');
+    updateClipLinks();
+}
+
+async function openClipFile(url: string, folder: boolean): Promise<void> {
+    const filename = clipBatchItems.find(item => item.url === url)?.filename;
+    if (!filename) return;
+    try {
+        const opened = folder ? await window.api.showInFolder(filename) : await window.api.openFile(filename);
+        if (!opened) showClipNotice(UI_TEXT.static.archiveActionFailed, true);
+    } catch { showClipNotice(UI_TEXT.static.archiveActionFailed, true); }
+}
+
+function positionClipInfo(): void {
+    const panel = byId<HTMLElement>('clipsInfoPopover');
+    if (!panel?.matches(':popover-open')) return;
+    const button = byId<HTMLElement>('clipsInfoButton');
+    if (!button.getClientRects().length) { panel.hidePopover(); return; }
+    const bounds = button.getBoundingClientRect();
+    const box = panel.getBoundingClientRect();
+    const left = Math.max(12, Math.min(bounds.right - box.width, window.innerWidth - box.width - 12));
+    const top = bounds.bottom + box.height + 8 <= window.innerHeight - 12 ? bounds.bottom + 8 : Math.max(12, bounds.top - box.height - 8);
+    panel.style.left = left + 'px';
+    panel.style.top = top + 'px';
+}
+
+function toggleClipInfo(): void {
+    const panel = byId<HTMLElement>('clipsInfoPopover');
+    if (!panel.dataset.bound) {
+        panel.dataset.bound = 'true';
+        panel.addEventListener('toggle', () => {
+            byId('clipsInfoButton').setAttribute('aria-expanded', String(panel.matches(':popover-open')));
+            positionClipInfo();
+        });
+        window.addEventListener('resize', positionClipInfo);
+        document.addEventListener('scroll', positionClipInfo, true);
+        new ResizeObserver(positionClipInfo).observe(byId('clipsInfoButton'));
+    }
+    panel.togglePopover();
+    positionClipInfo();
+}
 
 function showClipNotice(message: string, error = false): void {
     clearTimeout(clipNoticeTimer);
@@ -2033,10 +2096,14 @@ function completeClipMetadata(url: string, info: { title: string; broadcaster_na
             item.metadataState = 'ready';
         } else {
             item.metadataState = info === null ? 'missing' : 'unavailable';
+            if (info === null && (item.state === 'ready' || item.state === 'stopped')) {
+                item.state = 'failed';
+                item.error = UI_TEXT.clips.notAvailable;
+            }
         }
     }
     requestClipMetadata();
-    renderClipBatch();
+    scheduleClipBatchRender();
 }
 
 function requestClipMetadata(): void {
@@ -2061,26 +2128,15 @@ function updateClipLinks(): void {
     if (clipDownloadInFlight) return;
     const lines = byId<HTMLTextAreaElement>('clipUrl').value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     const seen = new Set<string>();
-    clipBatchLimitExceeded = lines.length > 200;
     const previous = new Map(clipBatchItems.map(item => [item.url, item]));
     clipBatchItems = [];
-    for (const line of lines.slice(0, 200)) {
-        let slug = '';
-        try {
-            const url = new URL(line);
-            if (['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.port && line.length <= 4096) {
-                const match = url.hostname === 'clips.twitch.tv'
-                    ? /^\/([A-Za-z0-9_-]+)\/?$/.exec(url.pathname)
-                    : ['twitch.tv', 'www.twitch.tv', 'm.twitch.tv'].includes(url.hostname)
-                        ? /^\/[A-Za-z0-9_]+\/clip\/([A-Za-z0-9_-]+)\/?$/.exec(url.pathname)
-                        : null;
-                slug = match?.[1] || '';
-            }
-        } catch {}
-        const canonical = slug ? 'https://clips.twitch.tv/' + slug : line;
-        if (seen.has(canonical)) continue;
-        seen.add(canonical);
-        clipBatchItems.push(previous.get(canonical) || { url: canonical, label: '', streamer: '', metadataState: slug ? 'pending' : 'unavailable', state: slug ? 'ready' : 'invalid' });
+    clipBatchLimitExceeded = false;
+    for (const line of lines) {
+        const parsed = canonicalClipLink(line);
+        if (seen.has(parsed.url)) continue;
+        seen.add(parsed.url);
+        if (clipBatchItems.length >= 200) { clipBatchLimitExceeded = true; break; }
+        clipBatchItems.push(previous.get(parsed.url) || { url: parsed.url, label: '', streamer: '', metadataState: parsed.valid ? 'pending' : 'unavailable', state: parsed.valid ? 'ready' : 'invalid' });
     }
     showClipNotice(clipBatchLimitExceeded ? UI_TEXT.clips.limitReached : '', true);
     requestClipMetadata();
@@ -2099,7 +2155,7 @@ function stopClipBatch(): void {
     renderClipBatch();
 }
 
-function createClipBatchRow(): ClipBatchRow {
+function createClipBatchRow(url: string): ClipBatchRow {
     const row = document.createElement('li');
     const span = (className: string) => {
         const element = document.createElement('span');
@@ -2118,8 +2174,28 @@ function createClipBatchRow(): ClipBatchRow {
     meta.className = 'clip-result-meta';
     meta.append(streamer, status);
     content.append(label, meta);
-    row.append(number, content, symbol);
-    return { row, number, label, streamer, status, symbol };
+    const actions = document.createElement('div');
+    actions.className = 'clip-result-actions';
+    const action = (pathData: string, callback: () => void) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'clip-row-action';
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        icon.setAttribute('viewBox', '0 0 24 24');
+        icon.setAttribute('aria-hidden', 'true');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', pathData);
+        icon.append(path);
+        button.append(icon);
+        button.addEventListener('click', callback);
+        actions.append(button);
+        return button;
+    };
+    const open = action('m8 5 11 7-11 7z', () => { void openClipFile(url, false); });
+    const folder = action('M3 7V4h6l2 3h10v13H3z', () => { void openClipFile(url, true); });
+    const remove = action('M6 6l12 12M6 18 18 6', () => removeClipLink(url));
+    row.append(number, content, symbol, actions);
+    return { row, number, label, streamer, status, symbol, open, folder, remove };
 }
 
 function updateClipBatchSymbol(elements: ClipBatchRow, kind: string): void {
@@ -2165,6 +2241,7 @@ function clipBatchTitle(item: ClipBatchItem): string {
 }
 
 function renderClipBatch(): void {
+    if (clipBatchRenderFrame !== null) { cancelAnimationFrame(clipBatchRenderFrame); clipBatchRenderFrame = null; }
     const done = clipBatchItems.filter(item => item.state === 'done').length;
     const failed = clipBatchItems.filter(item => item.state === 'failed' || item.state === 'invalid').length;
     const ready = clipBatchItems.some(item => item.state === 'ready' || item.state === 'stopped');
@@ -2217,7 +2294,7 @@ function renderClipBatch(): void {
     clipBatchItems.forEach((item, index) => {
         let elements = clipBatchRows.get(item.url);
         if (!elements) {
-            elements = createClipBatchRow();
+            elements = createClipBatchRow(item.url);
             elements.row.dataset.clipUrl = item.url;
             clipBatchRows.set(item.url, elements);
         }
@@ -2235,6 +2312,13 @@ function renderClipBatch(): void {
         elements.status.title = status;
         const kind = item.state === 'done' ? 'done' : item.state === 'failed' || item.state === 'invalid' ? 'error' : item.state === 'active' || item.metadataState === 'loading' ? 'loading' : 'ready';
         updateClipBatchSymbol(elements, kind);
+        for (const [button, label] of [[elements.open, UI_TEXT.static.archiveOpen], [elements.folder, UI_TEXT.static.archiveShowInFolder], [elements.remove, UI_TEXT.merge.removeAria]] as const) {
+            button.setAttribute('aria-label', label);
+            button.title = label;
+        }
+        elements.open.style.visibility = elements.folder.style.visibility = item.filename ? 'visible' : 'hidden';
+        elements.open.disabled = elements.folder.disabled = !item.filename;
+        elements.remove.disabled = clipDownloadInFlight;
         if (list.children[index] !== elements.row) list.insertBefore(elements.row, list.children[index] || null);
     });
     list.scrollTop = scrollTop;
@@ -2267,11 +2351,13 @@ async function downloadClip(retryFailed = false): Promise<void> {
                 item.state = 'stopped';
                 continue;
             }
+            if (item.state === 'failed' && item.metadataState === 'missing') continue;
             item.state = 'active';
             renderClipBatch();
             try {
                 const result = await window.api.downloadClip(item.url);
                 item.state = result?.success ? 'done' : 'failed';
+                if (result?.success) item.filename = result.filename;
                 if (!result?.success) item.error = result?.error?.trim() || UI_TEXT.clips.unknownError;
                 else if (item.metadataState === 'missing' || item.metadataState === 'unavailable') {
                     item.metadataState = 'pending';
@@ -2346,104 +2432,123 @@ function initSegmentedIndicators(): void {
     window.addEventListener('resize', scheduleSegmentedIndicatorsSync);
 }
 
-async function addMergeFiles(): Promise<void> {
-    const files = await window.api.selectMultipleVideos();
-    if (!files || files.length === 0) {
-        return;
-    }
+let mergeFilePickerInFlight = false;
 
-    mergeFiles = [...mergeFiles, ...files];
+async function addMergeFiles(): Promise<void> {
+    if (isMerging || mergeFilePickerInFlight) return;
+    mergeFilePickerInFlight = true;
     renderMergeFiles();
+    try {
+        const files = await window.api.selectMultipleVideos();
+        if (files?.length) mergeFiles = [...mergeFiles, ...files];
+    } catch {
+        showAppToast(UI_TEXT.merge.selectFailed, 'warn');
+    } finally {
+        mergeFilePickerInFlight = false;
+        renderMergeFiles();
+    }
 }
 
 function renderMergeFiles(): void {
-    const list = byId('mergeFileList');
-    byId('btnMerge').disabled = mergeFiles.length < 2;
-
-    if (mergeFiles.length === 0) {
-        // Build via DOM API to keep the renderer clean of inline-styled
-        // HTML strings. The empty-state SVG is the same plus-icon the
-        // static HTML uses, just built programmatically.
-        list.replaceChildren();
+    const list = byId<HTMLElement>('mergeFileList');
+    byId<HTMLButtonElement>('btnMerge').disabled = isMerging || mergeFilePickerInFlight || mergeFiles.length < 2;
+    byId('btnMerge').textContent = isMerging ? UI_TEXT.merge.merging : UI_TEXT.merge.merge;
+    byId<HTMLButtonElement>('mergeAddBtn').disabled = isMerging || mergeFilePickerInFlight;
+    if (!mergeFiles.length) {
         const wrap = document.createElement('div');
         wrap.className = 'empty-state merge-empty-state';
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('viewBox', '0 0 24 24');
-        svg.setAttribute('fill', 'currentColor');
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        icon.setAttribute('viewBox', '0 0 24 24');
+        icon.setAttribute('fill', 'currentColor');
+        icon.setAttribute('aria-hidden', 'true');
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z');
-        svg.appendChild(path);
-        wrap.appendChild(svg);
-        const p = document.createElement('p');
-        p.textContent = UI_TEXT.merge.empty;
-        wrap.appendChild(p);
-        list.appendChild(wrap);
+        icon.append(path);
+        const text = document.createElement('p');
+        text.textContent = UI_TEXT.merge.empty;
+        wrap.append(icon, text);
+        list.replaceChildren(wrap);
         return;
     }
-
-    list.innerHTML = mergeFiles.map((file: FileCapabilityReference, index: number) => {
-        const name = file.name;
-        return `
-            <div class="file-item" draggable="true" data-index="${index}">
-                <div class="file-order">${index + 1}</div>
-                <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-                <div class="file-actions">
-                    <button type="button" class="file-btn" aria-label="${escapeHtml(UI_TEXT.merge.moveUpAria)}" title="${escapeHtml(UI_TEXT.merge.moveUpAria)}" onclick="moveMergeFile(${index}, -1)" ${index === 0 ? 'disabled' : ''}>&#9650;</button>
-                    <button type="button" class="file-btn" aria-label="${escapeHtml(UI_TEXT.merge.moveDownAria)}" title="${escapeHtml(UI_TEXT.merge.moveDownAria)}" onclick="moveMergeFile(${index}, 1)" ${index === mergeFiles.length - 1 ? 'disabled' : ''}>&#9660;</button>
-                    <button type="button" class="file-btn remove" aria-label="${escapeHtml(UI_TEXT.merge.removeAria)}" title="${escapeHtml(UI_TEXT.merge.removeAria)}" onclick="removeMergeFile(${index})">x</button>
-                </div>
-            </div>
-        `;
-    }).join('');
+    const fragment = document.createDocumentFragment();
+    mergeFiles.forEach((file, index) => {
+        const row = document.createElement('div');
+        row.className = 'file-item';
+        row.dataset.index = String(index);
+        const number = document.createElement('div');
+        number.className = 'file-order';
+        number.textContent = formatUiNumber(index + 1);
+        const name = document.createElement('div');
+        name.className = 'file-name';
+        name.textContent = file.name;
+        name.title = file.name;
+        const actions = document.createElement('div');
+        actions.className = 'file-actions';
+        const addAction = (label: string, pathData: string, disabled: boolean, callback: () => void, remove = false) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'file-btn' + (remove ? ' remove' : '');
+            button.disabled = disabled || isMerging || mergeFilePickerInFlight;
+            button.setAttribute('aria-label', label);
+            button.title = label;
+            const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            icon.setAttribute('viewBox', '0 0 24 24');
+            icon.setAttribute('aria-hidden', 'true');
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', pathData);
+            icon.append(path);
+            button.append(icon);
+            button.addEventListener('click', callback);
+            actions.append(button);
+        };
+        addAction(UI_TEXT.merge.moveUpAria, 'm6 14 6-6 6 6', index === 0, () => moveMergeFile(index, -1));
+        addAction(UI_TEXT.merge.moveDownAria, 'm6 10 6 6 6-6', index === mergeFiles.length - 1, () => moveMergeFile(index, 1));
+        addAction(UI_TEXT.merge.removeAria, 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7', false, () => removeMergeFile(index), true);
+        row.append(number, name, actions);
+        fragment.append(row);
+    });
+    list.replaceChildren(fragment);
 }
 
 function moveMergeFile(index: number, direction: number): void {
-    const newIndex = index + direction;
-    if (newIndex < 0 || newIndex >= mergeFiles.length) {
-        return;
-    }
-
-    const temp = mergeFiles[index];
-    mergeFiles[index] = mergeFiles[newIndex];
-    mergeFiles[newIndex] = temp;
+    const next = index + direction;
+    if (isMerging || mergeFilePickerInFlight || !Number.isInteger(index) || !mergeFiles[index] || !mergeFiles[next] || Math.abs(direction) !== 1) return;
+    [mergeFiles[index], mergeFiles[next]] = [mergeFiles[next], mergeFiles[index]];
     renderMergeFiles();
+    byId<HTMLElement>('mergeFileList').children[next]?.querySelector<HTMLButtonElement>(direction < 0 ? '.file-btn' : '.file-btn:nth-child(2)')?.focus({ preventScroll: true });
 }
 
 function removeMergeFile(index: number): void {
+    if (isMerging || mergeFilePickerInFlight || !Number.isInteger(index) || !mergeFiles[index]) return;
     mergeFiles.splice(index, 1);
     renderMergeFiles();
 }
 
 async function startMerging(): Promise<void> {
-    if (mergeFiles.length < 2 || isMerging) {
-        return;
-    }
-
-    const output = await window.api.saveVideoDialog('merged_video.mp4');
-    if (!output) {
-        return;
-    }
-
+    if (mergeFiles.length < 2 || isMerging || mergeFilePickerInFlight) return;
     isMerging = true;
-    byId('btnMerge').disabled = true;
-    byId('btnMerge').textContent = UI_TEXT.merge.merging;
-    byId('mergeProgress').classList.add('show');
-
-    const result = await window.api.mergeVideos(mergeFiles.map((file) => file.token), output.token);
-
-    isMerging = false;
-    byId('btnMerge').disabled = false;
-    byId('btnMerge').textContent = UI_TEXT.merge.merge;
-    byId('mergeProgress').classList.remove('show');
-
-    if (result.success) {
-        alert(`${UI_TEXT.merge.success}\n\n${result.outputName || output.name}`);
+    renderMergeFiles();
+    try {
+        const output = await window.api.saveVideoDialog('merged_video.mp4');
+        if (!output) return;
+        byId('mergeProgressBar').style.width = '0%';
+        byId('mergeProgressText').textContent = '0%';
+        byId('mergeProgressGauge').setAttribute('aria-valuenow', '0');
+        byId('mergeProgress').classList.add('show');
+        const result = await window.api.mergeVideos(mergeFiles.map(file => file.token), output.token);
+        if (!result?.success) {
+            showAppToast(UI_TEXT.merge.failed, 'warn');
+            return;
+        }
+        showAppToast(UI_TEXT.merge.success);
         mergeFiles = [];
+    } catch {
+        showAppToast(UI_TEXT.merge.failed, 'warn');
+    } finally {
+        isMerging = false;
+        byId('mergeProgress').classList.remove('show');
         renderMergeFiles();
-        return;
     }
-
-    alert(UI_TEXT.merge.failed);
 }
 
 void init();

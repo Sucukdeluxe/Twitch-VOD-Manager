@@ -1,5 +1,8 @@
 #cutterTab .cutter-container { max-width: 1900px; gap: 14px; }
-#cutterTab .cutter-source-bar { display: flex; padding: 10px 14px; }
+#cutterTab .cutter-source-bar { display: flex; min-height: 34px; padding: 6px 12px; border: 0; border-radius: 6px; }
+#cutterTab .cutter-source-copy { display: block; }
+#cutterTab #cutterFilePath { display: block; height: 22px; min-height: 0; font-size: 14px; color: var(--workspace-text); }
+#cutterTab button.btn-secondary, #cutterTab button.btn-primary { font-size: 14px; }
 #cutterTab .cutter-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 260px; gap: 16px; align-items: stretch; }
 #cutterTab .cutter-workspace:not(.shown) { grid-template-columns: minmax(0, 1fr); }
 #cutterTab .cutter-preview-panel, #cutterTab .cutter-workspace:not(.shown) .cutter-preview-panel { display: flex; width: 100%; min-height: 0; padding: 0; background: transparent; border: 0; }
@@ -16,25 +19,25 @@
 #cutterTab .cutter-format-badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 4px 8px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 5px; color: var(--text-secondary); }
 #cutterTab .cutter-export-body { display: grid; gap: 12px; padding: 0 14px 12px; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 #cutterTab .cutter-export-summary { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--workspace-border, var(--border)); background: var(--workspace-control, var(--bg-main)); border-radius: 8px; }
-#cutterTab .cutter-export-summary > span { font-size: 11px; color: var(--text-secondary); }
+#cutterTab .cutter-export-summary > span { font-size: 14px; color: var(--text-secondary); }
 #cutterTab .cutter-export-summary strong { font: 600 20px Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--text); }
 #cutterTab .cutter-export-codecs { margin-top: 2px; }
 #cutterTab .cutter-profile-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
-#cutterTab .cutter-profile-fieldset legend, #cutterTab .cutter-export-field > label { font-size: 12px; font-weight: 600; margin-bottom: 6px; padding: 0; }
+#cutterTab .cutter-profile-fieldset legend, #cutterTab .cutter-export-field > label { font-size: 14px; font-weight: 600; margin-bottom: 6px; padding: 0; }
 #cutterTab .cutter-profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-#cutterTab .cutter-profile-grid label { display: flex; align-items: center; gap: 7px; min-height: 32px; padding: 6px 8px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; font-size: 12px; background: var(--workspace-panel, var(--bg-card)); cursor: pointer; user-select: none; }
+#cutterTab .cutter-profile-grid label { display: flex; align-items: center; gap: 7px; min-height: 32px; padding: 6px 8px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; font-size: 14px; background: var(--workspace-panel, var(--bg-card)); cursor: pointer; user-select: none; }
 #cutterTab .cutter-profile-grid label:has(input:checked) { background: #8c6ac41f; border-color: #9e82c7; }
 #cutterTab .cutter-profile-grid label:has(input:disabled) { opacity: .5; cursor: default; }
 #cutterTab .cutter-profile-grid input { position: relative; padding: 0; width: 13px; height: 13px; margin: 0; opacity: 1; accent-color: #9e82c7; flex: 0 0 auto; }
-#cutterTab .cutter-field-help { margin: 6px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+#cutterTab .cutter-field-help { margin: 6px 0 0; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
 #cutterTab .cutter-export-field { display: grid; min-width: 0; }
-#cutterTab .cutter-export-field select { appearance: none; width: 100%; min-width: 0; height: 36px; padding: 6px 36px 6px 10px; padding-right: 36px !important; font-size: 12px; color: var(--text); background-color: var(--workspace-control, var(--bg-main)); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23969da8'%3E%3Cpath d='m4 6 4 4 4-4z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-size: 14px; background-position: right 14px center; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; user-select: none; }
+#cutterTab .cutter-export-field select { appearance: none; width: 100%; min-width: 0; height: 36px; padding: 6px 36px 6px 10px; padding-right: 36px !important; font-size: 14px; color: var(--text); background-color: var(--workspace-control, var(--bg-main)); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23969da8'%3E%3Cpath d='m4 6 4 4 4-4z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-size: 14px; background-position: right 14px center; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; user-select: none; }
 #cutterTab .cutter-export-field select:disabled { opacity: .65; }
 #cutterTab .cutter-info.shown { display: grid; grid-template-columns: 1fr; gap: 8px; margin: 14px 0; padding: 0; background: transparent; border: 0; }
 #cutterTab .cutter-info-item { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 0; min-width: 0; text-align: left; background: transparent; border: 0; }
-#cutterTab .cutter-info-label { font-size: 11px; text-transform: none; letter-spacing: normal; }
-#cutterTab .cutter-info-value { font-size: 12px; }
-#cutterTab .cutter-format-details { font-size: 12px; line-height: 1.5; border-top: 1px solid var(--workspace-border, var(--border)); padding-top: 10px; }
+#cutterTab .cutter-info-label { font-size: 14px; text-transform: none; letter-spacing: normal; }
+#cutterTab .cutter-info-value { font-size: 14px; }
+#cutterTab .cutter-format-details { font-size: 14px; line-height: 1.5; border-top: 1px solid var(--workspace-border, var(--border)); padding-top: 10px; }
 #cutterTab .cutter-format-details summary { cursor: pointer; padding: 2px 0; color: var(--text-secondary); user-select: none; }
 #cutterTab .cutter-format-details[open] summary { margin-bottom: 12px; }
 #cutterTab .cutter-export-footer { flex: 0 0 auto; padding: 12px 14px; border-top: 1px solid var(--workspace-border, var(--border)); }
@@ -43,7 +46,7 @@
 #cutterTab .cutter-actions #cutterCancelExportBtn { width: 100%; }
 #cutterTab .cutter-export-state { margin: 0 0 10px; }
 #cutterTab #cutProgress { margin: 0 0 12px; padding: 0; }
-#cutterTab #cutProgress .progress-text { font-size: 12px; }
+#cutterTab #cutProgress .progress-text { font-size: 14px; }
 #cutterTab .timeline-container { flex: 0 0 auto; border: 0; border-radius: 0; background: #101318; color: #f2f3f5; overflow: visible; }
 #cutterTab .cutter-timeline-toolbar { min-height: 34px; padding: 2px 14px; border: 0; }
 #cutterTab .cutter-timeline-timecode { color: #e6e3ff; font-size: 12px; }
@@ -70,44 +73,44 @@
 #cutterTab .cutter-edit-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
 #cutterTab .cutter-history-controls { margin-left: auto; }
 #cutterTab .cutter-modes { display: flex; gap: 5px; }
-#cutterTab .cutter-modes button { min-height: 32px; padding: 6px 12px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; background: var(--workspace-control, var(--bg-main)); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; user-select: none; }
+#cutterTab .cutter-modes button { min-height: 32px; padding: 6px 12px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; background: var(--workspace-control, var(--bg-main)); color: var(--text); font: inherit; font-size: 14px; cursor: pointer; user-select: none; }
 #cutterTab .cutter-modes button[aria-pressed="true"] { border-color: #bba7e7; background: #8065aa32; }
 #cutterTab .cutter-trim-fields { display: grid; grid-template-columns: minmax(0, 1fr) 210px minmax(0, 1fr); gap: 12px; align-items: stretch; }
 #cutterTab .cutter-boundary-field { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 8px; background: var(--workspace-control, var(--bg-main)); }
 #cutterTab .cutter-boundary-field > div { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-#cutterTab .cutter-boundary-field label { font-size: 12px; font-weight: 600; }
+#cutterTab .cutter-boundary-field label { font-size: 14px; font-weight: 600; }
 #cutterTab .cutter-boundary-field kbd { display: inline-grid; place-items: center; width: 23px; height: 23px; margin-right: 5px; background: #6644a3; border: 1px solid #b79bff; color: #fff; border-radius: 4px; font-size: 12px; }
-#cutterTab .cutter-boundary-field .btn-secondary { min-height: 28px; padding: 4px 10px; font-size: 11px; }
+#cutterTab .cutter-boundary-field .btn-secondary { min-height: 28px; padding: 4px 10px; font-size: 14px; }
 #cutterTab .cutter-boundary-field input { width: 100%; height: 32px; text-align: center; font: 600 19px Consolas, monospace; font-variant-numeric: tabular-nums; padding: 4px 6px; background: transparent; border: 0; border-radius: 4px; }
 #cutterTab .cutter-output-length { justify-self: stretch; min-width: 0; text-align: center; display: grid; align-content: center; gap: 7px; padding: 12px 16px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 8px; background: transparent; }
-#cutterTab .cutter-output-length span { font-size: 11px; color: var(--text-secondary); }
+#cutterTab .cutter-output-length span { font-size: 14px; color: var(--text-secondary); }
 #cutterTab .cutter-output-length strong { font: 600 20px Consolas, monospace; font-variant-numeric: tabular-nums; color: #80c49e; }
 .theme-light #cutterTab .cutter-output-length strong { color: #227649; }
 #cutterTab .cutter-edit-bottom { display: flex; align-items: center; gap: 12px; margin-top: 12px; min-height: 32px; flex-wrap: wrap; }
-#cutterTab .cutter-preview-toggle { display: flex; align-items: center; gap: 7px; margin: 0; padding: 0; font-size: 12px; white-space: nowrap; }
+#cutterTab .cutter-preview-toggle { display: flex; align-items: center; gap: 7px; margin: 0; padding: 0; font-size: 14px; white-space: nowrap; }
 #cutterTab .cutter-preview-toggle input { position: static; opacity: 1; width: 15px; height: 15px; accent-color: #9c80d5; }
-#cutterTab .cutter-edit-hint { font-size: 11px; color: var(--text-secondary); margin-left: auto; }
+#cutterTab .cutter-edit-hint { font-size: 14px; color: var(--text-secondary); margin-left: auto; }
 #cutterTab .cutter-cut-list { height: auto; min-height: 0; max-height: 110px; overflow: auto; scrollbar-gutter: stable; margin-top: 10px; gap: 6px; }
 #cutterTab .cutter-cut-list:has(.cutter-cut-empty) { display: none; }
 #cutterTab .cutter-cut-count { padding: 4px 8px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 5px; background: transparent; color: var(--text-secondary); font-size: 11px; }
 #cutterTab .cutter-cut-count[hidden] { display: none; }
-#cutterTab .cutter-cut-empty { min-height: 90px; display: grid; place-items: center; font-size: 12px; }
+#cutterTab .cutter-cut-empty { min-height: 90px; display: grid; place-items: center; font-size: 14px; }
 #cutterTab .cutter-cut-row { display: grid; grid-template-columns: 100px minmax(240px, 1fr) 110px 175px; gap: 12px; align-items: center; padding: 7px 10px; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; margin: 0; }
 #cutterTab .cutter-cut-row.active { border-color: #c76d80; background: #bd405914; }
-#cutterTab .cutter-cut-row-heading { display: block; width: 100%; text-align: left; font-size: 12px; padding: 0; border: 0; cursor: pointer; background: transparent; color: var(--text); }
+#cutterTab .cutter-cut-row-heading { display: block; width: 100%; text-align: left; font-size: 14px; padding: 0; border: 0; cursor: pointer; background: transparent; color: var(--text); }
 #cutterTab .cutter-cut-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-#cutterTab .cutter-cut-fields label { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-secondary); }
-#cutterTab .cutter-cut-fields input { width: 100%; min-width: 0; height: 29px; font-size: 12px; padding: 4px 6px; }
+#cutterTab .cutter-cut-fields label { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text-secondary); }
+#cutterTab .cutter-cut-fields input { width: 100%; min-width: 0; height: 29px; font-size: 14px; padding: 4px 6px; }
 #cutterTab .cutter-cut-fields input[readonly] { border-color: transparent; background: transparent; color: var(--text); cursor: text; }
 #cutterTab .cutter-cut-fields input[aria-invalid="true"] { border-color: #da697d; }
 #cutterTab .cutter-cut-duration { font: 12px Consolas, monospace; font-variant-numeric: tabular-nums; text-align: right; }
 #cutterTab .cutter-cut-actions { display: flex; gap: 5px; align-items: center; justify-content: flex-end; }
-#cutterTab .cutter-cut-actions .btn-secondary { font-size: 11px; padding: 5px 9px; min-height: 29px; }
+#cutterTab .cutter-cut-actions .btn-secondary { font-size: 14px; padding: 5px 9px; min-height: 29px; }
 #cutterTab .cutter-cut-actions .cutter-icon-button { font-size: 21px; width: 29px; height: 29px; }
-#cutterTab .cutter-range-error { grid-column: 1 / -1; color: var(--text-secondary); font-size: 11px; }
+#cutterTab .cutter-range-error { grid-column: 1 / -1; color: var(--text-secondary); font-size: 14px; }
 #cutterTab .local-cutter-controls { padding: 3px 10px 5px; }
 #cutterTab .local-frame-controls { display: flex; }
-#cutterTab .local-player-message { position: absolute; bottom: 60px; right: 15px; padding: 8px 12px; border: 1px solid #626773; border-radius: 6px; background: #171b21; font-size: 12px; }
+#cutterTab .local-player-message { position: absolute; bottom: 60px; right: 15px; padding: 8px 12px; border: 1px solid #626773; border-radius: 6px; background: #171b21; font-size: 14px; }
 @container (max-width: 800px) { .local-cutter-controls .local-frame-controls { display: none !important; } .local-cutter-controls .player-button.player-rate-button { width: 74px; } }
 @container (max-width: 550px) { .local-cutter-controls .player-volume-control { display: none; } .local-cutter-controls .player-button { width: 36px; } }
 @media (min-width: 1001px) and (min-height: 760px) {
@@ -182,3 +185,4 @@ body:has(#cutterTab.active) :is(#cutterTab, .top-nav, .context-sidebar, .workspa
 #cutterTab .cutter-mode-icon { display:inline-grid; place-items:center; width:18px; height:18px; color:#d7c8ff; font-size:16px; line-height:1; }
 #cutterTab .cutter-audio-track { height:64px; }
 #cutterTab #cutterWaveform { image-rendering:crisp-edges; }
+#cutterPreviewPlaceholder { font-size: 14px; }

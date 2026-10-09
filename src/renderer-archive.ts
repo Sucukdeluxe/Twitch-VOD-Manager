@@ -1,4 +1,8 @@
+let archivePageOffset = 0;
+let archiveCriteriaKey = '';
+let archiveRefreshRequested = false;
 let archiveSearchInFlight = false;
+let archiveSearchFailed = false;
 let archiveSearchRequested = false;
 let archiveSearchDebounceTimer: number | null = null;
 let lastArchiveSearchResult: ArchiveSearchResult | null = null;
@@ -22,7 +26,7 @@ function populateArchiveStreamerSelect(): void {
 }
 
 function getArchiveSearchFilter() {
-    return {
+    const criteria = {
         query: (document.getElementById('archiveSearchQuery') as HTMLInputElement | null)?.value.trim() || '',
         type: ((document.getElementById('archiveSearchType') as HTMLSelectElement | null)?.value || 'all') as 'all' | 'live' | 'vod' | 'clip' | 'chat' | 'events',
         streamer: (document.getElementById('archiveSearchStreamer') as HTMLSelectElement | null)?.value || '',
@@ -31,6 +35,30 @@ function getArchiveSearchFilter() {
         sort: ((document.getElementById('archiveSearchSort') as HTMLSelectElement | null)?.value || 'date_desc') as 'date_desc' | 'date_asc' | 'size_desc' | 'size_asc' | 'name_asc',
         limit: 200
     };
+    const key = JSON.stringify(criteria);
+    if (key !== archiveCriteriaKey) { archivePageOffset = 0; archiveCriteriaKey = key; }
+    return { ...criteria, offset: archivePageOffset };
+}
+
+function changeArchivePage(direction: number): void {
+    if (archiveSearchInFlight || !lastArchiveSearchResult || Math.abs(direction) !== 1) return;
+    archivePageOffset = Math.max(0, Math.min(archivePageOffset + direction * 200, Math.max(0, Math.ceil(lastArchiveSearchResult.matchCount / 200) - 1) * 200));
+    void performArchiveSearch();
+}
+
+function renderArchivePagination(): void {
+    const result = lastArchiveSearchResult;
+    const pages = Math.max(1, Math.ceil((result?.matchCount || 0) / 200));
+    const page = Math.floor((result?.offset ?? 0) / 200) + 1;
+    const pager = byId<HTMLElement>('archivePagination');
+    if (!pager) return;
+    pager.style.visibility = pages > 1 ? 'visible' : 'hidden';
+    pager.setAttribute('aria-label', currentLanguage === 'de' ? 'Archiv-Seiten' : 'Archive pages');
+    byId<HTMLButtonElement>('archivePrevious').disabled = archiveSearchInFlight || archiveSearchFailed || page <= 1;
+    byId<HTMLButtonElement>('archiveNext').disabled = archiveSearchInFlight || archiveSearchFailed || page >= pages;
+    byId('archivePrevious').textContent = currentLanguage === 'de' ? 'Zurück' : 'Previous';
+    byId('archiveNext').textContent = currentLanguage === 'de' ? 'Weiter' : 'Next';
+    byId('archivePageLabel').textContent = currentLanguage === 'de' ? 'Seite ' + formatUiNumber(page) + ' von ' + formatUiNumber(pages) : 'Page ' + formatUiNumber(page) + ' of ' + formatUiNumber(pages);
 }
 
 function onArchiveSearchInput(): void {
@@ -41,7 +69,8 @@ function onArchiveSearchInput(): void {
     }, 250);
 }
 
-async function performArchiveSearch(): Promise<void> {
+async function performArchiveSearch(refresh = false): Promise<void> {
+    archiveRefreshRequested ||= refresh;
     if (archiveSearchDebounceTimer !== null) {
         window.clearTimeout(archiveSearchDebounceTimer);
         archiveSearchDebounceTimer = null;
@@ -53,6 +82,8 @@ async function performArchiveSearch(): Promise<void> {
     const button = document.getElementById('btnArchiveSearch') as HTMLButtonElement | null;
     if (!results) return;
     archiveSearchInFlight = true;
+    archiveSearchFailed = false;
+    renderArchivePagination();
     results.setAttribute('aria-busy', 'true');
     if (button) button.disabled = true;
     try {
@@ -66,17 +97,22 @@ async function performArchiveSearch(): Promise<void> {
                 summary.classList.remove('is-error');
             }
             try {
-                const result = await window.api.searchArchive(filter);
+                const refresh = archiveRefreshRequested;
+                archiveRefreshRequested = false;
+                const result = await window.api.searchArchive({ ...filter, refresh });
                 if (key !== JSON.stringify(getArchiveSearchFilter())) archiveSearchRequested = true;
                 if (archiveSearchRequested) continue;
                 const preserveScroll = key === lastArchiveFilterKey;
-                lastArchiveFilterKey = key;
+                result.offset ??= filter.offset;
+                archivePageOffset = result.offset;
+                lastArchiveFilterKey = JSON.stringify(getArchiveSearchFilter());
                 lastArchiveSearchResult = result;
                 for (const streamer of result.streamers || result.hits.map(hit => hit.streamer)) archiveKnownStreamers.add(streamer);
                 populateArchiveStreamerSelect();
                 renderArchiveSearchResults(result, preserveScroll);
             } catch (error) {
                 if (key !== JSON.stringify(getArchiveSearchFilter())) archiveSearchRequested = true;
+                if (!archiveSearchRequested) archiveSearchFailed = true;
                 if (!archiveSearchRequested && summary) {
                     summary.textContent = UI_TEXT.static.errorPrefix + ': ' + (error instanceof Error ? error.message : String(error));
                     summary.classList.add('is-error');
@@ -87,6 +123,7 @@ async function performArchiveSearch(): Promise<void> {
         archiveSearchInFlight = false;
         results.setAttribute('aria-busy', 'false');
         if (button) button.disabled = false;
+        renderArchivePagination();
     }
 }
 
@@ -109,13 +146,16 @@ function renderArchiveSearchResults(result: ArchiveSearchResult, preserveScroll 
     if (!results) return;
     const scrollTop = preserveScroll ? results.scrollTop : 0;
     summary?.classList.remove('is-error');
+    renderArchivePagination();
     if (!result.rootExists) {
         if (summary) summary.textContent = '';
         results.replaceChildren(archiveElement('div', 'insights-empty archive-empty', UI_TEXT.static.archiveNoRoot));
         return;
     }
     if (summary) {
-        summary.textContent = (result.truncated ? UI_TEXT.static.archiveSummaryTruncated : UI_TEXT.static.archiveSummary)
+        summary.textContent = (result.matchCount > 200 ? UI_TEXT.static.archiveSummaryTruncated : UI_TEXT.static.archiveSummary)
+            .replace('{first}', formatUiNumber((result.offset ?? 0) + 1))
+            .replace('{last}', formatUiNumber((result.offset ?? 0) + result.hits.length))
             .replace('{matchCount}', formatUiNumber(result.matchCount))
             .replace('{scanned}', formatUiNumber(result.totalScanned))
             .replace('{shown}', formatUiNumber(result.hits.length));
@@ -194,4 +234,4 @@ function initArchiveSearchInput(): void {
     }
 }
 
-Object.assign(window, { performArchiveSearch, onArchiveSearchInput, openFilePath, showFileInFolder, openEventsOrChat, initArchiveSearchInput });
+Object.assign(window, { changeArchivePage, performArchiveSearch, onArchiveSearchInput, openFilePath, showFileInFolder, openEventsOrChat, initArchiveSearchInput });

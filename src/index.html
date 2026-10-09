@@ -449,7 +449,7 @@
                         <section class="clip-input" aria-labelledby="clipsHeading">
                             <header class="clips-card-header">
                                 <div><h2 id="clipsHeading">Twitch Clips</h2><p id="clipsBatchHint">Ein Link pro Zeile.</p></div>
-                                <span class="clips-count" id="clipsLinkCount">0</span>
+                                <div class="clips-header-actions"><span class="clips-count" id="clipsLinkCount">0</span><button type="button" class="btn-secondary" id="clipsInfoButton" aria-controls="clipsInfoPopover" aria-expanded="false" onclick="toggleClipInfo()"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/></svg><span id="clipsInfoTitle">Info</span></button></div>
                             </header>
                             <label for="clipUrl" id="clipsLinksLabel">Twitch-Links</label>
                             <textarea id="clipUrl" rows="6" maxlength="820000" spellcheck="false" oninput="updateClipLinks()" aria-describedby="clipsBatchHint" placeholder="https://clips.twitch.tv/…"></textarea>
@@ -466,12 +466,8 @@
                                 <ol id="clipsDownloadList"></ol>
                             </section>
                         </section>
-                        <aside class="clips-info" aria-labelledby="clipsInfoTitle">
-                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 10v7M12 7v1"/></svg>
-                            <h3 id="clipsInfoTitle">Info</h3>
-                            <p id="clipsInfoText">Maximal 200 Clips.
-Speicherort: Download-Ordner → Clips → Kanal.</p>
-                        </aside>
+                        <aside class="clips-info" id="clipsInfoPopover" popover="auto" aria-labelledby="clipsInfoTitle"><p id="clipsInfoText">Maximal 200 Clips.
+Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
                     </div>
                 </div>
 
@@ -480,10 +476,10 @@ Speicherort: Download-Ordner → Clips → Kanal.</p>
                     <div class="cutter-container">
                         <div class="cutter-source-bar">
                             <div class="cutter-source-copy">
-                                <span class="cutter-source-title" id="cutterSelectTitle">Video auswählen</span>
+                                <span class="cutter-source-title" id="cutterSelectTitle" hidden>Video auswählen</span>
                                 <input type="text" id="cutterFilePath" readonly aria-labelledby="cutterSelectTitle" placeholder="Keine Datei ausgewählt…">
                             </div>
-                            <button type="button" class="btn-secondary" id="cutterBrowseBtn" onclick="selectCutterVideo()">Durchsuchen</button>
+                            <button type="button" class="btn-secondary" id="cutterBrowseBtn" onclick="selectCutterVideo()" hidden>Durchsuchen</button>
                         </div>
                         <div class="cutter-recovery-panel" id="cutterRecoveryPanel" role="status" hidden>
                             <span id="cutterRecoveryText">Gespeicherte Bearbeitung gefunden</span>
@@ -636,10 +632,10 @@ Speicherort: Download-Ordner → Clips → Kanal.</p>
                 <!-- Merge Tab -->
                 <div class="tab-content" id="mergeTab">
                     <div class="merge-container">
-                        <div class="settings-card">
+                        <div class="merge-header">
                             <h3 id="mergeTitle">Videos zusammenfügen</h3>
 
-                            <button type="button" class="btn-secondary" id="mergeAddBtn" onclick="addMergeFiles()">+ Videos hinzufügen</button>
+                            <button type="button" class="btn-primary" id="mergeAddBtn" onclick="addMergeFiles()">Videos hinzufügen</button>
                         </div>
 
                         <div class="file-list" id="mergeFileList">
@@ -705,16 +701,17 @@ Speicherort: Download-Ordner → Clips → Kanal.</p>
                             <div class="archive-filter-field"><label id="archiveTypeLabel" for="archiveSearchType">Aufnahmeart</label><select id="archiveSearchType" class="select-compact"><option value="all">Alle Aufnahmen</option><option value="live">Live-Aufnahmen</option><option value="vod">VODs</option><option value="clip">Clips</option></select></div>
                             <div class="archive-filter-field"><label id="archiveStreamerLabel" for="archiveSearchStreamer">Streamer</label><select id="archiveSearchStreamer" class="select-compact"><option value="">Alle Streamer</option></select></div>
                             <div class="archive-filter-field"><label id="archiveSortLabel" for="archiveSearchSort">Sortierung</label><select id="archiveSearchSort" class="select-compact"><option value="date_desc">Neueste zuerst</option><option value="date_asc">Älteste zuerst</option><option value="size_desc">Größte zuerst</option><option value="size_asc">Kleinste zuerst</option><option value="name_asc">Name (A–Z)</option></select></div>
-                            <button type="button" class="btn-secondary" id="btnArchiveSearch" onclick="performArchiveSearch()">Suchen</button>
+                            <button type="button" class="btn-secondary" id="btnArchiveSearch" onclick="performArchiveSearch(true)">Suchen</button>
                         </section>
                         <div class="archive-results-heading"><h3 id="archiveResultsTitle">Ergebnisse</h3><span id="archiveSearchSummary" role="status" aria-live="polite"></span></div>
                         <div id="archiveSearchResults" class="archive-results-list" aria-labelledby="archiveResultsTitle"></div>
+                        <nav class="archive-pagination" id="archivePagination" aria-label="Archiv-Seiten"><button type="button" class="btn-secondary" id="archivePrevious" onclick="changeArchivePage(-1)" disabled>Zurück</button><span id="archivePageLabel" role="status"></span><button type="button" class="btn-secondary" id="archiveNext" onclick="changeArchivePage(1)" disabled>Weiter</button></nav>
                     </div>
                 </div>
 
                 <!-- Settings Tab -->
                 <div class="tab-content" id="settingsTab" data-settings-pane="general">
-                    <header class="settings-page-heading"><h2 id="settingsGroupTitle">Allgemein</h2></header>
+                    <header class="settings-page-heading"><h2 id="settingsGroupTitle">Allgemein</h2><div id="settingsSaveNotice" class="settings-save-notice" role="status" hidden><span id="settingsSaveMessage"></span><button type="button" class="btn-secondary" id="settingsSaveRetry" onclick="flushSettingsAutoSave(true)">Erneut speichern</button></div></header>
                     <div class="settings-card" data-settings-pane="design" data-settings-group="general">
                         <h3 id="designTitle">Design</h3>
                         <div class="form-group">
@@ -791,7 +788,7 @@ Speicherort: Download-Ordner → Clips → Kanal.</p>
                     </div>
 
                     <div class="settings-card" data-settings-pane="downloads" data-settings-group="downloads" hidden>
-                        <h3 id="downloadSettingsTitle">Download-Einstellungen</h3>
+                        <h3 id="downloadSettingsTitle" hidden>Download-Einstellungen</h3>
                         <div class="form-group download-settings-storage">
                             <label id="storageLabel" for="downloadPath">Speicherort</label>
                             <div class="form-row">
@@ -824,7 +821,7 @@ Speicherort: Download-Ordner → Clips → Kanal.</p>
                                     </div>
                                     <div class="form-group">
                                         <label id="streamlinkQualityLabel" for="streamlinkQuality">Stream-Qualität</label>
-                                        <input type="text" id="streamlinkQuality" value="Source" readonly>
+                                        <output id="streamlinkQuality" class="settings-fixed-value">Source</output>
                                     </div>
                                     <div class="form-group">
                                         <label id="performanceModeLabel" for="performanceMode">Performance-Profil</label>
@@ -910,23 +907,23 @@ Speicherort: Download-Ordner → Clips → Kanal.</p>
                     </div>
 
                     <div class="settings-card" data-settings-pane="system" data-settings-group="system" hidden>
+                        <div class="system-check-grid"><section>
                         <div class="form-row section-header">
                             <h3 id="preflightTitle">System-Check</h3>
                             <span class="health-badge unknown" id="healthBadge">System: Unbekannt</span>
                         </div>
-                        <div class="system-check-grid"><section>
                         <div class="form-row" style="margin-bottom: 10px;">
                             <button type="button" class="btn-secondary" id="btnPreflightRun" onclick="runPreflight(false)">Check ausführen</button>
                             <button type="button" class="btn-secondary" id="btnPreflightFix" onclick="runPreflight(true)">Auto-Fix Tools</button>
                         </div>
-                        <pre id="preflightResult" class="log-panel">Noch kein Check ausgeführt.</pre>
-                        </section><section><h4 id="managedToolsTitle">Verwaltete Tools</h4>
+                        <details class="settings-diagnostics"><summary>Details</summary><pre id="preflightResult" class="log-panel">Noch kein Check ausgeführt.</pre></details>
+                        </section><section><div class="form-row section-header"><h3 id="managedToolsTitle">Verwaltete Tools</h3></div>
                         <div class="form-row" style="margin-bottom: 10px;">
                             <button type="button" class="btn-secondary" id="btnRefreshManagedTools" onclick="refreshManagedToolStatus()">Tool-Status aktualisieren</button>
                             <button type="button" class="btn-secondary" id="btnRepairManagedTools" onclick="repairManagedTools()">Tools reparieren</button>
                             <button type="button" class="btn-secondary" id="btnResetManagedTools" onclick="resetManagedTools()">Tools zurücksetzen</button>
                         </div>
-                        <pre id="managedToolStatus" class="log-panel">Noch kein Tool-Status geladen.</pre>
+                        <details class="settings-diagnostics"><summary>Details</summary><pre id="managedToolStatus" class="log-panel">Noch kein Tool-Status geladen.</pre></details>
                         </section></div>
                     </div>
 
@@ -940,7 +937,7 @@ Speicherort: Download-Ordner → Clips → Kanal.</p>
                                 <span id="autoRefreshText">Auto-Refresh</span>
                             </label>
                         </div>
-                        <pre id="debugLogOutput" class="log-panel">Lade...</pre>
+                        <details class="settings-diagnostics"><summary>Details</summary><pre id="debugLogOutput" class="log-panel">Lade...</pre></details>
                     </div>
 
                     <div class="settings-card" data-settings-pane="storage" data-settings-group="storage" hidden>
@@ -1053,7 +1050,7 @@ Speicherort: Download-Ordner → Clips → Kanal.</p>
                                 <span id="runtimeMetricsAutoRefreshText">Auto-Refresh</span>
                             </label>
                         </div>
-                        <pre id="runtimeMetricsOutput" class="log-panel">Lade...</pre>
+                        <details class="settings-diagnostics"><summary>Details</summary><pre id="runtimeMetricsOutput" class="log-panel">Lade...</pre></details>
                     </div>
                 </div>
             </div>

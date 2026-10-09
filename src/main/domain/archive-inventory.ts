@@ -16,7 +16,7 @@ export interface ArchiveStats {
 export interface ArchiveSearchFilter {
     query: string; type: 'all' | 'live' | 'vod' | 'clip' | 'chat' | 'events'; streamer: string;
     sinceMs: number | null; untilMs: number | null;
-    sort: 'date_desc' | 'date_asc' | 'size_desc' | 'size_asc' | 'name_asc'; limit: number;
+    sort: 'date_desc' | 'date_asc' | 'size_desc' | 'size_asc' | 'name_asc'; limit: number; offset?: number; refresh?: boolean;
 }
 export interface ArchiveSearchHit {
     fullPath: string; fileName: string; streamer: string; type: ArchiveFileType; size: number; mtimeMs: number;
@@ -24,7 +24,7 @@ export interface ArchiveSearchHit {
 }
 export interface ArchiveSearchResult {
     totalScanned: number; matchCount: number; truncated: boolean; hits: ArchiveSearchHit[];
-    scannedAt: string; rootExists: boolean; streamers: string[];
+    scannedAt: string; rootExists: boolean; streamers: string[]; offset: number;
 }
 interface ArchiveInventoryFile { fullPath: string; relativePath: string; fileName: string; streamer: string; type: ArchiveFileType; size: number; mtimeMs: number; date: string }
 export interface ArchiveInventory { root: string; rootExists: boolean; scannedAt: string; files: ArchiveInventoryFile[] }
@@ -92,21 +92,39 @@ export async function scanArchiveInventory(root: string): Promise<ArchiveInvento
     return inventory;
 }
 
-export function createArchiveInventoryReader(): (root: string) => Promise<ArchiveInventory> {
-    const active = new Map<string, Promise<ArchiveInventory>>();
-    return root => {
-        const key = root ? path.resolve(root) : '';
+export function createArchiveInventoryReader(maxAgeMs = 15000) {
+    const cache = new Map<string, { inventory: ArchiveInventory; expires: number }>();
+    const active = new Map<string, { request: Promise<ArchiveInventory>; refresh: boolean }>();
+    const resolveRoot = (root: string) => root ? path.resolve(root) : '';
+    const read = (root: string, refresh = false): Promise<ArchiveInventory> => {
+        const key = resolveRoot(root);
+        const cached = cache.get(key);
+        if (!refresh && cached && cached.expires > Date.now()) return Promise.resolve(cached.inventory);
         const existing = active.get(key);
-        if (existing) return existing;
-        const request = scanArchiveInventory(key).finally(() => active.delete(key));
-        active.set(key, request);
+        if (existing && (!refresh || existing.refresh)) return existing.request;
+        cache.delete(key);
+        const request = scanArchiveInventory(key).then(inventory => {
+            if (active.get(key)?.request === request) {
+                if (cache.size >= 4) cache.delete(cache.keys().next().value!);
+                cache.set(key, { inventory, expires: Date.now() + maxAgeMs });
+            }
+            return inventory;
+        }).finally(() => {
+            if (active.get(key)?.request === request) active.delete(key);
+        });
+        active.set(key, { request, refresh });
         return request;
     };
+    read.invalidate = (root?: string): void => {
+        if (root === undefined) { cache.clear(); active.clear(); }
+        else { const key = resolveRoot(root); cache.delete(key); active.delete(key); }
+    };
+    return read;
 }
 
 export function searchArchiveInventory(inventory: ArchiveInventory, filter: ArchiveSearchFilter): ArchiveSearchResult {
     const result: ArchiveSearchResult = {
-        totalScanned: inventory.files.length, matchCount: 0, truncated: false, hits: [], scannedAt: inventory.scannedAt, rootExists: inventory.rootExists, streamers: [],
+        totalScanned: inventory.files.length, matchCount: 0, truncated: false, hits: [], offset: 0, scannedAt: inventory.scannedAt, rootExists: inventory.rootExists, streamers: [],
     };
     const companions = new Map<string, { chat: string | null; events: string | null }>();
     for (const file of inventory.files) {
@@ -141,8 +159,10 @@ export function searchArchiveInventory(inventory: ArchiveInventory, filter: Arch
     result.hits.sort((a, b) => (compare[filter.sort] ?? compare.date_desc)(a, b) || a.fullPath.localeCompare(b.fullPath));
     result.matchCount = result.hits.length;
     const limit = Math.max(10, Math.min(2000, Math.floor(filter.limit) || 200));
-    result.truncated = result.matchCount > limit;
-    result.hits = result.hits.slice(0, limit);
+    const offset = Number.isFinite(filter.offset) ? Math.max(0, Math.floor(filter.offset!)) : 0;
+    result.offset = Math.min(offset, Math.max(0, Math.ceil(result.matchCount / limit) - 1) * limit);
+    result.truncated = result.offset + limit < result.matchCount;
+    result.hits = result.hits.slice(result.offset, result.offset + limit);
     return result;
 }
 

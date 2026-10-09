@@ -571,3 +571,7 @@ body.theme-light .insights-workspace .is-error {
         animation: none !important;
     }
 }
+
+.archive-pagination { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 16px; min-height: 36px; visibility: hidden; }
+.archive-pagination button { min-height: 34px; font-size: 14px; }
+.archive-pagination span { font-size: 14px; font-variant-numeric: tabular-nums; }

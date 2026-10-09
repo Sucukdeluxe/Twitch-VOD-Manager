@@ -582,6 +582,7 @@ function normalizeConfigTemplates(input: Config): Config {
 }
 
 function recordDownloadedVodId(vodId: string): void {
+    readArchiveInventory.invalidate();
     if (!vodId) return;
     const downloadedVodIds = Array.isArray(config.downloaded_vod_ids) ? config.downloaded_vod_ids : [];
     if (downloadedVodIds.includes(vodId)) return;
@@ -3957,6 +3958,7 @@ async function finalizeDownloadedMp4(partialFilename: string, filename: string, 
         const integrity = validateDownloadedFileIntegrity(remuxFilename, expectedDuration);
         if (!integrity.success) return integrity;
         partialDownloadRegistry.commit(remuxFilename, filename);
+        readArchiveInventory.invalidate();
         return { success: true };
     } catch (error) {
         appendDebugLog('mp4-finalization-failed', { itemId, error: String(error) });
@@ -4917,6 +4919,7 @@ function runStorageCleanup(opts: { dryRun: boolean }): CleanupReport {
         }
     }
 
+    readArchiveInventory.invalidate();
     appendDebugLog('storage-cleanup-run', {
         candidates: report.candidates,
         processed: report.processed,
@@ -8145,6 +8148,9 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
             } catch (error) {
                 appendDebugLog('clip-history-save-failed', { clipId, error: String(error) });
             }
+            readArchiveInventory.invalidate();
+            rememberRendererPath('open-file', filename);
+            rememberRendererPath('show-in-folder', filename);
             appendDebugLog('clip-download-success', { clipId, bytes: stats.size, filename });
             finish({ success: true, filename });
         });
@@ -8222,7 +8228,7 @@ ipcMain.handle('open-debug-log-file', (event): boolean => {
 
 ipcMain.handle('get-archive-stats', async (event): Promise<ArchiveStats> => {
     if (!isTrustedRendererEvent(event)) throw new Error('File access denied');
-    return summarizeArchiveInventory(await readArchiveInventory(config.download_path), downloadHistoryStore?.summarize() ?? emptyLifetimeDownloadStats());
+    return summarizeArchiveInventory(await readArchiveInventory(config.download_path, true), downloadHistoryStore?.summarize() ?? emptyLifetimeDownloadStats());
 });
 
 ipcMain.handle('get-streamer-profile', async (_, login: string, forceRefresh?: boolean): Promise<StreamerProfile | null> => {
@@ -8256,9 +8262,10 @@ ipcMain.handle('search-archive', async (event, filter: Partial<ArchiveSearchFilt
         sort: (['date_desc', 'date_asc', 'size_desc', 'size_asc', 'name_asc'] as const).includes(filter?.sort as 'date_desc')
             ? filter!.sort as 'date_desc' | 'date_asc' | 'size_desc' | 'size_asc' | 'name_asc'
             : 'date_desc',
-        limit: Number.isFinite(filter?.limit as number) ? Number(filter?.limit) : 200
+        limit: Number.isFinite(filter?.limit as number) ? Number(filter?.limit) : 200,
+        offset: Number.isFinite(filter?.offset) ? Math.max(0, Math.floor(Number(filter?.offset))) : 0
     };
-    const result = searchArchiveInventory(await readArchiveInventory(config.download_path), normalized);
+    const result = searchArchiveInventory(await readArchiveInventory(config.download_path, filter?.refresh === true), normalized);
     for (const hit of result.hits) {
         rememberRendererPath('open-file', hit.fullPath);
         rememberRendererPath('show-in-folder', hit.fullPath);
