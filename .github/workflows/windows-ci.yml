@@ -177,8 +177,8 @@ jobs:
             if (!result.success) throw new Error(`Pinned media tool provisioning failed: ${JSON.stringify(result.statuses)}`);
             if (!process.env.GITHUB_ENV) throw new Error('Actions environment export file is unavailable');
             fs.appendFileSync(process.env.GITHUB_ENV, [
-              `TWITCH_VOD_MANAGER_LIVE_STREAMLINK_PATH=${tools.getStreamlinkPath()}`,
-              `TWITCH_VOD_MANAGER_LIVE_FFPROBE_PATH=${tools.getFFprobePath()}`,
+              `TWITCH_VOD_MANAGER_LIVE_STREAMLINK_PATH=${await tools.getStreamlinkPath()}`,
+              `TWITCH_VOD_MANAGER_LIVE_FFPROBE_PATH=${await tools.getFFprobePath()}`,
               ''
             ].join('\n'));
           })().catch((error) => {

@@ -2,6 +2,66 @@
 
 ## Unreleased
 
+## 1.0.26 - 2026-10-09
+
+This update removes startup stalls, keeps large download queues responsive, and restores clip and merge workspaces after reopening the app. It also improves error recovery, archive browsing and the video editor.
+
+### Startup and responsiveness
+
+- Tool discovery and Streamlink, FFmpeg and FFprobe checks run asynchronously instead of blocking the main process. Simultaneous checks share their work and have time limits.
+- The window appears after the interface has initialized. Navigation and keyboard controls no longer wait for Twitch login or initial network requests.
+- Old preview files are cleaned up in the background, while temporary files belonging to an active editor are preserved.
+- Large queues update changed rows instead of rebuilding the entire list. Collapsed details are created when opened, reducing startup and update work.
+
+### Download queue
+
+- Changes to titles, dates, durations and output files appear reliably, including updates that do not change download progress.
+- Starting a download immediately updates its visible status, progress information and drag availability.
+- Removing selected entries updates their selection numbers correctly. The merge action disappears when the queue or eligible selection is empty.
+- Unchanged rows remain in place during updates and reordering, preserving their controls and reducing visual disruption.
+
+### Twitch Clips
+
+- Clip lists, metadata and download states are saved and restored. A running download reconnects to the interface after a renderer reload.
+- Metadata requests interrupted by a reload restart correctly instead of leaving clips stuck in the loading state.
+- Cancel the current clip during preparation, transfer or final saving. Partial files and child processes are cleaned up when cancellation completes.
+- Active transfers show downloaded data and speed. Individual clips can be removed, and saved clips can be opened or shown in their folder.
+- Saved filenames preserve umlauts and other valid Unicode characters while excluding characters Windows cannot use.
+- Missing clips and temporary metadata failures have distinct states. Retry and completion updates no longer rebuild every row in a large batch.
+
+### Joining videos
+
+- Selected files, their order and durations are restored after restarting. Missing files are identified before a merge starts.
+- Reorder files with the drag handle or the existing move actions. The workspace shows individual and total durations.
+- Failed file selection, output selection or merge requests release the controls so the operation can be retried. Rapid duplicate clicks do not start overlapping operations.
+- Retrying after an invalid or protected output location keeps access to the original input files.
+
+### Archive and video editor
+
+- Browse archive results in pages instead of being limited to the first 200 matches. Filter changes return to the first page, and late responses cannot replace a newer search.
+- Repeated archive queries reuse a short-lived inventory. Explicit refreshes and completed downloads update the inventory when needed.
+- Failed page changes keep the last successful results and allow another attempt.
+- The local editor has a more compact file header and more readable controls. Timeline labels remain visible below the audio waveform, including compact layouts.
+- VOD cards show two-line titles. Top workspace actions are aligned consistently to the right, and file sizes follow the selected language.
+
+### Settings and automation
+
+- Failed setting changes display a persistent retry action. New edits made while a save is in progress are saved afterwards instead of being lost.
+- Theme, language and download-folder changes use the same save and recovery flow.
+- Auto-VOD and live-recording scans distinguish provider failures from a successful scan with no new videos or live channels. Automation status is localized.
+- Diagnostics refresh only while their relevant section is visible. A successful log request restores the output after an earlier failure, even if the log content has not changed.
+- Redundant descriptions and duplicate headings have been reduced; diagnostics are collapsible and fixed Source quality is shown directly.
+
+### Development builds
+
+- Stylesheet changes update the running interface without restarting playback or clearing editor state. Invalid styles leave the last valid appearance in place.
+- Changes to application logic still require a restart and are identified separately by the development status indicator.
+
+### Verification
+
+- The changes were checked with 841 automated tests, Chromium and WebKit interface suites, and 1,000 queue combination steps.
+- Additional checks covered isolated startup stress, clip cancellation, Unicode output, reload recovery, real video merging and cutter export. These checks do not imply compatibility with every codec, device or network condition.
+
 ## 1.0.25 - 2026-10-09
 
 This update rebuilds Twitch Clips for batch downloads, preserves download statistics when files are removed, and simplifies navigation and settings. Twitch downloads and previews now consistently use Source quality.
