@@ -203,26 +203,15 @@ function buildQueueFingerprint(url: string, streamer: string, date: string, cust
 
 let lastQueueRenderFingerprint = '';
 
-function getQueueRenderFingerprint(items: QueueItem[]): string {
-    const lang = typeof currentLanguage === 'string' ? currentLanguage : 'en';
-    const pieces = items.map((item) => [
-        item.id,
-        getStreamerDisplayName(item.streamer),
-        item.status,
-        Math.round((Number(item.progress) || 0) * 10),
-        item.currentPart || 0,
-        item.totalParts || 0,
-        item.speed || '',
-        item.eta || '',
-        item.progressStatus || '',
-        item.recordingHealth || '',
-        item.last_error || '',
-        item.mergeRecoveryBlocked ? 'blocked' : '',
-        item.mergeGroup?.mergePhase || ''
-    ].join(':'));
-
-    return `${lang}|${selectedQueueIds.join(',')}|${[...expandedQueueIds].join(',')}|${pieces.join('|')}`;
+function getQueueItemFingerprint(item: QueueItem): string {
+    return JSON.stringify([currentLanguage, getStreamerDisplayName(item.streamer), selectedQueueIds.indexOf(item.id), expandedQueueIds.has(item.id), item]);
 }
+
+function getQueueRenderFingerprint(items: QueueItem[]): string {
+    return JSON.stringify([currentLanguage, selectedQueueIds, [...expandedQueueIds], items.map(getQueueItemFingerprint)]);
+}
+
+const queueRowCache = new Map<string, { element: HTMLElement; fingerprint: string }>();
 
 function hasActiveQueueDuplicate(url: string, streamer: string, date: string, customClip?: CustomClip): boolean {
     const target = buildQueueFingerprint(url, streamer, date, customClip);
@@ -563,12 +552,17 @@ function updateQueueItemProgress(progress: DownloadProgress): void {
     const progressId = String(progress.id ?? '');
     if (!progressId) return;
     const list = byId<HTMLElement>('queueList');
-    const el = Array.from(list.querySelectorAll<HTMLElement>('.queue-item'))
+    const el = queueRowCache.get(progressId)?.element || Array.from(list.querySelectorAll<HTMLElement>('.queue-item'))
         .find((candidate) => candidate.dataset.id === progressId) || null;
     if (!el) return;
 
     const item = queue.find(i => String(i.id) === progressId);
     if (!item) return;
+
+    if (item.status !== 'pending' && selectedQueueIds.includes(item.id)) {
+        renderQueue();
+        return;
+    }
 
     const bar = el.querySelector('.queue-progress-bar') as HTMLElement | null;
     const wrap = el.querySelector('.queue-progress-wrap') as HTMLElement | null;
@@ -590,6 +584,18 @@ function updateQueueItemProgress(progress: DownloadProgress): void {
         metrics.textContent = getQueueProgressMetricsText(item);
         metrics.title = metrics.textContent;
     }
+    el.draggable = item.status === 'pending';
+    const badge = el.querySelector<HTMLElement>('.queue-status-badge');
+    const label = badge?.querySelector<HTMLElement>('.queue-status-label');
+    const indicator = badge?.querySelector<HTMLElement>('.status');
+    if (badge) badge.title = getQueueProgressStatusText(item);
+    if (label) label.textContent = getQueueStatusLabel(item);
+    if (indicator) indicator.className = 'status ' + item.status;
+    wrap?.setAttribute('aria-label', getQueueStatusLabel(item));
+    el.querySelector('.queue-progress-info')?.classList.toggle('is-hidden', item.status === 'pending' || item.status === 'completed');
+    status?.classList.toggle('is-starting', item.status === 'downloading' && item.progress <= 0);
+    status?.classList.toggle('is-hidden', item.status === 'paused');
+    if (item.status !== 'error') el.querySelector('.queue-retry-btn')?.remove();
     syncQueueRecordingHealth(el, item);
 }
 
@@ -603,6 +609,11 @@ function toggleQueueDetails(id: string): void {
         .find((candidate) => candidate.dataset.id === id);
     const details = item?.querySelector<HTMLElement>('.queue-details');
     if (details) {
+        if (expandedQueueIds.has(id) && !details.firstElementChild) {
+            const entry = queue.find(candidate => candidate.id === id);
+            if (entry) details.innerHTML = renderQueueDetails(entry);
+            details.getBoundingClientRect();
+        }
         details.classList.toggle('expanded', expandedQueueIds.has(id));
         details.inert = !expandedQueueIds.has(id);
     }
@@ -678,6 +689,7 @@ function renderQueue(): void {
     clearBtn.disabled = !hasCompleted;
     updateDownloadButtonState();
 
+    updateMergeGroupButton();
     const renderFingerprint = getQueueRenderFingerprint(queue);
     if (renderFingerprint === lastQueueRenderFingerprint) {
         return;
@@ -689,6 +701,7 @@ function renderQueue(): void {
         // clean of inline-style HTML strings (which the lint hook
         // flags as a potential XSS surface). The CSS for .queue-empty
         // lives in styles.css.
+        queueRowCache.clear();
         list.replaceChildren();
         const empty = document.createElement('div');
         empty.className = 'queue-empty';
@@ -697,80 +710,100 @@ function renderQueue(): void {
         return;
     }
 
-    list.innerHTML = queue.map((item: QueueItem, itemIndex: number) => {
-        const safeTitle = escapeHtml(item.title || UI_TEXT.vods.untitled);
-        const safeStatusLabel = escapeHtml(getQueueStatusLabel(item));
-        const safeProgressStatus = escapeHtml(getQueueProgressStatusText(item));
-        const safeProgressMetrics = escapeHtml(getQueueProgressMetricsText(item));
-        const safeDate = escapeHtml(formatUiDate(item.date));
-        const progressStatusClass = item.status === 'downloading' && item.progress <= 0 ? ' is-starting' : '';
-        const isClip = item.customClip ? '* ' : '';
-        const hasDeterminateProgress = item.progress > 0 && item.progress <= 100;
-        const progressValue = item.status === 'completed'
-            ? 100
-            : (hasDeterminateProgress ? Math.max(0, Math.min(100, item.progress)) : 0);
+    const ids = new Set(queue.map(item => item.id));
+    for (const [id, cached] of queueRowCache) {
+        if (!ids.has(id)) {
+            cached.element.remove();
+            queueRowCache.delete(id);
+        }
+    }
+    list.querySelector('.queue-empty')?.remove();
+    const template = document.createElement('template');
+    queue.forEach((item, index) => {
+        const fingerprint = getQueueItemFingerprint(item);
+        let cached = queueRowCache.get(item.id);
+        if (!cached || cached.fingerprint !== fingerprint) {
+            template.innerHTML = renderQueueItem(item);
+            const element = template.content.firstElementChild as HTMLElement;
+            if (cached) {
+                const active = cached.element.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+                const action = active?.dataset.queueAction;
+                cached.element.replaceWith(element);
+                if (action) element.querySelector<HTMLElement>('[data-queue-action="' + action + '"]')?.focus({ preventScroll: true });
+            }
+            cached = { element, fingerprint };
+            queueRowCache.set(item.id, cached);
+        }
+        if (list.children[index] !== cached.element) list.insertBefore(cached.element, list.children[index] || null);
+    });
 
-        const isMergeGroup = !!item.mergeGroup;
-        const selectionIndex = selectedQueueIds.indexOf(item.id);
-        const isSelected = selectionIndex >= 0;
-        const selectionPosition = selectionIndex + 1;
-        const selectionTitle = escapeHtml(UI_TEXT.queue.mergeSelectionPosition.replace('{position}', String(selectionPosition)));
-        const mergeIcon = isMergeGroup
-            ? '<svg class="merge-group-icon" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z"/></svg> '
-            : '';
-        const liveBadge = item.isLive
-            ? `<span class="queue-live-badge" title="${escapeHtml(UI_TEXT.queue.liveRecordingTitle)}">REC</span> `
-            : '';
-        const healthBadge = (item.isLive && item.status === 'downloading')
-            ? renderRecordingHealthBadge(item.recordingHealth)
-            : '';
-        const mergeMetaExtra = isMergeGroup
-            ? escapeHtml(UI_TEXT.mergeGroup.metaLabel.replace('{count}', formatUiNumber(item.mergeGroup!.items.length)))
-            : '';
-        const detailsId = `queue-details-${itemIndex}`;
-
-        return `
-            <div class="queue-item${isMergeGroup ? ' merge-group' : ''}${isSelected ? ' merge-selected' : ''}" draggable="${item.status === 'pending' ? 'true' : 'false'}" data-id="${escapeHtml(item.id)}">
-                ${isSelected ? `<span class="queue-selection-order" title="${selectionTitle}" aria-label="${selectionTitle}">${selectionPosition}</span>` : ''}
-                <div class="queue-main">
-                    <div class="queue-title-row">
-                        <div class="title" title="${safeTitle}">${liveBadge}${healthBadge}${mergeIcon}${isClip}${safeTitle}</div>
-                        ${item.status === 'error' && !item.mergeRecoveryBlocked ? `<button class="queue-retry-btn" type="button" title="${escapeHtml(UI_TEXT.queue.retryItem)}" aria-label="${escapeHtml(UI_TEXT.queue.retryItem)}" data-queue-action="retry">&#x21bb;</button>` : ''}
-                        <button class="remove" type="button" title="${escapeHtml(UI_TEXT.queue.removeItem)}" aria-label="${escapeHtml(UI_TEXT.queue.removeItem)}" data-queue-action="remove"><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"/></svg></button>
-                    </div>
-                    ${mergeMetaExtra ? `<div class="queue-meta">${mergeMetaExtra}</div>` : ''}
-                    <div class="queue-progress-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progressValue)}" aria-label="${escapeHtml(safeStatusLabel)}">
-                        <div class="queue-progress-bar" style="width: ${progressValue}%;"></div>
-                    </div>
-                    <div class="queue-footer">
-                        <div class="queue-summary">
-                            <button class="queue-details-toggle" type="button" aria-label="${escapeHtml(UI_TEXT.queue.toggleDetails)}" title="${escapeHtml(UI_TEXT.queue.toggleDetails)}" aria-expanded="${expandedQueueIds.has(item.id) ? 'true' : 'false'}" aria-controls="${detailsId}" data-queue-action="details"><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m7 10 5 5 5-5"/></svg></button>
-                            <span class="queue-date">${safeDate}</span>
-                        </div>
-                        <span class="queue-status-badge" title="${safeProgressStatus}"><span class="status ${item.status}" aria-hidden="true"></span><span class="queue-status-label">${safeStatusLabel}</span></span>
-                    </div>
-                    <div class="queue-progress-info${item.status === 'pending' || item.status === 'completed' ? ' is-hidden' : ''}">
-                        <span class="queue-progress-status${progressStatusClass}${item.status === 'paused' ? ' is-hidden' : ''}" title="${escapeHtml(item.progressStatus || getQueueProgressStatusText(item))}">${safeProgressStatus}</span>
-                        <span class="queue-progress-metrics" title="${safeProgressMetrics}">${safeProgressMetrics}</span>
-                    </div>
-                    <div class="queue-details${expandedQueueIds.has(item.id) ? ' expanded' : ''}" id="${detailsId}"${expandedQueueIds.has(item.id) ? '' : ' inert'}>
-                        <div class="queue-details-clip"><div class="queue-details-content">
-                        <div class="queue-url-row"><span class="queue-detail-label">URL:</span><button class="queue-url-copy" type="button" data-queue-action="copy-url" aria-label="${escapeHtml(UI_TEXT.queue.ctxCopyUrl)}" title="${escapeHtml(UI_TEXT.queue.ctxCopyUrl)}: ${escapeHtml(item.url)}">${escapeHtml(item.url)}</button></div>
-                        <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailStreamer)}</span> <span class="queue-streamer-name">${escapeHtml(getStreamerDisplayName(item.streamer))}</span></div>
-                        <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDuration)}</span> ${escapeHtml(item.duration_str)}</div>
-                        <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDate)}</span> ${escapeHtml(formatUiDateTime(item.date))}</div>
-                        ${renderQueueOmissions(item)}
-                        ${renderQueueItemFileActions(item)}
-                        </div></div>
-                    </div>
-                </div>
-            </div>
-        `;
-    }).join('');
-
-    updateMergeGroupButton();
     initQueueContextMenu();
     lastQueueRenderFingerprint = renderFingerprint;
+}
+
+function renderQueueItem(item: QueueItem): string {
+    const safeTitle = escapeHtml(item.title || UI_TEXT.vods.untitled);
+    const safeStatusLabel = escapeHtml(getQueueStatusLabel(item));
+    const safeProgressStatus = escapeHtml(getQueueProgressStatusText(item));
+    const safeProgressMetrics = escapeHtml(getQueueProgressMetricsText(item));
+    const safeDate = escapeHtml(formatUiDate(item.date));
+    const progressStatusClass = item.status === 'downloading' && item.progress <= 0 ? ' is-starting' : '';
+    const isClip = item.customClip ? '* ' : '';
+    const hasDeterminateProgress = item.progress > 0 && item.progress <= 100;
+    const progressValue = item.status === 'completed'
+        ? 100
+        : (hasDeterminateProgress ? Math.max(0, Math.min(100, item.progress)) : 0);
+
+    const isMergeGroup = !!item.mergeGroup;
+    const selectionIndex = selectedQueueIds.indexOf(item.id);
+    const isSelected = selectionIndex >= 0;
+    const selectionPosition = selectionIndex + 1;
+    const selectionTitle = escapeHtml(UI_TEXT.queue.mergeSelectionPosition.replace('{position}', String(selectionPosition)));
+    const mergeIcon = isMergeGroup
+        ? '<svg class="merge-group-icon" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z"/></svg> '
+        : '';
+    const liveBadge = item.isLive
+        ? `<span class="queue-live-badge" title="${escapeHtml(UI_TEXT.queue.liveRecordingTitle)}">REC</span> `
+        : '';
+    const healthBadge = (item.isLive && item.status === 'downloading')
+        ? renderRecordingHealthBadge(item.recordingHealth)
+        : '';
+    const mergeMetaExtra = isMergeGroup
+        ? escapeHtml(UI_TEXT.mergeGroup.metaLabel.replace('{count}', formatUiNumber(item.mergeGroup!.items.length)))
+        : '';
+    const detailsId = `queue-details-${encodeURIComponent(item.id)}`;
+
+    return `
+        <div class="queue-item${isMergeGroup ? ' merge-group' : ''}${isSelected ? ' merge-selected' : ''}" draggable="${item.status === 'pending' ? 'true' : 'false'}" data-id="${escapeHtml(item.id)}">
+            ${isSelected ? `<span class="queue-selection-order" title="${selectionTitle}" aria-label="${selectionTitle}">${selectionPosition}</span>` : ''}
+            <div class="queue-main">
+                <div class="queue-title-row">
+                    <div class="title" title="${safeTitle}">${liveBadge}${healthBadge}${mergeIcon}${isClip}${safeTitle}</div>
+                    ${item.status === 'error' && !item.mergeRecoveryBlocked ? `<button class="queue-retry-btn" type="button" title="${escapeHtml(UI_TEXT.queue.retryItem)}" aria-label="${escapeHtml(UI_TEXT.queue.retryItem)}" data-queue-action="retry">&#x21bb;</button>` : ''}
+                    <button class="remove" type="button" title="${escapeHtml(UI_TEXT.queue.removeItem)}" aria-label="${escapeHtml(UI_TEXT.queue.removeItem)}" data-queue-action="remove"><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"/></svg></button>
+                </div>
+                ${mergeMetaExtra ? `<div class="queue-meta">${mergeMetaExtra}</div>` : ''}
+                <div class="queue-progress-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progressValue)}" aria-label="${escapeHtml(safeStatusLabel)}">
+                    <div class="queue-progress-bar" style="width: ${progressValue}%;"></div>
+                </div>
+                <div class="queue-footer">
+                    <div class="queue-summary">
+                        <button class="queue-details-toggle" type="button" aria-label="${escapeHtml(UI_TEXT.queue.toggleDetails)}" title="${escapeHtml(UI_TEXT.queue.toggleDetails)}" aria-expanded="${expandedQueueIds.has(item.id) ? 'true' : 'false'}" aria-controls="${detailsId}" data-queue-action="details"><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m7 10 5 5 5-5"/></svg></button>
+                        <span class="queue-date">${safeDate}</span>
+                    </div>
+                    <span class="queue-status-badge" title="${safeProgressStatus}"><span class="status ${item.status}" aria-hidden="true"></span><span class="queue-status-label">${safeStatusLabel}</span></span>
+                </div>
+                <div class="queue-progress-info${item.status === 'pending' || item.status === 'completed' ? ' is-hidden' : ''}">
+                    <span class="queue-progress-status${progressStatusClass}${item.status === 'paused' ? ' is-hidden' : ''}" title="${escapeHtml(item.progressStatus || getQueueProgressStatusText(item))}">${safeProgressStatus}</span>
+                    <span class="queue-progress-metrics" title="${safeProgressMetrics}">${safeProgressMetrics}</span>
+                </div>
+                <div class="queue-details${expandedQueueIds.has(item.id) ? ' expanded' : ''}" id="${detailsId}"${expandedQueueIds.has(item.id) ? '' : ' inert'}>
+                    ${expandedQueueIds.has(item.id) || queueRowCache.get(item.id)?.element.querySelector('.queue-details-content') ? renderQueueDetails(item) : ''}
+                </div>
+            </div>
+        </div>
+    `;
+
 }
 
 async function toggleDownload(): Promise<void> {
@@ -784,4 +817,15 @@ async function toggleDownload(): Promise<void> {
         renderQueue();
         alert(UI_TEXT.queue.emptyAlert);
     }
+}
+
+function renderQueueDetails(item: QueueItem): string {
+    return `                        <div class="queue-details-clip"><div class="queue-details-content">
+                        <div class="queue-url-row"><span class="queue-detail-label">URL:</span><button class="queue-url-copy" type="button" data-queue-action="copy-url" aria-label="${escapeHtml(UI_TEXT.queue.ctxCopyUrl)}" title="${escapeHtml(UI_TEXT.queue.ctxCopyUrl)}: ${escapeHtml(item.url)}">${escapeHtml(item.url)}</button></div>
+                        <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailStreamer)}</span> <span class="queue-streamer-name">${escapeHtml(getStreamerDisplayName(item.streamer))}</span></div>
+                        <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDuration)}</span> ${escapeHtml(item.duration_str)}</div>
+                        <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDate)}</span> ${escapeHtml(formatUiDateTime(item.date))}</div>
+                        ${renderQueueOmissions(item)}
+                        ${renderQueueItemFileActions(item)}
+                        </div></div>`;
 }
