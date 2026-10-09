@@ -1248,7 +1248,7 @@
         white-space: nowrap;
         text-overflow: ellipsis;
         border: 0;
-        font-size: 13px;
+        font-size: clamp(14px, calc(1.25vw - 4px), 18px);
     }
 
     .topbar-navigation-cluster .top-nav-item[data-tab="vods"] {
