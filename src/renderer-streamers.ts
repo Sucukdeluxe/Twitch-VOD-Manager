@@ -356,7 +356,7 @@ function buildVodCardHtml(vod: VOD, streamer: string, downloadedIds?: Set<string
             <input type="checkbox" class="vod-select-checkbox" data-vod-url="${safeUrlAttr}" ${isChecked ? 'checked' : ''} aria-label="${escapeHtml(UI_TEXT.vods.selectAriaLabel)}">
             ${downloadedBadge}
             <div class="vod-thumb-wrap">
-                <img class="vod-thumbnail" loading="lazy" decoding="async" src="${thumb}" alt="" title="${escapeHtml(UI_TEXT.vods.selectAriaLabel)}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 320 180%22><rect fill=%22%23333%22 width=%22320%22 height=%22180%22/></svg>'">
+                <img class="vod-thumbnail" loading="lazy" decoding="async" src="${thumb}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 320 180%22><rect fill=%22%23333%22 width=%22320%22 height=%22180%22/></svg>'">
                 <div class="vod-duration-badge">${escapeHtml(vod.duration)}</div>
             </div>
             <div class="vod-info">
