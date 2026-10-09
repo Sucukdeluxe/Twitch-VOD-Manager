@@ -484,6 +484,10 @@
     overflow: visible;
 }
 
+.workspace-toolbar .toolbar-context[data-toolbar-for="cutter"] {
+    margin-inline-start: auto;
+}
+
 .workspace-toolbar .toolbar-primary {
     height: 36px;
     min-height: 36px;
