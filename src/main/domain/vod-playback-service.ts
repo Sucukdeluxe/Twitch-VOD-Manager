@@ -33,7 +33,7 @@ interface PlaybackSession {
 
 interface PlaybackTools {
     prepare: () => Promise<boolean>;
-    streamlink: () => { command: string; prefixArgs: string[] };
+    streamlink: () => { command: string; prefixArgs: string[] } | Promise<{ command: string; prefixArgs: string[] }>;
     quality: string;
 }
 
@@ -81,7 +81,7 @@ export class VodPlaybackService {
             });
             signal.throwIfAborted();
             if (!prepared) throw new Error('Playback tools unavailable');
-            const streamlink = tools.streamlink();
+            const streamlink = await tools.streamlink();
             const output = await runMediaProcess(streamlink.command, [
                 ...streamlink.prefixArgs, '--loglevel', 'none', '--stream-url', request.url, tools.quality,
             ], { signal, timeoutMs: 60000 });

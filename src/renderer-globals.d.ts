@@ -542,6 +542,7 @@ interface ApiBridge {
     cutVideo(inputCapability: string, startTime: number, endTime: number): Promise<{ success: boolean; outputName: string | null }>;
     mergeVideos(inputCapabilities: string[], outputCapability: string): Promise<{ success: boolean; outputName: string | null }>;
     getVersion(): Promise<string>;
+    notifyRendererReady(): void;
     checkUpdate(): Promise<{ checking?: boolean; error?: boolean; skipped?: 'ready-to-install' | 'in-progress' | 'throttled' | 'timed-out' | 'error' | string }>;
     downloadUpdate(): Promise<{ downloading?: boolean; error?: boolean; skipped?: 'ready-to-install' | 'in-progress' | 'error' | string }>;
     installUpdate(): Promise<void>;

@@ -5,6 +5,7 @@ const QUEUE_SYNC_HIDDEN_MS = 9000;
 const QUEUE_SYNC_RECENT_ACTIVITY_WINDOW_MS = 15000;
 
 async function init(): Promise<void> {
+    performance.mark('tvm:init-start');
     const [loadedConfig, loadedSecretStatus, initialQueue, isDown, version] = await Promise.all([
         window.api.getConfig(),
         window.api.getSecretStatus(),
@@ -12,6 +13,7 @@ async function init(): Promise<void> {
         window.api.isDownloading(),
         window.api.getVersion()
     ]);
+    performance.mark('tvm:config-ready');
     config = loadedConfig;
     secretStatus = loadedSecretStatus;
     const language = setLanguage((config.language as string) || 'en');
@@ -183,31 +185,6 @@ async function init(): Promise<void> {
         else startStatsBarPolling();
     });
 
-    if (config.client_id && secretStatus.clientSecretConfigured) {
-        await connect();
-    } else {
-        updateStatus(UI_TEXT.status.noLogin, false);
-    }
-
-    if (config.streamers && config.streamers.length > 0) {
-        const preloader = (window as unknown as { preloadConfiguredStreamerData?: (streamers: string[]) => Promise<void> }).preloadConfiguredStreamerData;
-        if (typeof preloader === 'function') void preloader(config.streamers as string[]);
-        await selectStreamer(config.streamers[0]);
-    }
-
-    const startBackgroundRefresh = (window as unknown as { startStreamerBackgroundRefresh?: () => void }).startStreamerBackgroundRefresh;
-    if (typeof startBackgroundRefresh === 'function') startBackgroundRefresh();
-
-    setTimeout(() => {
-        void checkUpdateSilent();
-    }, 3000);
-
-    void runPreflight(false);
-    void refreshManagedToolStatus();
-    void refreshDebugLog();
-    validateFilenameTemplates();
-    void refreshRuntimeMetrics();
-
     document.addEventListener('visibilitychange', () => {
         scheduleQueueSync(document.hidden ? 600 : 150);
     });
@@ -287,6 +264,38 @@ async function init(): Promise<void> {
     });
 
     scheduleQueueSync(QUEUE_SYNC_DEFAULT_MS);
+    performance.mark('tvm:ui-ready');
+    window.api.notifyRendererReady?.();
+    setTimeout(() => { void startRendererServices().catch(error => console.error('startup-services-failed', error)); }, 0);
+}
+
+async function startRendererServices(): Promise<void> {
+    if (config.client_id && secretStatus.clientSecretConfigured) {
+        await connect();
+    } else {
+        updateStatus(UI_TEXT.status.noLogin, false);
+    }
+
+    if (config.streamers && config.streamers.length > 0) {
+        const preloader = (window as unknown as { preloadConfiguredStreamerData?: (streamers: string[]) => Promise<void> }).preloadConfiguredStreamerData;
+        if (typeof preloader === 'function') void preloader(config.streamers as string[]);
+        await selectStreamer(config.streamers[0]);
+    }
+
+    const startBackgroundRefresh = (window as unknown as { startStreamerBackgroundRefresh?: () => void }).startStreamerBackgroundRefresh;
+    if (typeof startBackgroundRefresh === 'function') startBackgroundRefresh();
+
+    setTimeout(() => {
+        void checkUpdateSilent();
+    }, 3000);
+
+    void runPreflight(false);
+    void refreshManagedToolStatus();
+    void refreshDebugLog();
+    validateFilenameTemplates();
+    void refreshRuntimeMetrics();
+
+    performance.mark('tvm:services-ready');
 }
 
 function openTwitchDevConsole(): void {

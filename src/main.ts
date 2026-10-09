@@ -8,7 +8,8 @@ import { parseTwitchClipId } from './main/twitch/clip-url';
 import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, Notification, type IpcMainInvokeEvent } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { spawn, ChildProcess, spawnSync } from 'child_process';
+import { spawn, ChildProcess, execFile } from 'child_process';
+import { promisify } from 'node:util';
 import { connect as tlsConnect, TLSSocket } from 'node:tls';
 import { pathToFileURL } from 'node:url';
 import type { Transform } from 'node:stream';
@@ -139,7 +140,7 @@ import {
     getStreamlinkCommand, getFFmpegPath, getFFprobePath,
     refreshBundledToolPaths, ensureStreamlinkInstalled, ensureFfmpegInstalled,
     getManagedToolStatuses, repairManagedTools, resetManagedTools,
-    canExecuteCommand,
+    canExecuteCommand, cancelPendingToolChecks,
     cacheVerifiedStreamlinkCommand,
     cacheVerifiedFfmpegCommands,
     setManagedToolExecutionObserver
@@ -1058,9 +1059,10 @@ async function runPreflight(autoFix = false): Promise<PreflightResult> {
     appendDebugLog('preflight-start', { autoFix });
 
     refreshBundledToolPaths();
+    const internetCheck = hasInternetConnection();
 
     const checks: PreflightChecks = {
-        internet: await hasInternetConnection(),
+        internet: false,
         streamlink: false,
         ffmpeg: false,
         ffprobe: false,
@@ -1073,19 +1075,19 @@ async function runPreflight(autoFix = false): Promise<PreflightResult> {
         refreshBundledToolPaths(true);
     }
 
-    const streamlinkCmd = getStreamlinkCommand();
-    checks.streamlink = canExecuteCommand(streamlinkCmd.command, [...streamlinkCmd.prefixArgs, '--version']);
-    if (checks.streamlink) {
-        cacheVerifiedStreamlinkCommand(streamlinkCmd.command, [...streamlinkCmd.prefixArgs, '--version']);
-    }
-
-    const ffmpegPath = getFFmpegPath();
-    const ffprobePath = getFFprobePath();
-    checks.ffmpeg = canExecuteCommand(ffmpegPath, ['-version']);
-    checks.ffprobe = canExecuteCommand(ffprobePath, ['-version']);
-    if (checks.ffmpeg && checks.ffprobe) {
-        cacheVerifiedFfmpegCommands(ffmpegPath, ffprobePath);
-    }
+    const ffmpegPath = await getFFmpegPath();
+    const ffprobePath = await getFFprobePath();
+    const streamlinkCheck = getStreamlinkCommand().then(async command => {
+        const args = [...command.prefixArgs, '--version'];
+        const runnable = await canExecuteCommand(command.command, args);
+        if (runnable) cacheVerifiedStreamlinkCommand(command.command, args);
+        return runnable;
+    });
+    [checks.internet, checks.streamlink, checks.ffmpeg, checks.ffprobe] = await Promise.all([
+        internetCheck, streamlinkCheck,
+        canExecuteCommand(ffmpegPath, ['-version']), canExecuteCommand(ffprobePath, ['-version']),
+    ]);
+    if (checks.ffmpeg && checks.ffprobe) cacheVerifiedFfmpegCommands(ffmpegPath, ffprobePath);
 
     const messages: string[] = [];
     if (!checks.internet) messages.push(tBackend('preflightNoInternet'));
@@ -1828,15 +1830,17 @@ function parseClockDurationSeconds(duration: string | null): number | null {
     return Math.max(0, Math.floor(parts[0] * 3600 + parts[1] * 60 + parts[2]));
 }
 
-function probeMediaFile(filePath: string): { durationSeconds: number; hasVideo: boolean } | null {
+const executeFile = promisify(execFile);
+
+async function probeMediaFile(filePath: string): Promise<{ durationSeconds: number; hasVideo: boolean } | null> {
     try {
-        const ffprobePath = getFFprobePath();
-        if (!canExecuteCommand(ffprobePath, ['-version'])) {
+        const ffprobePath = await getFFprobePath();
+        if (!await canExecuteCommand(ffprobePath, ['-version'])) {
             return null;
         }
 
         recordManagedToolExecution('ffprobe', ffprobePath);
-        const res = spawnSync(ffprobePath, [
+        const res = await executeFile(ffprobePath, [
             '-v', 'error',
             '-print_format', 'json',
             '-show_format',
@@ -1844,10 +1848,12 @@ function probeMediaFile(filePath: string): { durationSeconds: number; hasVideo: 
             filePath
         ], {
             windowsHide: true,
-            encoding: 'utf-8'
+            encoding: 'utf-8',
+            timeout: 15000,
+            maxBuffer: 4 * 1024 * 1024
         });
 
-        if (res.status !== 0 || !res.stdout) {
+        if (!res.stdout) {
             return null;
         }
 
@@ -1868,8 +1874,8 @@ function probeMediaFile(filePath: string): { durationSeconds: number; hasVideo: 
     }
 }
 
-function validateDownloadedFileIntegrity(filePath: string, expectedDurationSeconds: number | null): DownloadResult {
-    const probed = probeMediaFile(filePath);
+async function validateDownloadedFileIntegrity(filePath: string, expectedDurationSeconds: number | null): Promise<DownloadResult> {
+    const probed = await probeMediaFile(filePath);
     if (!probed) {
         appendDebugLog('integrity-probe-skipped', { filePath });
         return { success: true };
@@ -2740,8 +2746,9 @@ async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProces
         return null;
     }
 
+    const ffprobe = await getFFprobePath();
+    if (appShutdownStarted) return null;
     return new Promise((resolve) => {
-        const ffprobe = getFFprobePath();
         const args = [
             '-v', 'quiet',
             '-print_format', 'json',
@@ -2837,9 +2844,9 @@ async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProces
 }
 
 async function runCutterFfmpegProbe(args: string[], captureOutput: boolean): Promise<{ success: boolean; output: string }> {
+    const ffmpegPath = await getFFmpegPath();
     if (appShutdownStarted) return { success: false, output: '' };
     return await new Promise((resolve) => {
-        const ffmpegPath = getFFmpegPath();
         recordManagedToolExecution('ffmpeg', ffmpegPath);
         const proc = spawn(ffmpegPath, args, { windowsHide: true });
         currentCutterProbeProcesses.add(proc);
@@ -2908,13 +2915,13 @@ function cancelCutterWaveformPreparation(): void {
     }
 }
 
-function runEditorMediaProcess(args: string[], runGeneration: number): Promise<boolean> {
+async function runEditorMediaProcess(args: string[], runGeneration: number): Promise<boolean> {
+    const ffmpegPath = await getFFmpegPath();
     return new Promise((resolve) => {
         if (runGeneration !== cutterAssetRunGeneration || appShutdownStarted) {
             resolve(false);
             return;
         }
-        const ffmpegPath = getFFmpegPath();
         recordManagedToolExecution('ffmpeg', ffmpegPath);
         const proc = spawn(ffmpegPath, args, { windowsHide: true });
         currentCutterMediaProcesses.add(proc);
@@ -2931,13 +2938,13 @@ function runEditorMediaProcess(args: string[], runGeneration: number): Promise<b
     });
 }
 
-function runEditorWaveformProcess(args: string[], runGeneration: number): Promise<boolean> {
+async function runEditorWaveformProcess(args: string[], runGeneration: number): Promise<boolean> {
+    const ffmpegPath = await getFFmpegPath();
     return new Promise((resolve) => {
         if (runGeneration !== cutterWaveformGeneration || appShutdownStarted) {
             resolve(false);
             return;
         }
-        const ffmpegPath = getFFmpegPath();
         recordManagedToolExecution('ffmpeg', ffmpegPath);
         const proc = spawn(ffmpegPath, args, { windowsHide: true });
         currentCutterWaveformProcesses.add(proc);
@@ -2954,13 +2961,13 @@ function runEditorWaveformProcess(args: string[], runGeneration: number): Promis
     });
 }
 
-function runEditorPreviewProcess(args: string[], requestGeneration: number): Promise<boolean> {
+async function runEditorPreviewProcess(args: string[], requestGeneration: number): Promise<boolean> {
+    const ffmpegPath = await getFFmpegPath();
     return new Promise((resolve) => {
         if (requestGeneration !== cutterMediaRequestGeneration || appShutdownStarted) {
             resolve(false);
             return;
         }
-        const ffmpegPath = getFFmpegPath();
         recordManagedToolExecution('ffmpeg', ffmpegPath);
         const proc = spawn(ffmpegPath, args, { windowsHide: true });
         currentCutterPreviewProcesses.add(proc);
@@ -3296,8 +3303,9 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
     });
     if (plan.filterComplex.length > 24000 || cutterExportCancelled) return false;
     currentCutterPartialFile = partialFile;
+    const ffmpegPath = await getFFmpegPath();
+    if (cutterExportCancelled || appShutdownStarted) return false;
     const runPlan = async (activePlan: ReturnType<typeof createCutterExportPlan>): Promise<boolean> => await new Promise<boolean>((resolve) => {
-        const ffmpegPath = getFFmpegPath();
         recordManagedToolExecution('ffmpeg', ffmpegPath);
         const proc = spawn(ffmpegPath, activePlan.ffmpegArgs, { windowsHide: true });
         currentCutterProcess = proc;
@@ -3397,8 +3405,9 @@ async function extractFrame(filePath: string, timeSeconds: number): Promise<stri
         return null;
     }
 
+    const ffmpeg = await getFFmpegPath();
+    if (appShutdownStarted) return null;
     return new Promise((resolve) => {
-        const ffmpeg = getFFmpegPath();
         const tempFile = path.join(app.getPath('temp'), `frame_${process.pid}_${Date.now()}.jpg`);
 
         const args = [
@@ -3473,7 +3482,7 @@ async function concatVideoFiles(inputFiles: string[], outputFile: string, itemId
         return false;
     }
 
-    const ffmpeg = getFFmpegPath();
+    const ffmpeg = await getFFmpegPath();
     const args = [
         '-f', 'concat',
         '-safe', '0',
@@ -3551,7 +3560,7 @@ async function cutVideo(
         return false;
     }
 
-    const ffmpeg = getFFmpegPath();
+    const ffmpeg = await getFFmpegPath();
     const duration = Math.max(0.1, endTime - startTime);
 
     let inputBytes = 0;
@@ -3665,7 +3674,8 @@ async function mergeVideos(
         return false;
     }
 
-    const ffmpeg = getFFmpegPath();
+    const ffmpeg = await getFFmpegPath();
+    if (appShutdownStarted) return false;
     const concatFile = path.join(app.getPath('temp'), `concat_${Date.now()}.txt`);
     const concatContent = inputFiles.map((filePath) => {
         const normalized = filePath.replace(/\\/g, '/');
@@ -3841,7 +3851,8 @@ async function splitMergedFile(
         return { success: false, files: [] };
     }
 
-    const ffmpeg = getFFmpegPath();
+    const ffmpeg = await getFFmpegPath();
+    if (appShutdownStarted) return { success: false, files: [] };
     const numParts = Math.ceil(totalDurationSec / partDurationSec);
     const splitFiles: string[] = [];
 
@@ -3935,8 +3946,8 @@ async function finalizeDownloadedMp4(partialFilename: string, filename: string, 
         await remuxMp4({
             inputPath: partialFilename,
             outputPath: remuxFilename,
-            ffmpegPath: getFFmpegPath(),
-            ffprobePath: getFFprobePath(),
+            ffmpegPath: await getFFmpegPath(),
+            ffprobePath: await getFFprobePath(),
             onProcess: (process) => {
                 if (clipTracking) clipTracking.process = process;
                 const remuxRegistration = itemId ? queueProcessRegistry.register(itemId, 'post-processing', createPhaseBoundaryProcessResource(
@@ -3947,7 +3958,8 @@ async function finalizeDownloadedMp4(partialFilename: string, filename: string, 
             },
         });
         if (appShutdownStarted || clipTracking?.cancelled || !(await waitForQueuePhaseBoundary(itemId))) throw new Error('Download cancelled');
-        const integrity = validateDownloadedFileIntegrity(remuxFilename, expectedDuration);
+        const integrity = await validateDownloadedFileIntegrity(remuxFilename, expectedDuration);
+        if (appShutdownStarted || clipTracking?.cancelled || !(await waitForQueuePhaseBoundary(itemId))) throw new Error('Download cancelled');
         if (!integrity.success) return integrity;
         partialDownloadRegistry.commit(remuxFilename, filename);
         readArchiveInventory.invalidate();
@@ -3978,8 +3990,9 @@ async function downloadVODPart(
 ): Promise<DownloadResult> {
     if (!(await ensureFfmpegInstalled())) return { success: false, error: tBackend('ffmpegAutoInstallFailed') };
     if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) return { success: false, error: tBackend('downloadCancelled') };
+    const streamlinkCmd = await getStreamlinkCommand();
+    if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) return { success: false, error: tBackend('downloadCancelled') };
     return new Promise((resolve) => {
-        const streamlinkCmd = getStreamlinkCommand();
         const args = [...streamlinkCmd.prefixArgs, url, getStreamlinkStreamArg(), '--stdout'];
         if (config.streamlink_disable_ads !== false) {
             // Skips Twitch mid-roll ads which would otherwise be embedded
@@ -4187,7 +4200,12 @@ async function downloadVODPart(
                     return;
                 }
 
-                const integrityResult = validateDownloadedFileIntegrity(partialFilename, expectedDurationSeconds);
+                const integrityResult = await validateDownloadedFileIntegrity(partialFilename, expectedDurationSeconds);
+                if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) {
+                    partialDownloadRegistry.discard(partialFilename);
+                    resolve({ success: false, error: tBackend('downloadCancelled') });
+                    return;
+                }
                 if (!integrityResult.success) {
                     partialDownloadRegistry.discard(partialFilename);
                     appendDebugLog('download-part-failed-integrity', {
@@ -5911,7 +5929,7 @@ async function downloadVOD(
             const outputFiles = await downloadEditedVod({
                 id: item.id, url: item.url, folder, duration: clip.durationSec, startPart: clip.startPart, omissions,
                 namingIdentity: JSON.stringify([clip.filenameFormat, clip.filenameTemplate, item.title, item.date, item.streamer]),
-                ffmpegPath: getFFmpegPath(), ffprobePath: getFFprobePath(), wait,
+                ffmpegPath: await getFFmpegPath(), ffprobePath: await getFFprobePath(), wait,
                 onProcess(process) {
                     const command = process.spawnfile;
                     recordManagedToolExecution(managedToolKindFromCommand(command) || 'ffmpeg', command);
@@ -6909,9 +6927,33 @@ function createWindow(): void {
             isDevelopment: IS_HOT_DEVELOPMENT,
         }));
     }
-    mainWindow.once('ready-to-show', () => {
-        mainWindow?.show();
+    const window = mainWindow;
+    let paintReady = false;
+    let rendererReady = false;
+    let revealed = false;
+    const reveal = () => {
+        if (revealed || !paintReady || !rendererReady || window.isDestroyed()) return;
+        revealed = true;
+        clearTimeout(readinessTimeout);
+        window.show();
         appendDebugLog('window-ready', { elapsedMs: Math.round(performance.now()) });
+    };
+    const readinessTimeout = setTimeout(() => {
+        appendDebugLog('renderer-ready-timeout');
+        rendererReady = true;
+        reveal();
+    }, 6000);
+    const onRendererReady = (event: Electron.IpcMainEvent) => {
+        if (event.sender !== window.webContents || !isTrustedRendererEvent(event)) return;
+        rendererReady = true;
+        appendDebugLog('renderer-ready', { elapsedMs: Math.round(performance.now()) });
+        reveal();
+    };
+    ipcMain.on('renderer-ready', onRendererReady);
+    window.once('ready-to-show', () => { paintReady = true; reveal(); });
+    window.once('closed', () => {
+        clearTimeout(readinessTimeout);
+        ipcMain.removeListener('renderer-ready', onRendererReady);
     });
 
     if (process.platform !== 'darwin') {
@@ -8096,7 +8138,8 @@ async function performClipDownload(clipId: string, request: ClipRequest): Promis
     let progressTimer: ReturnType<typeof setInterval> | undefined;
     try {
         partialFilename = partialDownloadRegistry.begin(filename);
-        const command = getStreamlinkCommand();
+        const command = await getStreamlinkCommand();
+        if (request.controller.signal.aborted || appShutdownStarted) return { success: false, cancelled: true };
         recordManagedToolExecution('streamlink', command.command);
         const proc = spawn(command.command, [...command.prefixArgs, 'https://clips.twitch.tv/' + clipId, getStreamlinkStreamArg(), '--stdout'], { windowsHide: true });
         if (!proc.stdout) { proc.kill(); return { success: false, error: tBackend('unknownDownloadError') }; }
@@ -8133,7 +8176,8 @@ async function performClipDownload(clipId: string, request: ClipRequest): Promis
         request.progress.phase = 'saving';
         request.progress.bytesPerSecond = 0;
         publishClipProgress(request);
-        const integrity = validateDownloadedFileIntegrity(partialFilename, null);
+        const integrity = await validateDownloadedFileIntegrity(partialFilename, null);
+        if (request.controller.signal.aborted || appShutdownStarted) return { success: false, cancelled: true };
         if (!integrity.success) return { success: false, error: integrity.error || tBackend('integrityFailedGeneric') };
         const finalized = await finalizeDownloadedMp4(partialFilename, filename, null, null, tracking);
         if (request.controller.signal.aborted || appShutdownStarted) return { success: false, cancelled: true };
@@ -8767,28 +8811,25 @@ ipcMain.handle('save-video-dialog', async (event, defaultName: string) => {
 let appDb: DbHandle | null = null;
 export function getAppDb(): DbHandle | null { return appDb; }
 
-function cleanupStaleCutterMediaDirectories(): number {
+async function cleanupStaleCutterMediaDirectories(): Promise<number> {
     const tempRoot = path.resolve(app.getPath('temp'));
     let removed = 0;
     try {
-        for (const name of fs.readdirSync(tempRoot)) {
-            if (!/^tvm-editor-(?:media|waveform|preview)-[A-Za-z0-9_-]+$/.test(name)) continue;
-            const candidate = path.resolve(tempRoot, name);
+        for (const entry of await fs.promises.readdir(tempRoot, { withFileTypes: true })) {
+            if (!entry.isDirectory() || !/^tvm-editor-(?:media|waveform|preview)-[A-Za-z0-9_-]+$/.test(entry.name)) continue;
+            const candidate = path.resolve(tempRoot, entry.name);
             if (path.dirname(candidate) !== tempRoot) continue;
-            const processMatch = name.match(/^tvm-editor-(?:media|waveform|preview)-(\d+)-/);
+            const processMatch = entry.name.match(/^tvm-editor-(?:media|waveform|preview)-(\d+)-/);
             if (processMatch) {
-                const ownerPid = Number(processMatch[1]);
-                if (ownerPid === process.pid) continue;
-                try {
-                    process.kill(ownerPid, 0);
-                    continue;
-                } catch { }
+                try { process.kill(Number(processMatch[1]), 0); continue; }
+                catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue; }
             } else {
-                const ageMs = Date.now() - fs.statSync(candidate).mtimeMs;
-                if (ageMs < 24 * 60 * 60 * 1000) continue;
+                try { if (Date.now() - (await fs.promises.stat(candidate)).mtimeMs < 24 * 60 * 60 * 1000) continue; }
+                catch { continue; }
             }
-            fs.rmSync(candidate, { recursive: true, force: true });
-            removed += 1;
+            if (appShutdownStarted) break;
+            try { await fs.promises.rm(candidate, { recursive: true, force: true }); removed += 1; }
+            catch { }
         }
     } catch { }
     return removed;
@@ -8799,8 +8840,6 @@ app.whenReady().then(() => {
     if (removedPartialDownloads.length > 0) {
         appendDebugLog('partial-downloads-cleaned-on-startup', { count: removedPartialDownloads.length });
     }
-    const removedCutterMediaDirectories = cleanupStaleCutterMediaDirectories();
-    if (removedCutterMediaDirectories > 0) appendDebugLog('cutter-media-cleaned-on-startup', { count: removedCutterMediaDirectories });
     refreshBundledToolPaths(true);
     startMetadataCacheCleanup();
     startDebugLogFlushTimer();
@@ -8877,6 +8916,9 @@ app.whenReady().then(() => {
     restartLiveStatusPoller();
     restartAutoCleanupTimer();
     createWindow();
+    void cleanupStaleCutterMediaDirectories().then(count => {
+        if (count > 0) appendDebugLog('cutter-media-cleaned-on-startup', { count });
+    });
     if (app.isPackaged) {
         startupToolsProvisionTimer = setTimeout(() => {
             startupToolsProvisionTimer = null;
@@ -8955,6 +8997,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
         ['live-status-poller', () => stopLiveStatusPoller()],
         ['auto-cleanup-timer', () => stopAutoCleanupTimer()],
         ['startup-tools-provision-timer', () => stopStartupToolsProvisionTimer()],
+        ['tool-probes', () => cancelPendingToolChecks()],
         ['queue-lifecycle', async () => {
             await queueRunLifecycle.shutdown(
                 () => {

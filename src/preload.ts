@@ -265,6 +265,7 @@ contextBridge.exposeInMainWorld('api', {
 
     // App
     getVersion: () => ipcRenderer.invoke('get-version'),
+    notifyRendererReady: () => ipcRenderer.send('renderer-ready'),
     checkUpdate: () => ipcRenderer.invoke('check-update'),
     downloadUpdate: () => ipcRenderer.invoke('download-update'),
     installUpdate: () => ipcRenderer.invoke('install-update'),
