@@ -1989,49 +1989,167 @@ async function confirmClipDialog(): Promise<void> {
     }
 }
 
+type ClipBatchState = 'ready' | 'active' | 'done' | 'failed' | 'invalid' | 'stopped';
+interface ClipBatchItem {
+    url: string;
+    label: string;
+    state: ClipBatchState;
+    error?: string;
+}
 let clipDownloadInFlight = false;
+let clipBatchStopRequested = false;
+let clipBatchItems: ClipBatchItem[] = [];
+let clipBatchLimitExceeded = false;
+let clipNoticeTimer: ReturnType<typeof setTimeout> | undefined;
 
-async function downloadClip(): Promise<void> {
+function showClipNotice(message: string, error = false): void {
+    clearTimeout(clipNoticeTimer);
+    const notice = byId('clipStatus');
+    notice.textContent = message;
+    notice.className = 'clip-notice' + (error ? ' error' : '') + (message ? ' visible' : '');
+    if (message) clipNoticeTimer = setTimeout(() => notice.classList.remove('visible'), 5000);
+}
+
+function updateClipLinks(): void {
     if (clipDownloadInFlight) return;
+    const lines = byId<HTMLTextAreaElement>('clipUrl').value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    const seen = new Set<string>();
+    clipBatchLimitExceeded = lines.length > 200;
+    const previous = new Map(clipBatchItems.map(item => [item.url, item]));
+    clipBatchItems = [];
+    for (const line of lines.slice(0, 200)) {
+        let slug = '';
+        try {
+            const url = new URL(line);
+            if (['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.port && line.length <= 4096) {
+                const match = url.hostname === 'clips.twitch.tv'
+                    ? /^\/([A-Za-z0-9_-]+)\/?$/.exec(url.pathname)
+                    : ['twitch.tv', 'www.twitch.tv', 'm.twitch.tv'].includes(url.hostname)
+                        ? /^\/[A-Za-z0-9_]+\/clip\/([A-Za-z0-9_-]+)\/?$/.exec(url.pathname)
+                        : null;
+                slug = match?.[1] || '';
+            }
+        } catch {}
+        const canonical = slug ? 'https://clips.twitch.tv/' + slug : line;
+        if (seen.has(canonical)) continue;
+        seen.add(canonical);
+        clipBatchItems.push(previous.get(canonical) || { url: canonical, label: slug || line, state: slug ? 'ready' : 'invalid' });
+    }
+    showClipNotice(clipBatchLimitExceeded ? UI_TEXT.clips.limitReached : '', true);
+    renderClipBatch();
+}
 
-    const url = byId<HTMLInputElement>('clipUrl').value.trim();
-    const status = byId('clipStatus');
-    const btn = byId<HTMLButtonElement>('btnClip');
-    const toolbarBtn = byId<HTMLButtonElement>('toolbarClipDownloadBtn');
+function clearClipLinks(): void {
+    if (clipDownloadInFlight) return;
+    byId<HTMLTextAreaElement>('clipUrl').value = '';
+    updateClipLinks();
+}
 
-    if (!url) {
-        status.textContent = UI_TEXT.clips.enterUrl;
-        status.className = 'clip-status error';
+function stopClipBatch(): void {
+    if (!clipDownloadInFlight) return;
+    clipBatchStopRequested = true;
+    renderClipBatch();
+}
+
+function renderClipBatch(): void {
+    const done = clipBatchItems.filter(item => item.state === 'done').length;
+    const failed = clipBatchItems.filter(item => item.state === 'failed' || item.state === 'invalid').length;
+    const ready = clipBatchItems.some(item => item.state === 'ready' || item.state === 'stopped');
+    const format = (message: string) => message.replace('{done}', formatUiNumber(done)).replace('{total}', formatUiNumber(clipBatchItems.length)).replace('{failed}', formatUiNumber(failed));
+    byId('clipsLinkCount').textContent = UI_TEXT.clips.linksCount.replace('{count}', formatUiNumber(clipBatchItems.length));
+    byId('clipsResults').hidden = clipBatchItems.length === 0;
+    byId('clipsBatchSummary').textContent = format(UI_TEXT.clips.summary);
+    const progress = clipBatchItems.length ? Math.round((done + failed) * 100 / clipBatchItems.length) : 0;
+    const gauge = byId<HTMLElement>('clipsBatchProgress');
+    gauge.setAttribute('aria-valuenow', String(progress));
+    gauge.querySelector<HTMLElement>('span')!.style.transition = clipDownloadInFlight ? '' : 'none';
+    gauge.querySelector<HTMLElement>('span')!.style.width = progress + '%';
+    byId<HTMLTextAreaElement>('clipUrl').disabled = clipDownloadInFlight;
+    byId<HTMLButtonElement>('clipsClearBtn').disabled = clipDownloadInFlight || !clipBatchItems.length;
+    const button = byId<HTMLButtonElement>('btnClip');
+    button.disabled = clipDownloadInFlight || clipBatchLimitExceeded || !ready;
+    button.textContent = clipDownloadInFlight ? UI_TEXT.clips.loadingButton : UI_TEXT.clips.downloadButton;
+    const toolbarButton = byId<HTMLButtonElement>('toolbarClipDownloadBtn');
+    toolbarButton.disabled = button.disabled;
+    const stop = byId<HTMLButtonElement>('clipsStopBtn');
+    stop.hidden = !clipDownloadInFlight;
+    stop.disabled = clipBatchStopRequested;
+    stop.textContent = clipBatchStopRequested ? UI_TEXT.clips.stopping : UI_TEXT.clips.stopBatch;
+    const retry = byId<HTMLButtonElement>('clipsRetryBtn');
+    retry.hidden = !clipBatchItems.some(item => item.state === 'failed');
+    retry.disabled = clipDownloadInFlight || clipBatchLimitExceeded;
+    const list = byId('clipsDownloadList');
+    const fragment = document.createDocumentFragment();
+    clipBatchItems.forEach((item, index) => {
+        const row = document.createElement('li');
+        row.className = 'clip-result-row ' + item.state;
+        const number = document.createElement('span');
+        number.className = 'clip-result-number';
+        number.textContent = formatUiNumber(index + 1);
+        const content = document.createElement('div');
+        content.className = 'clip-result-content';
+        const label = document.createElement('span');
+        label.className = 'clip-result-label';
+        label.textContent = item.label;
+        const status = document.createElement('span');
+        status.className = 'clip-result-status';
+        status.textContent = item.state === 'invalid' ? UI_TEXT.clips.invalidUrl : item.error || UI_TEXT.clips[item.state];
+        content.append(label, status);
+        const symbol = document.createElement('span');
+        symbol.className = 'clip-result-symbol';
+        symbol.setAttribute('aria-hidden', 'true');
+        symbol.textContent = item.state === 'done' ? '✓' : item.state === 'failed' || item.state === 'invalid' ? '!' : item.state === 'active' ? '↻' : '–';
+        row.append(number, content, symbol);
+        fragment.append(row);
+    });
+    list.replaceChildren(fragment);
+}
+
+async function downloadClip(retryFailed = false): Promise<void> {
+    if (clipDownloadInFlight) return;
+    if (!clipBatchItems.length) updateClipLinks();
+    if (clipBatchLimitExceeded) {
+        showClipNotice(UI_TEXT.clips.limitReached, true);
         return;
     }
-
+    const pending = clipBatchItems.filter(item => retryFailed ? item.state === 'failed' : item.state === 'ready' || item.state === 'stopped');
+    if (!pending.length) {
+        showClipNotice(clipBatchItems.length ? UI_TEXT.clips.emptyBatch : UI_TEXT.clips.enterUrl, true);
+        return;
+    }
     clipDownloadInFlight = true;
-    btn.disabled = true;
-    toolbarBtn.disabled = true;
-    btn.textContent = UI_TEXT.clips.loadingButton;
-    status.textContent = UI_TEXT.clips.loadingStatus;
-    status.className = 'clip-status loading';
-
+    clipBatchStopRequested = false;
+    showClipNotice('');
+    for (const item of pending) {
+        item.state = 'ready';
+        item.error = undefined;
+    }
     try {
-        const result = await window.api.downloadClip(url);
-        if (result.success) {
-            status.textContent = UI_TEXT.clips.success;
-            status.className = 'clip-status success';
-            return;
+        for (const item of pending) {
+            if (clipBatchStopRequested) {
+                item.state = 'stopped';
+                continue;
+            }
+            item.state = 'active';
+            renderClipBatch();
+            try {
+                const result = await window.api.downloadClip(item.url);
+                item.state = result?.success ? 'done' : 'failed';
+                if (!result?.success) item.error = result?.error?.trim() || UI_TEXT.clips.unknownError;
+            } catch {
+                item.state = 'failed';
+                item.error = UI_TEXT.clips.unknownError;
+            }
+            renderClipBatch();
         }
-
-        const backendError = (result.error || '').trim();
-        status.textContent = UI_TEXT.clips.errorPrefix + (backendError || UI_TEXT.clips.unknownError);
-        status.className = 'clip-status error';
-    } catch {
-        status.textContent = UI_TEXT.clips.errorPrefix + UI_TEXT.clips.unknownError;
-        status.className = 'clip-status error';
     } finally {
         clipDownloadInFlight = false;
-        btn.disabled = false;
-        toolbarBtn.disabled = false;
-        btn.textContent = UI_TEXT.clips.downloadButton;
+        clipBatchStopRequested = false;
+        renderClipBatch();
     }
+    const done = clipBatchItems.filter(item => item.state === 'done').length;
+    const failed = clipBatchItems.filter(item => item.state === 'failed' || item.state === 'invalid').length;
+    showClipNotice(UI_TEXT.clips.finished.replace('{done}', formatUiNumber(done)).replace('{failed}', formatUiNumber(failed)), failed > 0);
 }
 
 const segmentedIndicatorFrames = new WeakMap<HTMLElement, number>();

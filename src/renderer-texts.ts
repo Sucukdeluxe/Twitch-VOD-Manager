@@ -179,7 +179,13 @@ function applyLanguageToStaticUI(): void {
     setText('clipSourceQualityHint', UI_TEXT.clips.sourceQualityHint);
     setText('cutterEncodingHint', UI_TEXT.cutter.encodingHint);
     setPlaceholder('clipUrl', UI_TEXT.clips.urlPlaceholder);
-    setText('btnClip', UI_TEXT.clips.downloadButton);
+    setText('clipsBatchHint', UI_TEXT.clips.batchHint);
+    setText('clipsLinksLabel', UI_TEXT.clips.linksLabel);
+    setText('clipsClearBtn', UI_TEXT.clips.clearList);
+    setText('clipsRetryBtn', UI_TEXT.clips.retryFailed);
+    setText('clipsResultsTitle', UI_TEXT.clips.resultsTitle);
+    setAriaLabel('clipsBatchProgress', UI_TEXT.clips.resultsTitle);
+    renderClipBatch();
     setPlaceholder('clipStartPart', UI_TEXT.clips.startPartPlaceholder);
     setPlaceholder('cutterFilePath', UI_TEXT.cutter.filePathPlaceholder);
     setText('cutterSelectTitle', UI_TEXT.static.cutterSelectTitle);

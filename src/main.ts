@@ -1,3 +1,5 @@
+import { requestPublicClipInfo } from './main/twitch/clip-info';
+import { parseTwitchClipId } from './main/twitch/clip-url';
 import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, Notification, type IpcMainInvokeEvent } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -2681,65 +2683,20 @@ async function getVodStoryboard(vodId: string): Promise<VodStoryboard | null> {
     });
 }
 
-async function getClipInfo(clipId: string): Promise<any | null> {
+async function getClipInfo(clipId: string): Promise<{ title: string; broadcaster_name: string } | null> {
     const cachedClip = getCachedValue(clipInfoCache, clipId);
     if (cachedClip !== undefined) {
         runtimeMetrics.cacheHits += 1;
         return cachedClip;
     }
-
     return await withInFlightDedup(inFlightClipRequests, clipId, async () => {
-        const refreshedCachedClip = getCachedValue(clipInfoCache, clipId);
-        if (refreshedCachedClip !== undefined) {
-            runtimeMetrics.cacheHits += 1;
-            return refreshedCachedClip;
-        }
-
         runtimeMetrics.cacheMisses += 1;
-
-        let twitchAccessToken = await ensureTwitchAuth();
-        if (!twitchAccessToken) return null;
-
-        const fetchClip = async () => {
-            return await axios.get('https://api.twitch.tv/helix/clips', {
-                params: { id: clipId },
-                headers: {
-                    'Client-ID': config.client_id,
-                    'Authorization': `Bearer ${twitchAccessToken}`
-                },
-                timeout: API_TIMEOUT
-            });
-        };
-
-        try {
-            const response = await fetchClip();
-            const clip = response.data.data[0] || null;
-            if (clip) {
-                setCachedValue(clipInfoCache, clipId, clip, MAX_CLIP_INFO_CACHE_ENTRIES);
-            }
-            return clip;
-        } catch (e) {
-            const refreshedToken = axios.isAxiosError(e) && e.response?.status === 401
-                ? await ensureTwitchAuth(true)
-                : null;
-            if (refreshedToken) {
-                twitchAccessToken = refreshedToken;
-                try {
-                    const retryResponse = await fetchClip();
-                    const clip = retryResponse.data.data[0] || null;
-                    if (clip) {
-                        setCachedValue(clipInfoCache, clipId, clip, MAX_CLIP_INFO_CACHE_ENTRIES);
-                    }
-                    return clip;
-                } catch (retryError) {
-                    console.error('Error getting clip after relogin:', projectExternalError('twitch-helix-clips', retryError));
-                    return null;
-                }
-            }
-
-            console.error('Error getting clip:', projectExternalError('twitch-helix-clips', e));
-            return null;
-        }
+        const outcome = await requestPublicClipInfo(axios, clipId, API_TIMEOUT);
+        if (outcome.status === 'not-found') return null;
+        if (outcome.status !== 'success') throw new Error(tBackend('clipLookupUnavailable'));
+        const clip = outcome.value;
+        setCachedValue(clipInfoCache, clipId, clip, MAX_CLIP_INFO_CACHE_ENTRIES);
+        return clip;
     });
 }
 
@@ -8423,15 +8380,14 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
         return { success: false, error: tBackend('downloadOutsideWindow', { nextStart }) };
     }
 
-    let clipId = '';
-    const match1 = clipUrl.match(/clips\.twitch\.tv\/([A-Za-z0-9_-]+)/);
-    const match2 = clipUrl.match(/twitch\.tv\/[^/]+\/clip\/([A-Za-z0-9_-]+)/);
-
-    if (match1) clipId = match1[1];
-    else if (match2) clipId = match2[1];
-    else return { success: false, error: tBackend('invalidClipUrl') };
-
-    const clipInfo = await getClipInfo(clipId);
+    const clipId = parseTwitchClipId(clipUrl);
+    if (!clipId) return { success: false, error: tBackend('invalidClipUrl') };
+    let clipInfo: Awaited<ReturnType<typeof getClipInfo>>;
+    try {
+        clipInfo = await getClipInfo(clipId);
+    } catch {
+        return { success: false, error: tBackend('clipLookupUnavailable') };
+    }
     if (appShutdownStarted) return { success: false, error: 'shutting-down' };
     if (!clipInfo) return { success: false, error: tBackend('clipNotFound') };
     if (!(await ensureStreamlinkInstalled())) return { success: false, error: tBackend('streamlinkAutoInstallFailed') };

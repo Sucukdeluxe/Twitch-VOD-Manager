@@ -997,61 +997,100 @@
     margin: 7px 0 0 30px;
 }
 
-#clipsTab.active {
-    display: grid;
-    grid-template-columns: minmax(420px, 1.35fr) minmax(280px, 0.65fr);
-    align-content: start;
-    align-items: start;
-    gap: 16px;
+.workspace-shell.app[data-active-workspace="clips"] {
+    grid-template-columns: minmax(0, 1fr);
 }
 
-#clipsTab .clip-input {
+.workspace-shell[data-active-workspace="clips"] > .context-sidebar,
+.workspace-shell[data-active-workspace="clips"] .workspace-toolbar {
+    display: none;
+}
+
+.workspace-main #clipsTab.active {
+    display: flex;
+    flex-direction: column;
+    scrollbar-gutter: stable both-edges;
+}
+
+.clips-workspace {
     display: grid;
+    grid-template-columns: minmax(0, 2.3fr) minmax(260px, 1fr);
+    align-items: start;
+    gap: 20px;
+    width: 100%;
+    max-width: 1180px;
+    flex: 0 0 auto;
+    margin: auto;
+}
+
+#clipsTab .clip-input,
+#clipsTab .clips-info {
+    min-width: 0;
     width: 100%;
     max-width: none;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 10px;
     margin: 0;
-    padding: 16px;
+    padding: 24px;
     text-align: left;
+    color: var(--workspace-text);
     background: var(--workspace-panel-raised);
     border: 1px solid var(--workspace-border);
-    border-radius: var(--workspace-radius);
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.55;
 }
 
-#clipsTab .clip-input h2 {
-    grid-column: 1 / -1;
-    margin: 0 0 2px;
-    font-size: 16px;
-    line-height: 22px;
+.clips-card-header {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 22px;
 }
 
-#clipsTab .clip-input #clipUrl {
-    width: 100%;
-    min-width: 0;
-    min-height: 38px;
-    margin: 0;
+#clipsTab h2 { margin: 0 0 6px; font-size: 20px; line-height: 1.3; }
+#clipsTab h3 { margin: 0; font-size: 16px; }
+#clipsBatchHint { margin: 0; color: var(--workspace-text-muted); }
+.clips-count { flex-shrink: 0; padding: 4px 10px; border-radius: 6px; background: var(--workspace-control); font-variant-numeric: tabular-nums; }
+#clipsLinksLabel { display: block; margin-bottom: 8px; font-weight: 600; }
+#clipsTab #clipUrl { display: block; width: 100%; min-height: 160px; max-height: 320px; resize: vertical; margin: 0; padding: 12px 14px; font: inherit; font-size: 14px; line-height: 1.7; color: var(--workspace-text); background: var(--workspace-panel); border: 1px solid var(--workspace-border-strong); border-radius: 8px; }
+#clipsTab #clipUrl:focus { outline: none; box-shadow: none; }
+#clipsTab #clipUrl:disabled { opacity: .7; }
+.clips-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; }
+#clipsTab .clips-actions button { min-height: 40px; padding: 8px 14px; font-size: 14px; }
+#clipsTab #btnClip { margin-left: auto; }
+#clipsTab .clips-info > svg { width: 24px; height: 24px; margin-bottom: 10px; color: var(--workspace-primary); }
+#clipsInfoText { margin: 14px 0 0; white-space: pre-line; overflow-wrap: anywhere; }
+.clip-notice { max-height: 0; overflow: hidden; opacity: 0; margin-top: 0; padding: 0 14px; border: 0 solid transparent; border-radius: 8px; transform: translateY(-6px); transition: max-height 220ms ease, opacity 220ms ease, transform 220ms ease, padding 220ms ease, margin 220ms ease; pointer-events: none; }
+.clip-notice.visible { max-height: 180px; margin-top: 16px; padding: 10px 14px; opacity: 1; transform: none; border-width: 1px; border-color: var(--workspace-border-strong); background: var(--workspace-control); }
+.clip-notice.error { color: var(--workspace-text); }
+.clip-notice.error.visible { border-color: var(--workspace-danger); }
+.clips-results { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--workspace-border); }
+.clips-results-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+#clipsBatchSummary { font-variant-numeric: tabular-nums; }
+.clips-batch-progress { height: 4px; overflow: hidden; border-radius: 2px; background: var(--workspace-control); margin-bottom: 12px; }
+.clips-batch-progress > span { display: block; height: 100%; background: var(--workspace-primary); transition: width 180ms ease; }
+#clipsDownloadList { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow: auto; scrollbar-gutter: stable; }
+.clip-result-row { display: flex; gap: 12px; align-items: center; min-height: 64px; padding: 10px 8px; border-bottom: 1px solid var(--workspace-border); }
+.clip-result-row:last-child { border-bottom: 0; }
+.clip-result-number { flex: 0 0 28px; text-align: center; font-variant-numeric: tabular-nums; color: var(--workspace-text-muted); }
+.clip-result-content { flex: 1; min-width: 0; }
+.clip-result-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.clip-result-status { display: block; overflow-wrap: anywhere; color: var(--workspace-text-muted); }
+.clip-result-row.failed .clip-result-status,
+.clip-result-row.invalid .clip-result-status { color: var(--workspace-text); }
+.clip-result-symbol { flex: 0 0 24px; text-align: center; font-size: 20px; }
+.clip-result-row.done .clip-result-symbol { color: var(--workspace-success); }
+.clip-result-row.failed .clip-result-symbol,
+.clip-result-row.invalid .clip-result-symbol { color: var(--workspace-danger); }
+.clip-result-row.active .clip-result-symbol { animation: clip-download-spin 1.2s linear infinite; }
+@keyframes clip-download-spin { to { transform: rotate(360deg); } }
+@media (max-width: 900px) {
+    .clips-workspace { grid-template-columns: minmax(0, 1fr); max-width: 760px; }
+    #clipsTab .clip-input, #clipsTab .clips-info { padding: 18px; }
 }
-
-#clipsTab .clip-input #btnClip {
-    min-height: 38px;
-    white-space: nowrap;
-}
-
-#clipsTab .clip-input #clipStatus {
-    grid-column: 1 / -1;
-    min-height: 20px;
-    margin: 0;
-    font-size: 12px;
-    line-height: 20px;
-}
-
-#clipsTab > .settings-card.centered {
-    width: 100%;
-    max-width: none;
-    align-self: start;
-    margin: 0;
+@media (prefers-reduced-motion: reduce) {
+    .clip-notice, .clips-batch-progress > span { transition: none; }
+    .clip-result-row.active .clip-result-symbol { animation: none; }
 }
 
 .workspace-settings-search {
