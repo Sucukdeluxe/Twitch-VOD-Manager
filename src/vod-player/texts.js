@@ -25,7 +25,7 @@ export const playerTexts = {
     "viewerCount": "Zuschauer",
     "historyTitleUnknown": "Titel für diesen Zeitpunkt nicht erfasst",
     "viewerMeasuredAt": "Gemessen am",
-    "exactTimeHint": "Stunden:Minuten:Sekunden,Millisekunden",
+    "exactTimeHint": "HH:MM:SS.mmm",
     "exactTimeInvalid": "Gültige Zeit innerhalb des VODs eingeben.",
     "close": "Schließen",
     "jumpToTime": "Zur Zeit springen",
@@ -59,9 +59,7 @@ export const playerTexts = {
     "selectChapterRange": "Kategorie zuschneiden",
     "historyLoading": "Verlauf wird geladen …",
     "historyUnavailable": "Der Verlauf konnte nicht geladen werden.",
-    "historyStreamrecorderTitles": "Titelverlauf: Streamrecorder",
-    "historyLocalTitles": "Titelzeiten aus lokalen Aufzeichnungen. Änderungen können vor der Erfassung erfolgt sein.",
-    "historyNoChapterSource": "Twitch-Kapitel sind derzeit nicht verfügbar."
+    "historyNoChapterSource": "Keine Twitch-Kapitel verfügbar."
   },
   "en": {
     "locale": "en",
@@ -89,7 +87,7 @@ export const playerTexts = {
     "viewerCount": "viewers",
     "historyTitleUnknown": "Title not recorded for this time",
     "viewerMeasuredAt": "Measured at",
-    "exactTimeHint": "Hours:minutes:seconds,milliseconds",
+    "exactTimeHint": "HH:MM:SS.mmm",
     "exactTimeInvalid": "Enter a valid time within the VOD.",
     "close": "Close",
     "jumpToTime": "Jump to time",
@@ -123,8 +121,6 @@ export const playerTexts = {
     "selectChapterRange": "Trim category",
     "historyLoading": "Loading history …",
     "historyUnavailable": "Could not load the history.",
-    "historyStreamrecorderTitles": "Title history: Streamrecorder",
-    "historyLocalTitles": "Title times from local recordings. Changes may have occurred before they were observed.",
-    "historyNoChapterSource": "Twitch chapters are currently unavailable."
+    "historyNoChapterSource": "Twitch chapters unavailable."
   }
 };

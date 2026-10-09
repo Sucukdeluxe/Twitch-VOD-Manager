@@ -109,7 +109,6 @@ function applyLanguageToStaticUI(): void {
     });
     setText('archiveResultsNavText', UI_TEXT.static.archiveResults);
     setText('archiveTitle', UI_TEXT.static.archiveTitle);
-    setText('archiveIntro', UI_TEXT.static.archiveIntro);
     setText('archiveQueryLabel', UI_TEXT.static.archiveQueryLabel);
     setText('archiveTypeLabel', UI_TEXT.static.archiveTypeLabel);
     setText('archiveStreamerLabel', UI_TEXT.static.archiveStreamerLabel);
@@ -139,11 +138,8 @@ function applyLanguageToStaticUI(): void {
     }
     setText('navSettingsText', UI_TEXT.static.navSettings);
     setText('statsTitle', UI_TEXT.static.statsTitle);
-    const statsIntroEl = document.getElementById('statsIntro');
-    if (statsIntroEl) applyHtml(statsIntroEl, UI_TEXT.static.statsIntro);
     setText('statsSummaryTitle', UI_TEXT.static.statsSummaryTitle);
     setText('statsInventoryTitle', UI_TEXT.static.statsInventoryTitle);
-    setText('statsInventoryNote', UI_TEXT.static.statsInventoryNote);
     if (typeof refreshArchiveStatsTexts === 'function') refreshArchiveStatsTexts();
     setText('statsTopStreamersTitle', UI_TEXT.static.statsTopStreamersTitle);
     setText('statsActivityTitle', UI_TEXT.static.statsActivityTitle);
@@ -160,7 +156,6 @@ function applyLanguageToStaticUI(): void {
     setText('clipsHeading', UI_TEXT.static.clipsHeading);
     setText('clipsInfoTitle', UI_TEXT.static.clipsInfoTitle);
     setText('clipsInfoText', UI_TEXT.static.clipsInfoText);
-    setText('clipTemplateHelp', UI_TEXT.clips.templateHelp);
     setPlaceholder('clipFilenameTemplate', UI_TEXT.clips.templatePlaceholder);
     setText('clipDialogStartLabel', UI_TEXT.clips.dialogStart);
     setText('clipDialogStartTimeLabel', UI_TEXT.clips.dialogStartTime);
@@ -176,7 +171,6 @@ function applyLanguageToStaticUI(): void {
     }
     setText('clipDialogDurationLabel', UI_TEXT.clips.dialogDuration);
     setText('clipDialogPartLabel', UI_TEXT.clips.dialogPartLabel);
-    setText('clipDialogPartHint', UI_TEXT.clips.dialogPartHint);
     setText('clipDialogFormatLabel', UI_TEXT.clips.dialogFormatLabel);
     setText('clipDialogConfirmBtn', UI_TEXT.clips.dialogConfirm);
     setText('clipTimeHint', UI_TEXT.clips.timeInputHint);
@@ -184,10 +178,8 @@ function applyLanguageToStaticUI(): void {
     setText('clipSeekStart', UI_TEXT.clips.seekStart);
     setText('clipSeekEnd', UI_TEXT.clips.seekEnd);
     setText('clipFilenameOptionsTitle', UI_TEXT.clips.filenameOptions);
-    setText('clipQueueHint', UI_TEXT.clips.queueHint);
+    setText('clipQueueHint', '');
     setText('clipCancelBtn', UI_TEXT.clips.close);
-    setText('clipSourceQualityHint', UI_TEXT.clips.sourceQualityHint);
-    setText('cutterEncodingHint', UI_TEXT.cutter.encodingHint);
     setPlaceholder('clipUrl', UI_TEXT.clips.urlPlaceholder);
     setText('clipsBatchHint', UI_TEXT.clips.batchHint);
     setText('clipsLinksLabel', UI_TEXT.clips.linksLabel);
@@ -265,7 +257,6 @@ function applyLanguageToStaticUI(): void {
     setAriaLabel('cutterNewCutBtn', UI_TEXT.cutter.newCut);
     setTitle('cutterNewCutBtn', UI_TEXT.cutter.newCut);
     setText('mergeTitle', UI_TEXT.static.mergeTitle);
-    setText('mergeDesc', UI_TEXT.static.mergeDesc);
     setText('mergeAddBtn', UI_TEXT.static.mergeAdd);
     setText('btnMerge', UI_TEXT.merge.merge);
     setText('designTitle', UI_TEXT.static.designTitle);
@@ -277,7 +268,6 @@ function applyLanguageToStaticUI(): void {
     setText('languageDeText', UI_TEXT.static.languageDe);
     setText('languageEnText', UI_TEXT.static.languageEn);
     setText('apiTitle', UI_TEXT.static.apiTitle);
-    setText('apiHelpIntro', UI_TEXT.static.apiHelpIntro);
     setText('apiHelpLink', UI_TEXT.static.apiHelpLinkText);
     setText('clientIdLabel', UI_TEXT.static.clientIdLabel);
     setText('clientSecretLabel', UI_TEXT.static.clientSecretLabel);
@@ -287,7 +277,6 @@ function applyLanguageToStaticUI(): void {
     setText('queueAutomationTitle', UI_TEXT.static.queueAutomationTitle);
     setText('recordingMetadataTitle', UI_TEXT.static.recordingMetadataTitle);
     setText('sidebarSplitViewLabel', UI_TEXT.static.sidebarSplitViewLabel);
-    setText('sidebarSplitViewHint', UI_TEXT.static.sidebarSplitViewHint);
     setText('storageLabel', UI_TEXT.static.storageLabel);
     setText('selectFolderBtn', UI_TEXT.static.selectFolder);
     setText('openFolderBtn', UI_TEXT.static.openFolder);
@@ -305,29 +294,12 @@ function applyLanguageToStaticUI(): void {
     setText('duplicatePreventionLabel', UI_TEXT.static.duplicatePreventionLabel);
     setText('persistQueueLabel', UI_TEXT.static.persistQueueLabel);
     setText('autoResumeQueueLabel', UI_TEXT.static.autoResumeQueueLabel);
-    setTitle('autoResumeQueueLabel', UI_TEXT.static.autoResumeQueueHint);
-    setTitle('autoResumeQueueToggle', UI_TEXT.static.autoResumeQueueHint);
     setText('notifyEachCompletionLabel', UI_TEXT.static.notifyEachCompletionLabel);
-    setTitle('notifyEachCompletionLabel', UI_TEXT.static.notifyEachCompletionHint);
-    setTitle('notifyEachCompletionToggle', UI_TEXT.static.notifyEachCompletionHint);
     setText('streamlinkDisableAdsLabel', UI_TEXT.static.streamlinkDisableAdsLabel);
-    setTitle('streamlinkDisableAdsLabel', UI_TEXT.static.streamlinkDisableAdsHint);
-    setTitle('streamlinkDisableAdsToggle', UI_TEXT.static.streamlinkDisableAdsHint);
     setText('downloadChatReplayLabel', UI_TEXT.static.downloadChatReplayLabel);
-    setTitle('downloadChatReplayLabel', UI_TEXT.static.downloadChatReplayHint);
-    setTitle('downloadChatReplayToggle', UI_TEXT.static.downloadChatReplayHint);
     setText('captureLiveChatLabel', UI_TEXT.static.captureLiveChatLabel);
-    setTitle('captureLiveChatLabel', UI_TEXT.static.captureLiveChatHint);
-    setTitle('captureLiveChatToggle', UI_TEXT.static.captureLiveChatHint);
     setText('logStreamEventsLabel', UI_TEXT.static.logStreamEventsLabel);
-    setTitle('logStreamEventsLabel', UI_TEXT.static.logStreamEventsHint);
-    setTitle('logStreamEventsToggle', UI_TEXT.static.logStreamEventsHint);
     setText('streamlinkQualityLabel', UI_TEXT.static.streamlinkQualityLabel);
-    setTitle('streamlinkQualityLabel', UI_TEXT.static.streamlinkQualityHint);
-    setTitle('streamlinkQuality', UI_TEXT.static.streamlinkQualityHint);
-    setText('streamlinkQualityBest', UI_TEXT.static.streamlinkQualityBest);
-    setText('streamlinkQualitySource', UI_TEXT.static.streamlinkQualitySource);
-    setText('streamlinkQualityAudio', UI_TEXT.static.streamlinkQualityAudio);
     setText('downloadPolicyTitle', UI_TEXT.static.downloadPolicyTitle);
     setText('downloadThrottleLabel', UI_TEXT.static.downloadThrottleLabel);
     setText('downloadThrottleHint', UI_TEXT.static.downloadThrottleHint);
@@ -346,13 +318,11 @@ function applyLanguageToStaticUI(): void {
     setText('vodTemplateLabel', UI_TEXT.static.vodTemplateLabel);
     setText('partsTemplateLabel', UI_TEXT.static.partsTemplateLabel);
     setText('defaultClipTemplateLabel', UI_TEXT.static.defaultClipTemplateLabel);
-    setText('filenameTemplateHint', UI_TEXT.static.filenameTemplateHint);
-    setText('filenameTemplateLint', UI_TEXT.static.templateLintOk);
+    setText('filenameTemplateLint', '');
     setText('settingsTemplateGuideBtn', UI_TEXT.static.templateGuideButton);
     setText('clipTemplateGuideBtn', UI_TEXT.static.templateGuideButton);
-    setText('clipTemplateLint', UI_TEXT.static.templateLintOk);
+    setText('clipTemplateLint', '');
     setText('templateGuideTitle', UI_TEXT.static.templateGuideTitle);
-    setText('templateGuideIntro', UI_TEXT.static.templateGuideIntro);
     setText('templateGuideTemplateLabel', UI_TEXT.static.templateGuideTemplateLabel);
     setText('templateGuideOutputLabel', UI_TEXT.static.templateGuideOutputLabel);
     setText('templateGuideVarsTitle', UI_TEXT.static.templateGuideVarsTitle);
@@ -383,7 +353,6 @@ function applyLanguageToStaticUI(): void {
     setText('btnRefreshLog', UI_TEXT.static.refreshLog);
     setText('btnOpenDebugLogFile', UI_TEXT.static.openDebugLogFile);
     setText('storageCardTitle', UI_TEXT.static.storageCardTitle);
-    setText('storageCardIntro', UI_TEXT.static.storageCardIntro);
     setText('btnRefreshStorage', UI_TEXT.static.storageRefresh);
     setText('cleanupTitle', UI_TEXT.static.cleanupTitle);
     setText('cleanupIntro', UI_TEXT.static.cleanupIntro);
@@ -398,7 +367,6 @@ function applyLanguageToStaticUI(): void {
     setText('btnCleanupDryRun', UI_TEXT.static.cleanupDryRun);
     setText('btnCleanupRunNow', UI_TEXT.static.cleanupRunNow);
     setText('discordCardTitle', UI_TEXT.static.discordCardTitle);
-    setText('discordCardIntro', UI_TEXT.static.discordCardIntro);
     setText('discordWebhookUrlLabel', UI_TEXT.static.discordWebhookUrlLabel);
     setText('discordNotifyLiveStartLabel', UI_TEXT.static.discordNotifyLiveStartLabel);
     setText('discordNotifyLiveEndLabel', UI_TEXT.static.discordNotifyLiveEndLabel);
@@ -408,7 +376,6 @@ function applyLanguageToStaticUI(): void {
     setText('deletePartsAfterMergeLabel', UI_TEXT.static.deletePartsAfterMergeLabel);
     setText('discordNotifyVodAutoQueuedLabel', UI_TEXT.static.discordNotifyVodAutoQueuedLabel);
     setText('autoVodCardTitle', UI_TEXT.static.autoVodCardTitle);
-    setText('autoVodCardIntro', UI_TEXT.static.autoVodCardIntro);
     setText('autoVodPollMinutesLabel', UI_TEXT.static.autoVodPollMinutesLabel);
     setText('autoVodMaxAgeHoursLabel', UI_TEXT.static.autoVodMaxAgeHoursLabel);
     setText('btnAutoVodScanNow', UI_TEXT.static.autoVodScanNow);
@@ -428,7 +395,6 @@ function applyLanguageToStaticUI(): void {
     document.getElementById('mergeProgressGauge')?.setAttribute('aria-label', UI_TEXT.streamers.mergeProgressAria);
     document.getElementById('updateProgressGauge')?.setAttribute('aria-label', UI_TEXT.streamers.updateProgressAria);
     setText('backupCardTitle', UI_TEXT.static.backupCardTitle);
-    setText('backupCardIntro', UI_TEXT.static.backupCardIntro);
     setText('btnExportConfig', UI_TEXT.static.exportConfig);
     setText('btnImportConfig', UI_TEXT.static.importConfig);
     setText('btnResetDownloadedIds', UI_TEXT.static.resetDownloadedIds);

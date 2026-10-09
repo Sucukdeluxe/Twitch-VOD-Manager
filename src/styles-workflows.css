@@ -1795,6 +1795,7 @@ input[type="checkbox"].vod-select-checkbox {
 }
 
 .template-lint.ok {
+    display: none;
     color: var(--success);
 }
 
@@ -3760,4 +3761,10 @@ body.theme-light .btn-clear:hover {
 
 body.theme-light .modal {
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+#settingsTab .settings-card #streamlinkQuality {
+    flex: 0 0 auto;
+    width: 110px;
+    cursor: default;
 }

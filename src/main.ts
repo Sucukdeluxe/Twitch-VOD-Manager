@@ -470,7 +470,7 @@ const defaultConfig: Config = {
     parallel_downloads: 1,
     auto_resume_queue_on_startup: false,
     downloaded_vod_ids: [],
-    streamlink_quality: 'best',
+    streamlink_quality: 'source',
     notify_on_each_completion: false,
     streamlink_disable_ads: true,
     download_policy: { throttle: null, windows: [] },
@@ -499,9 +499,7 @@ const defaultConfig: Config = {
 // kommen aus ./main/domain/config-normalize. getStreamlinkStreamArg bleibt
 // hier, da es config liest.
 function getStreamlinkStreamArg(): string {
-    const choice = normalizeStreamlinkQuality(config.streamlink_quality);
-    if (choice === 'best') return 'best';
-    return `${choice},best`;
+    return `${normalizeStreamlinkQuality(config.streamlink_quality)},best`;
 }
 
 function createDownloadThrottleTransform(): Transform | undefined {
@@ -8009,6 +8007,12 @@ interface ActiveClipDownloadTracking {
     partialFilename: string;
 }
 const activeClipProcesses = new Set<ActiveClipDownloadTracking>();
+
+registerTrustedIpcHandler(ipcMain, 'get-clip-info', isTrustedRendererEvent, () => Promise.resolve(null), async (_, clipUrl: unknown): Promise<{ title: string; broadcaster_name: string } | null> => {
+    if (appShutdownStarted) return null;
+    const clipId = parseTwitchClipId(clipUrl);
+    return clipId ? await getClipInfo(clipId) : null;
+});
 
 registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () => Promise.resolve({ success: false, error: 'File access denied' }), async (_, clipUrl: string) => {
     if (appShutdownStarted) return { success: false, error: 'shutting-down' };

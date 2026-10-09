@@ -61,12 +61,12 @@
                 <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="closeClipDialog()">×</button>
             </header>
             <div class="vod-cut-layout">
-                <section class="vod-cut-stage"><div id="clipPlayer"></div><p id="clipSourceQualityHint" class="clip-preview-hint"></p></section>
+                <section class="vod-cut-stage"><div id="clipPlayer"></div></section>
                 <aside class="vod-cut-sidebar">
                     <section id="clipHistoryPanel" aria-labelledby="clipHistoryTitle"><div id="clipHistory"></div></section>
                 </aside>
                 <section id="clipCutPanel" aria-labelledby="clipSelectionTitle">
-                    <div class="vod-cut-heading"><h3 id="clipSelectionTitle">Schnittbereich</h3><div id="clipEditMode"></div><p id="clipTimeHint"></p><div id="clipTimelineView"></div></div>
+                    <div class="vod-cut-heading"><h3 id="clipSelectionTitle">Schnittbereich</h3><div id="clipEditMode"></div><p id="clipTimeHint">HH:MM:SS.mmm oder Sekunden</p><div id="clipTimelineView"></div></div>
                     <div class="vod-cut-fields">
             <div class="clip-modal-field">
                 <label class="clip-modal-label" hidden id="clipDialogStartLabel" for="clipStartSlider">Start:</label>
@@ -101,13 +101,13 @@
                     <div id="clipSelectionTools"></div></div>
                     <details class="vod-filename-options"><summary id="clipFilenameOptionsTitle">Dateiname und Fortsetzung</summary>
             <div class="clip-modal-field">
-                <label class="clip-modal-label" id="clipDialogPartLabel" for="clipStartPart">Start Part-Nummer (optional, für Fortsetzung):</label>
+                <label class="clip-modal-label" id="clipDialogPartLabel" for="clipStartPart">Startnummer</label>
                 <input type="text" id="clipStartPart" placeholder="z.B. 42" class="clip-modal-part-input" oninput="updateFilenameExamples()">
-                <div id="clipDialogPartHint" class="clip-modal-hint">Leer lassen = Teil 1</div>
+
             </div>
 
             <div class="clip-modal-field">
-                <label class="clip-modal-label" id="clipDialogFormatLabel">Dateinamen-Format:</label>
+                <label class="clip-modal-label" id="clipDialogFormatLabel">Dateiname</label>
                 <label class="clip-radio-row">
                     <input type="radio" name="filenameFormat" value="simple" checked onchange="updateFilenameExamples()">
                     <span id="formatSimple" class="clip-radio-label">01.02.2026_1.mp4 (Standard)</span>
@@ -127,16 +127,16 @@
 
                 <div id="clipFilenameTemplateWrap" class="clip-template-wrap">
                     <input type="text" id="clipFilenameTemplate" value="{date}_{part}.mp4" placeholder="{date}_{part}.mp4" class="clip-modal-template-input" oninput="updateFilenameExamples()">
-                    <div id="clipTemplateHelp" class="clip-modal-hint">Platzhalter: {title} {id} {channel} {date} {part} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}</div>
+
                     <div id="clipTemplateLint" class="template-lint ok">Template-Check: OK</div>
-                    <button type="button" class="btn-secondary" id="clipTemplateGuideBtn" onclick="openTemplateGuide('clip')">Template Guide</button>
+                    <button type="button" class="btn-secondary" id="clipTemplateGuideBtn" onclick="openTemplateGuide('clip')">Platzhalter</button>
                 </div>
             </div>
 
                     </details>
                 </section>
             </div>
-            <footer class="vod-cut-footer"><span id="clipQueueHint">Der gewählte Ausschnitt wird zur Download-Queue hinzugefügt.</span><button type="button" class="btn-secondary" id="clipCancelBtn" onclick="closeClipDialog()">Schließen</button><button type="button" class="btn-pill success" id="clipDialogConfirmBtn" onclick="confirmClipDialog()">Zur Queue hinzufügen</button></footer>
+            <footer class="vod-cut-footer"><span id="clipQueueHint"></span><button type="button" class="btn-secondary" id="clipCancelBtn" onclick="closeClipDialog()">Schließen</button><button type="button" class="btn-pill success" id="clipDialogConfirmBtn" onclick="confirmClipDialog()">Zur Queue hinzufügen</button></footer>
         </div>
     </div>
 
@@ -167,8 +167,8 @@
     <div class="modal-overlay" id="templateGuideModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="templateGuideTitle">
         <div class="modal template-guide-modal">
             <button type="button" class="modal-close modal-close-localizable" aria-label="Close" onclick="closeTemplateGuide()">x</button>
-            <h2 id="templateGuideTitle">Template Guide</h2>
-            <p id="templateGuideIntro" class="template-guide-intro">Nutze Variablen für Dateinamen und prüfe das Ergebnis als Live-Vorschau.</p>
+            <h2 id="templateGuideTitle">Dateinamen</h2>
+
 
             <div class="template-guide-actions">
                 <button type="button" class="btn-secondary" id="templateGuideUseVod" onclick="setTemplateGuidePreset('vod')">VOD Template</button>
@@ -176,16 +176,16 @@
                 <button type="button" class="btn-secondary" id="templateGuideUseClip" onclick="setTemplateGuidePreset('clip')">Clip Template</button>
             </div>
 
-            <label id="templateGuideTemplateLabel" for="templateGuideInput" class="template-guide-label">Template</label>
+            <label id="templateGuideTemplateLabel" for="templateGuideInput" class="template-guide-label">Muster</label>
             <input type="text" id="templateGuideInput" class="template-guide-input" oninput="updateTemplateGuidePreview()" placeholder="{title}.mp4">
 
             <div class="template-guide-preview-box">
-                <div class="template-guide-preview-label" id="templateGuideOutputLabel">Live Vorschau</div>
+                <div class="template-guide-preview-label" id="templateGuideOutputLabel">Vorschau</div>
                 <div id="templateGuideOutput" class="template-guide-output">-</div>
                 <div id="templateGuideContext" class="template-guide-context"></div>
             </div>
 
-            <h3 id="templateGuideVarsTitle" class="template-guide-vars-title">Verfügbare Variablen</h3>
+            <h3 id="templateGuideVarsTitle" class="template-guide-vars-title">Platzhalter</h3>
             <div class="template-guide-table-wrap">
                 <table class="template-guide-table" aria-labelledby="templateGuideVarsTitle">
                     <thead>
@@ -448,7 +448,7 @@
                     <div class="clips-workspace">
                         <section class="clip-input" aria-labelledby="clipsHeading">
                             <header class="clips-card-header">
-                                <div><h2 id="clipsHeading">Twitch Clips herunterladen</h2><p id="clipsBatchHint">Ein Link pro Zeile. Doppelte Links werden nur einmal geladen.</p></div>
+                                <div><h2 id="clipsHeading">Twitch Clips</h2><p id="clipsBatchHint">Ein Link pro Zeile.</p></div>
                                 <span class="clips-count" id="clipsLinkCount">0</span>
                             </header>
                             <label for="clipUrl" id="clipsLinksLabel">Twitch-Links</label>
@@ -469,7 +469,8 @@
                         <aside class="clips-info" aria-labelledby="clipsInfoTitle">
                             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 10v7M12 7v1"/></svg>
                             <h3 id="clipsInfoTitle">Info</h3>
-                            <p id="clipsInfoText"></p>
+                            <p id="clipsInfoText">Maximal 200 Clips.
+Speicherort: Download-Ordner → Clips → Kanal.</p>
                         </aside>
                     </div>
                 </div>
@@ -497,7 +498,7 @@
                                     <video id="cutterVideo" preload="metadata"></video>
                                     <div class="placeholder" id="cutterPreviewEmpty">
                                         <svg aria-hidden="true" width="64" height="64" viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM9 8l7 4-7 4V8z"/></svg>
-                                        <p id="cutterPreviewPlaceholder">Video auswählen, um eine Vorschau zu sehen</p>
+                                        <p id="cutterPreviewPlaceholder">Video auswählen</p>
                                     </div>
                                     <div class="cutter-player-loading" id="cutterPlayerLoading" hidden>
                                         <span class="cutter-spinner"></span>
@@ -560,7 +561,7 @@
                                             <label><input type="radio" name="cutterProfile" value="fast" onchange="setCutterExportProfile(this.value)" disabled><span id="cutterProfileFastLabel">Schnell</span></label>
                                             <label><input type="radio" name="cutterProfile" value="archive" onchange="setCutterExportProfile(this.value)" disabled><span id="cutterProfileArchiveLabel">Archiv</span></label>
                                         </div>
-                                        <p class="cutter-field-help" id="cutterProfileHelp"></p>
+
                                     </fieldset>
                                     <div class="cutter-export-field">
                                         <label for="cutterAudioStream" id="cutterAudioStreamLabel">Audiospur</label>
@@ -578,7 +579,7 @@
                                             <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoResolutionLabel">Auflösung</span><span class="cutter-info-value" id="infoResolution">----×----</span></div>
                                             <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoFpsLabel">Bildrate</span><span class="cutter-info-value" id="infoFps">--</span></div>
                                         </div>
-                                        <p id="cutterEncodingHint" class="cutter-field-help"></p>
+
                                     </details>
                                 </div>
                                 <div class="cutter-export-footer">
@@ -637,10 +638,7 @@
                     <div class="merge-container">
                         <div class="settings-card">
                             <h3 id="mergeTitle">Videos zusammenfügen</h3>
-                            <p id="mergeDesc" class="card-intro">
-                                Wähle mehrere Videos aus um sie zu einem Video zusammenzufügen.
-                                Die Reihenfolge kann per Drag & Drop geändert werden.
-                            </p>
+
                             <button type="button" class="btn-secondary" id="mergeAddBtn" onclick="addMergeFiles()">+ Videos hinzufügen</button>
                         </div>
 
@@ -668,17 +666,17 @@
                 <div class="tab-content" id="statsTab">
                     <div class="insights-workspace">
                         <header class="insights-header">
-                            <div><h2 id="statsTitle">Statistik</h2><p id="statsIntro">Abgeschlossene Downloads bleiben auch nach dem Löschen der Dateien gezählt.</p></div>
+                            <div><h2 id="statsTitle">Statistik</h2></div>
                             <button type="button" class="btn-secondary insights-refresh" id="btnStatsRefresh" onclick="refreshArchiveStats()">Aktualisieren</button>
                         </header>
                         <div class="insights-status-row"><span id="statsLastScannedLabel"></span><span id="statsStatus" role="status" aria-live="polite"></span></div>
                         <section class="insights-section" aria-labelledby="statsSummaryTitle">
-                            <div class="insights-section-heading"><h3 id="statsSummaryTitle">Downloads insgesamt</h3><span id="statsTrackingSince"></span></div>
+                            <div class="insights-section-heading"><h3 id="statsSummaryTitle">Downloads</h3><span id="statsTrackingSince"></span></div>
                             <div id="statsSummaryGrid" class="stats-summary-grid"></div>
                             <p id="statsHistoryNote" class="insights-note"></p>
                         </section>
                         <section class="insights-section stats-inventory-section" aria-labelledby="statsInventoryTitle">
-                            <div class="insights-section-heading"><h3 id="statsInventoryTitle">Aktuell im Download-Ordner</h3><span id="statsInventoryNote">Nur vorhandene Dateien</span></div>
+                            <div class="insights-section-heading"><h3 id="statsInventoryTitle">Im Download-Ordner</h3></div>
                             <div id="statsInventoryGrid" class="stats-inventory-grid"></div>
                             <p id="statsInventoryStatus" class="insights-note"></p>
                         </section>
@@ -701,7 +699,7 @@
 
                 <div class="tab-content" id="archiveTab">
                     <div class="insights-workspace archive-workspace">
-                        <header class="insights-header"><div><h2 id="archiveTitle">Archiv durchsuchen</h2><p id="archiveIntro">Vorhandene Aufnahmen suchen, öffnen und zugehörige Chats ansehen.</p></div></header>
+                        <header class="insights-header"><div><h2 id="archiveTitle">Archiv durchsuchen</h2></div></header>
                         <section class="insights-card archive-filters" aria-labelledby="archiveTitle">
                             <div class="archive-search-field"><label id="archiveQueryLabel" for="archiveSearchQuery">Suche</label><input type="search" id="archiveSearchQuery" placeholder="Dateiname oder Streamer" autocomplete="off"></div>
                             <div class="archive-filter-field"><label id="archiveTypeLabel" for="archiveSearchType">Aufnahmeart</label><select id="archiveSearchType" class="select-compact"><option value="all">Alle Aufnahmen</option><option value="live">Live-Aufnahmen</option><option value="vod">VODs</option><option value="clip">Clips</option></select></div>
@@ -716,7 +714,7 @@
 
                 <!-- Settings Tab -->
                 <div class="tab-content" id="settingsTab" data-settings-pane="general">
-                    <header class="settings-page-heading"><h2 id="settingsGroupTitle">Allgemein</h2><p id="settingsGroupDescription">Darstellung, Sprache und Updates.</p></header>
+                    <header class="settings-page-heading"><h2 id="settingsGroupTitle">Allgemein</h2></header>
                     <div class="settings-card" data-settings-pane="design" data-settings-group="general">
                         <h3 id="designTitle">Design</h3>
                         <div class="form-group">
@@ -771,14 +769,14 @@
                                 <input type="checkbox" id="sidebarSplitViewToggle" checked onchange="applySidebarLayoutPreference(this.checked)">
                                 <span id="sidebarSplitViewLabel">Streamer und Queue gleichzeitig anzeigen</span>
                             </label>
-                            <p id="sidebarSplitViewHint" class="form-note">Teilt die linke Seitenleiste gleichmäßig auf. Deaktiviert erscheinen wieder die Umschaltflächen.</p>
+
                         </div>
                     </div>
 
                     <div class="settings-card" data-settings-pane="api" data-settings-group="api" hidden>
                         <h3 id="apiTitle">Twitch API</h3>
                         <p id="apiHelpText" class="card-intro">
-                            <span id="apiHelpIntro">Du brauchst eine Client-ID und ein Client-Secret von Twitch.</span>
+
                             <a href="#" id="apiHelpLink" onclick="event.preventDefault(); openTwitchDevConsole()">dev.twitch.tv/console/apps</a>
                         </p>
                         <div class="form-group">
@@ -814,7 +812,7 @@
                                         </select>
                                     </div>
                                     <div class="form-group">
-                                        <label id="partMinutesLabel" for="partMinutes">Teil-Länge (Minuten)</label>
+                                        <label id="partMinutesLabel" for="partMinutes">Part-Länge (Min.)</label>
                                         <input type="number" id="partMinutes" value="120" min="10" max="480">
                                     </div>
                                     <div class="form-group">
@@ -826,15 +824,7 @@
                                     </div>
                                     <div class="form-group">
                                         <label id="streamlinkQualityLabel" for="streamlinkQuality">Stream-Qualität</label>
-                                        <select id="streamlinkQuality">
-                                            <option value="best" id="streamlinkQualityBest">Best (Standard)</option>
-                                            <option value="source" id="streamlinkQualitySource">Source (Original)</option>
-                                            <option value="1080p60" id="streamlinkQuality1080p60">1080p60</option>
-                                            <option value="720p60" id="streamlinkQuality720p60">720p60</option>
-                                            <option value="720p" id="streamlinkQuality720p">720p</option>
-                                            <option value="480p" id="streamlinkQuality480p">480p</option>
-                                            <option value="audio_only" id="streamlinkQualityAudio">Audio only</option>
-                                        </select>
+                                        <input type="text" id="streamlinkQuality" value="Source" readonly>
                                     </div>
                                     <div class="form-group">
                                         <label id="performanceModeLabel" for="performanceMode">Performance-Profil</label>
@@ -847,8 +837,8 @@
                                 </section>
                                 <section class="download-settings-section">
                                     <div class="download-settings-section-heading">
-                                        <h4 id="filenameTemplatesTitle">Dateinamen-Templates</h4>
-                                        <button class="btn-secondary" id="settingsTemplateGuideBtn" type="button" onclick="openTemplateGuide('vod')">Template Guide</button>
+                                        <h4 id="filenameTemplatesTitle">Dateinamen</h4>
+                                        <button class="btn-secondary" id="settingsTemplateGuideBtn" type="button" onclick="openTemplateGuide('vod')">Platzhalter</button>
                                     </div>
                                     <div class="form-row template-presets">
                                         <button class="btn-secondary" id="templatePresetDefault" type="button" onclick="applyTemplatePreset('default')">Preset: Default</button>
@@ -856,14 +846,14 @@
                                         <button class="btn-secondary" id="templatePresetClipper" type="button" onclick="applyTemplatePreset('clipper')">Preset: Clipper</button>
                                     </div>
                                     <div class="filename-template-grid">
-                                        <label id="vodTemplateLabel" for="vodFilenameTemplate">VOD Template</label>
+                                        <label id="vodTemplateLabel" for="vodFilenameTemplate">VOD</label>
                                         <input type="text" id="vodFilenameTemplate" class="input-monospace" placeholder="{title}.mp4" oninput="validateFilenameTemplates()">
-                                        <label id="partsTemplateLabel" for="partsFilenameTemplate">VOD Part Template</label>
+                                        <label id="partsTemplateLabel" for="partsFilenameTemplate">Parts</label>
                                         <input type="text" id="partsFilenameTemplate" class="input-monospace" placeholder="{date}_Part{part_padded}.mp4" oninput="validateFilenameTemplates()">
-                                        <label id="defaultClipTemplateLabel" for="defaultClipFilenameTemplate">Clip Template</label>
+                                        <label id="defaultClipTemplateLabel" for="defaultClipFilenameTemplate">Clip</label>
                                         <input type="text" id="defaultClipFilenameTemplate" class="input-monospace" placeholder="{date}_{part}.mp4" oninput="validateFilenameTemplates()">
                                     </div>
-                                    <div id="filenameTemplateHint" class="form-note">Platzhalter: {title} {id} {channel} {date} {part} {part_padded} {trim_start} {trim_end} {trim_length} {date_custom="yyyy-MM-dd"}</div>
+
                                     <div id="filenameTemplateLint" class="template-lint ok">Template-Check: OK</div>
                                 </section>
                             </div>
@@ -871,23 +861,23 @@
                                 <section class="download-settings-section">
                                     <h4 id="queueAutomationTitle">Queue und Automatisierung</h4>
                                     <div class="download-settings-toggles">
-                                        <label class="toggle-row"><input type="checkbox" id="duplicatePreventionToggle" checked><span id="duplicatePreventionLabel">Duplikate in Queue verhindern</span></label>
-                                        <label class="toggle-row"><input type="checkbox" id="persistQueueToggle" checked><span id="persistQueueLabel">Queue zwischen App-Starts speichern</span></label>
-                                        <label class="toggle-row"><input type="checkbox" id="autoResumeQueueToggle"><span id="autoResumeQueueLabel">Queue beim Start automatisch fortsetzen</span></label>
-                                        <label class="toggle-row"><input type="checkbox" id="notifyEachCompletionToggle"><span id="notifyEachCompletionLabel">Benachrichtigung bei jedem fertigen Download</span></label>
+                                        <label class="toggle-row"><input type="checkbox" id="duplicatePreventionToggle" checked><span id="duplicatePreventionLabel">Duplikate verhindern</span></label>
+                                        <label class="toggle-row"><input type="checkbox" id="persistQueueToggle" checked><span id="persistQueueLabel">Warteschlange speichern</span></label>
+                                        <label class="toggle-row"><input type="checkbox" id="autoResumeQueueToggle"><span id="autoResumeQueueLabel">Beim Start fortsetzen</span></label>
+                                        <label class="toggle-row"><input type="checkbox" id="notifyEachCompletionToggle"><span id="notifyEachCompletionLabel">Fertige Downloads melden</span></label>
                                     </div>
                                 </section>
                                 <section class="download-settings-section download-policy-settings">
                                     <h4 id="downloadPolicyTitle">Drosselung und Zeitfenster</h4>
                                     <div class="form-group">
-                                        <label id="downloadThrottleLabel" for="downloadThrottleMiBps">Maximale Downloadrate (MiB/s)</label>
+                                        <label id="downloadThrottleLabel" for="downloadThrottleMiBps">Downloadrate (MiB/s)</label>
                                         <input type="text" id="downloadThrottleMiBps" inputmode="decimal" autocomplete="off" aria-describedby="downloadThrottleHint downloadPolicyValidation">
-                                        <div id="downloadThrottleHint" class="form-note">Leer lassen für keine Drosselung. Dezimalwerte wie 1,5 sind möglich.</div>
+                                        <div id="downloadThrottleHint" class="form-note">Leer = unbegrenzt.</div>
                                     </div>
                                     <div class="form-group">
-                                        <label id="downloadWindowsLabel" for="downloadWindows">Lokale Download-Zeitfenster</label>
+                                        <label id="downloadWindowsLabel" for="downloadWindows">Zeitfenster</label>
                                         <textarea id="downloadWindows" rows="3" aria-describedby="downloadWindowsHint downloadPolicyValidation" placeholder="22:00-06:00"></textarea>
-                                        <div id="downloadWindowsHint" class="form-note">Ein Zeitfenster pro Zeile oder durch Semikolon getrennt. Über Mitternacht ist erlaubt.</div>
+                                        <div id="downloadWindowsHint" class="form-note">Ein Zeitfenster pro Zeile.</div>
                                     </div>
                                     <div id="downloadPolicyValidation" class="form-note" role="alert"></div>
                                     <div id="downloadPolicyStatus" class="form-note" role="status" aria-live="polite"></div>
@@ -896,16 +886,16 @@
                                 <section class="download-settings-section">
                                     <h4 id="recordingMetadataTitle">Aufnahmen und Metadaten</h4>
                                     <div class="download-settings-toggles">
-                                        <label class="toggle-row"><input type="checkbox" id="streamlinkDisableAdsToggle" checked><span id="streamlinkDisableAdsLabel">Twitch-Ads beim Download überspringen</span></label>
-                                        <label class="toggle-row"><input type="checkbox" id="downloadChatReplayToggle"><span id="downloadChatReplayLabel">Chat-Replay parallel zum VOD speichern (.chat.json)</span></label>
-                                        <label class="toggle-row"><input type="checkbox" id="captureLiveChatToggle"><span id="captureLiveChatLabel">Live-Chat während der Aufnahme mitschneiden (.chat.jsonl)</span></label>
-                                        <label class="toggle-row"><input type="checkbox" id="logStreamEventsToggle" checked><span id="logStreamEventsLabel">Stream-Events bei Live-Aufnahmen mitloggen (.events.jsonl)</span></label>
-                                        <label class="toggle-row"><input type="checkbox" id="autoResumeLiveRecordingToggle" checked><span id="autoResumeLiveRecordingLabel">Live-Aufnahme automatisch fortsetzen wenn Streamlink abbricht (max. 5 Versuche)</span></label>
-                                        <label class="toggle-row"><input type="checkbox" id="autoMergeResumedPartsToggle"><span id="autoMergeResumedPartsLabel">Fortgesetzte Aufnahme-Parts automatisch zu einer Datei zusammenfügen (ffmpeg concat)</span></label>
-                                        <label class="toggle-row indented"><input type="checkbox" id="deletePartsAfterMergeToggle"><span id="deletePartsAfterMergeLabel">Einzelne Parts nach erfolgreichem Merge löschen</span></label>
+                                        <label class="toggle-row"><input type="checkbox" id="streamlinkDisableAdsToggle" checked><span id="streamlinkDisableAdsLabel">Werbung überspringen</span></label>
+                                        <label class="toggle-row"><input type="checkbox" id="downloadChatReplayToggle"><span id="downloadChatReplayLabel">VOD-Chat speichern</span></label>
+                                        <label class="toggle-row"><input type="checkbox" id="captureLiveChatToggle"><span id="captureLiveChatLabel">Live-Chat speichern</span></label>
+                                        <label class="toggle-row"><input type="checkbox" id="logStreamEventsToggle" checked><span id="logStreamEventsLabel">Titel- und Spielwechsel speichern</span></label>
+                                        <label class="toggle-row"><input type="checkbox" id="autoResumeLiveRecordingToggle" checked><span id="autoResumeLiveRecordingLabel">Live-Aufnahmen automatisch fortsetzen</span></label>
+                                        <label class="toggle-row"><input type="checkbox" id="autoMergeResumedPartsToggle"><span id="autoMergeResumedPartsLabel">Fortgesetzte Aufnahmen zusammenfügen</span></label>
+                                        <label class="toggle-row indented"><input type="checkbox" id="deletePartsAfterMergeToggle"><span id="deletePartsAfterMergeLabel">Parts nach dem Zusammenfügen löschen</span></label>
                                     </div>
                                     <div class="form-group metadata-cache-setting">
-                                        <label id="metadataCacheMinutesLabel" for="metadataCacheMinutes">Metadata-Cache (Minuten)</label>
+                                        <label id="metadataCacheMinutesLabel" for="metadataCacheMinutes">Cache (Min.)</label>
                                         <input type="number" id="metadataCacheMinutes" value="10" min="1" max="120">
                                     </div>
                                 </section>
@@ -958,20 +948,20 @@
                             <h3 id="storageCardTitle">Storage</h3>
                             <button type="button" class="btn-secondary" id="btnRefreshStorage" onclick="refreshStorageStats()">Aktualisieren</button>
                         </div>
-                        <p id="storageCardIntro" class="card-intro">Disk-Verbrauch pro Streamer im aktuellen Download-Ordner. Live-Aufnahmen werden separat ausgewiesen.</p>
+
                         <div id="storageSummary" class="form-sublabel" style="margin-bottom:8px;" role="status" aria-live="polite"></div>
                         <div id="storageList"></div>
 
                         <hr>
-                        <h4 id="cleanupTitle">Auto-Cleanup</h4>
-                        <p id="cleanupIntro" class="card-intro">Aufnahmen älter als X Tage automatisch archivieren oder löschen. Schiebt Sidecar-Chat-Dateien (.chat.json/.chat.jsonl) mit der Aufnahme.</p>
+                        <h4 id="cleanupTitle">Automatisch aufräumen</h4>
+                        <p id="cleanupIntro" class="card-intro">Chat-Dateien werden mitverschoben oder gelöscht.</p>
                         <label class="toggle-row" style="margin-bottom: 8px;">
                             <input type="checkbox" id="autoCleanupEnabledToggle">
-                            <span id="autoCleanupEnabledLabel">Auto-Cleanup aktivieren</span>
+                            <span id="autoCleanupEnabledLabel">Aktivieren</span>
                         </label>
                         <div class="form-row" style="gap:12px; flex-wrap:wrap; margin-bottom: 8px;">
                             <label class="form-stack size-sm">
-                                <span id="autoCleanupDaysLabel" class="form-sublabel">Tage-Schwelle</span>
+                                <span id="autoCleanupDaysLabel" class="form-sublabel">Älter als (Tage)</span>
                                 <input type="number" id="autoCleanupDays" min="1" max="3650" value="30">
                             </label>
                             <label class="form-stack size-md">
@@ -998,7 +988,7 @@
 
                     <div class="settings-card" data-settings-pane="notifications" data-settings-group="automation" hidden>
                         <h3 id="discordCardTitle">Discord-Webhook</h3>
-                        <p id="discordCardIntro" class="card-intro">Sende Benachrichtigungen an einen Discord-Channel via Webhook — nützlich für Multi-Device-Setups oder eine dedizierte Archiv-Maschine.</p>
+
                         <div class="form-group">
                             <label id="discordWebhookUrlLabel" for="discordWebhookUrl">Webhook-URL</label>
                             <input type="text" id="discordWebhookUrl" placeholder="https://discord.com/api/webhooks/...">
@@ -1006,50 +996,50 @@
                         <div class="form-group">
                             <label class="toggle-row">
                                 <input type="checkbox" id="discordNotifyLiveStartToggle">
-                                <span id="discordNotifyLiveStartLabel">Bei Live-Aufnahme-Start benachrichtigen</span>
+                                <span id="discordNotifyLiveStartLabel">Aufnahme gestartet</span>
                             </label>
                             <label class="toggle-row">
                                 <input type="checkbox" id="discordNotifyLiveEndToggle">
-                                <span id="discordNotifyLiveEndLabel">Bei Live-Aufnahme-Ende benachrichtigen</span>
+                                <span id="discordNotifyLiveEndLabel">Aufnahme beendet</span>
                             </label>
                             <label class="toggle-row">
                                 <input type="checkbox" id="discordNotifyVodCompleteToggle">
-                                <span id="discordNotifyVodCompleteLabel">Bei abgeschlossenem VOD-Download benachrichtigen</span>
+                                <span id="discordNotifyVodCompleteLabel">VOD heruntergeladen</span>
                             </label>
                             <label class="toggle-row">
                                 <input type="checkbox" id="discordNotifyVodAutoQueuedToggle">
-                                <span id="discordNotifyVodAutoQueuedLabel">Bei automatisch eingereihten VODs benachrichtigen</span>
+                                <span id="discordNotifyVodAutoQueuedLabel">VOD automatisch eingereiht</span>
                             </label>
                         </div>
                     </div>
 
                     <div class="settings-card" data-settings-pane="automation" data-settings-group="automation" hidden>
                         <h3 id="autoVodCardTitle">Auto-VOD-Download</h3>
-                        <p id="autoVodCardIntro" class="card-intro">Streamer mit aktiviertem VOD-Toggle werden in dem hier festgelegten Intervall auf neue Twitch-VODs geprüft. Neue VODs innerhalb des Alters-Fensters werden automatisch zur Download-Queue hinzugefügt.</p>
+
                         <div class="form-row aligned compact-number-fields">
                             <div class="form-stack">
-                                <label id="autoVodPollMinutesLabel" class="form-sublabel" for="autoVodPollMinutes">Poll-Intervall (Minuten)</label>
+                                <label id="autoVodPollMinutesLabel" class="form-sublabel" for="autoVodPollMinutes">Intervall (Min.)</label>
                                 <input type="number" id="autoVodPollMinutes" min="5" max="360" value="15" class="input-narrow">
                             </div>
                             <div class="form-stack">
-                                <label id="autoVodMaxAgeHoursLabel" class="form-sublabel" for="autoVodMaxAgeHours">Max. Alter (Stunden)</label>
+                                <label id="autoVodMaxAgeHoursLabel" class="form-sublabel" for="autoVodMaxAgeHours">Max. Alter (Std.)</label>
                                 <input type="number" id="autoVodMaxAgeHours" min="1" max="720" value="24" class="input-narrow">
                             </div>
                         </div>
-                        <div class="form-row" style="align-items: center; gap: 12px; flex-wrap: wrap;">
-                            <button type="button" class="btn-secondary" id="btnAutoVodScanNow" onclick="triggerManualAutoVodScan()">Jetzt scannen</button>
-                            <button type="button" class="btn-secondary" id="btnAutoRecordScanNow" onclick="triggerManualAutoRecordScan()">Live-Status prüfen</button>
+                        <div class="form-row auto-vod-actions">
+                            <button type="button" class="btn-secondary" id="btnAutoVodScanNow" onclick="triggerManualAutoVodScan()">VODs prüfen</button>
+                            <button type="button" class="btn-secondary" id="btnAutoRecordScanNow" onclick="triggerManualAutoRecordScan()">Live prüfen</button>
                             <span id="autoVodStatusLine" class="form-sublabel"></span>
                         </div>
                     </div>
 
                     <div class="settings-card" data-settings-pane="maintenance" data-settings-group="storage" hidden>
                         <h3 id="backupCardTitle">Sicherung &amp; Wartung</h3>
-                        <p id="backupCardIntro" class="card-intro">Konfiguration sichern, auf einem anderen Gerät wiederherstellen, oder die Liste der bereits heruntergeladenen VODs zurücksetzen.</p>
+
                         <div class="form-row" style="margin-bottom: 10px; flex-wrap: wrap;">
                             <button type="button" class="btn-secondary" id="btnExportConfig" onclick="exportConfigToFile()">Konfiguration exportieren</button>
                             <button type="button" class="btn-secondary" id="btnImportConfig" onclick="importConfigFromFile()">Konfiguration importieren</button>
-                            <button type="button" class="btn-secondary" id="btnResetDownloadedIds" onclick="resetDownloadedIds()">Downloaded-VODs zurücksetzen</button>
+                            <button type="button" class="btn-secondary" id="btnResetDownloadedIds" onclick="resetDownloadedIds()">Download-Markierungen zurücksetzen</button>
                         </div>
                     </div>
 
@@ -1096,7 +1086,7 @@
                 aria-expanded="false"
             />
             <ul id="commandPaletteList" class="cp-list" role="listbox" aria-label="Befehlsergebnisse"></ul>
-            <p class="cp-hint" id="commandPaletteHint">Up/Down zum Navigieren, Enter zum Ausführen, Esc zum Schließen</p>
+            <p class="cp-hint" id="commandPaletteHint">↑↓ Auswählen · Enter Öffnen · Esc Schließen</p>
         </div>
     </div>
 

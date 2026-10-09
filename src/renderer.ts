@@ -1602,7 +1602,6 @@ function refreshTemplateGuideTexts(): void {
     setText('settingsTemplateGuideBtn', UI_TEXT.static.templateGuideButton);
     setText('clipTemplateGuideBtn', UI_TEXT.static.templateGuideButton);
     setText('templateGuideTitle', UI_TEXT.static.templateGuideTitle);
-    setText('templateGuideIntro', UI_TEXT.static.templateGuideIntro);
     setText('templateGuideTemplateLabel', UI_TEXT.static.templateGuideTemplateLabel);
     setText('templateGuideOutputLabel', UI_TEXT.static.templateGuideOutputLabel);
     setText('templateGuideVarsTitle', UI_TEXT.static.templateGuideVarsTitle);
@@ -1685,9 +1684,9 @@ function updateClipOmissionState(): void {
     const plan = clipOmissionState?.plan;
     byId('clipDialogDurationLabel').textContent = UI_TEXT.clips.dialogDuration;
     byId('clipQueueHint').textContent = isEditing
-        ? plan && plan.parts.length ? (currentLanguage === 'de' ? `${formatUiNumber(plan.parts.length)} ${plan.parts.length === 1 ? 'Datei' : 'Dateien'} · ${formatClipTime(plan.duration)} · Auslassungen angewendet` : `${formatUiNumber(plan.parts.length)} ${plan.parts.length === 1 ? 'file' : 'files'} · ${formatClipTime(plan.duration)} · Exclusions applied`)
-            : (currentLanguage === 'de' ? 'Keine gültige Ausgabe geplant.' : 'No valid output planned.')
-        : UI_TEXT.clips.queueHint;
+        ? plan && plan.parts.length ? (currentLanguage === 'de' ? `${formatUiNumber(plan.parts.length)} ${plan.parts.length === 1 ? 'Datei' : 'Dateien'} · ${formatClipTime(plan.duration)}` : `${formatUiNumber(plan.parts.length)} ${plan.parts.length === 1 ? 'file' : 'files'} · ${formatClipTime(plan.duration)}`)
+            : (currentLanguage === 'de' ? 'Kein gültiger Bereich.' : 'No valid range.')
+        : '';
     const start = parseTimeToSeconds(byId<HTMLInputElement>('clipStartTime').value), end = parseTimeToSeconds(byId<HTMLInputElement>('clipEndTime').value);
     const validRange = Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start && end <= clipTotalSeconds;
     if (plan && validRange) {
@@ -1699,8 +1698,8 @@ function updateClipOmissionState(): void {
     byId('clipStartPart').setAttribute('aria-invalid', String(invalidPart));
     byId<HTMLButtonElement>('clipDialogConfirmBtn').disabled = clipQueueInFlight || invalidPart || Boolean(clipOmissionState?.editing)
         || !validRange || (isEditing && !plan?.parts.length);
-    if (invalidPart) byId('clipQueueHint').textContent = currentLanguage === 'de' ? 'Startnummer: eine ganze Zahl von 1 bis 100.000 eingeben.' : 'Starting number: enter a whole number from 1 to 100,000.';
-    else if (clipOmissionState?.editing) byId('clipQueueHint').textContent = currentLanguage === 'de' ? 'Bereich zuerst bestätigen oder die Bearbeitung abbrechen.' : 'Confirm the range or cancel editing first.';
+    if (invalidPart) byId('clipQueueHint').textContent = currentLanguage === 'de' ? 'Startnummer: 1–100.000.' : 'Starting number: 1–100,000.';
+    else if (clipOmissionState?.editing) byId('clipQueueHint').textContent = currentLanguage === 'de' ? 'Bereich bestätigen oder abbrechen.' : 'Confirm or cancel the range.';
     else if (clipQueueError) byId('clipQueueHint').textContent = clipQueueError;
 }
 
@@ -1870,7 +1869,7 @@ function updateFilenameExamples(): void {
 
     if (!unknownTokens.length) {
         clipLint.className = 'template-lint ok';
-        clipLint.textContent = UI_TEXT.static.templateLintOk;
+        clipLint.textContent = '';
     } else {
         clipLint.className = 'template-lint warn';
         clipLint.textContent = `${UI_TEXT.static.templateLintWarn}: ${unknownTokens.join(' ')}`;
@@ -1990,17 +1989,31 @@ async function confirmClipDialog(): Promise<void> {
 }
 
 type ClipBatchState = 'ready' | 'active' | 'done' | 'failed' | 'invalid' | 'stopped';
+type ClipMetadataState = 'pending' | 'loading' | 'ready' | 'missing' | 'unavailable';
 interface ClipBatchItem {
     url: string;
     label: string;
+    streamer: string;
+    metadataState: ClipMetadataState;
     state: ClipBatchState;
     error?: string;
+}
+interface ClipBatchRow {
+    row: HTMLLIElement;
+    number: HTMLSpanElement;
+    label: HTMLSpanElement;
+    streamer: HTMLSpanElement;
+    status: HTMLSpanElement;
+    symbol: HTMLSpanElement;
+    symbolKind?: string;
 }
 let clipDownloadInFlight = false;
 let clipBatchStopRequested = false;
 let clipBatchItems: ClipBatchItem[] = [];
 let clipBatchLimitExceeded = false;
 let clipNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+const clipMetadataRequests = new Set<string>();
+const clipBatchRows = new Map<string, ClipBatchRow>();
 
 function showClipNotice(message: string, error = false): void {
     clearTimeout(clipNoticeTimer);
@@ -2008,6 +2021,40 @@ function showClipNotice(message: string, error = false): void {
     notice.textContent = message;
     notice.className = 'clip-notice' + (error ? ' error' : '') + (message ? ' visible' : '');
     if (message) clipNoticeTimer = setTimeout(() => notice.classList.remove('visible'), 5000);
+}
+
+function completeClipMetadata(url: string, info: { title: string; broadcaster_name: string } | null | undefined): void {
+    clipMetadataRequests.delete(url);
+    const item = clipBatchItems.find(candidate => candidate.url === url && candidate.state !== 'invalid');
+    if (item) {
+        if (info && typeof info.title === 'string' && typeof info.broadcaster_name === 'string') {
+            item.label = info.title.trim();
+            item.streamer = info.broadcaster_name.trim();
+            item.metadataState = 'ready';
+        } else {
+            item.metadataState = info === null ? 'missing' : 'unavailable';
+        }
+    }
+    requestClipMetadata();
+    renderClipBatch();
+}
+
+function requestClipMetadata(): void {
+    for (const item of clipBatchItems) {
+        if (item.state === 'invalid' || item.metadataState !== 'pending') continue;
+        if (clipMetadataRequests.has(item.url)) {
+            item.metadataState = 'loading';
+            continue;
+        }
+        if (clipMetadataRequests.size >= 4) continue;
+        const url = item.url;
+        item.metadataState = 'loading';
+        clipMetadataRequests.add(url);
+        void Promise.resolve().then(() => window.api.getClipInfo(url)).then(
+            info => completeClipMetadata(url, info),
+            () => completeClipMetadata(url, undefined)
+        );
+    }
 }
 
 function updateClipLinks(): void {
@@ -2033,9 +2080,10 @@ function updateClipLinks(): void {
         const canonical = slug ? 'https://clips.twitch.tv/' + slug : line;
         if (seen.has(canonical)) continue;
         seen.add(canonical);
-        clipBatchItems.push(previous.get(canonical) || { url: canonical, label: slug || line, state: slug ? 'ready' : 'invalid' });
+        clipBatchItems.push(previous.get(canonical) || { url: canonical, label: '', streamer: '', metadataState: slug ? 'pending' : 'unavailable', state: slug ? 'ready' : 'invalid' });
     }
     showClipNotice(clipBatchLimitExceeded ? UI_TEXT.clips.limitReached : '', true);
+    requestClipMetadata();
     renderClipBatch();
 }
 
@@ -2049,6 +2097,71 @@ function stopClipBatch(): void {
     if (!clipDownloadInFlight) return;
     clipBatchStopRequested = true;
     renderClipBatch();
+}
+
+function createClipBatchRow(): ClipBatchRow {
+    const row = document.createElement('li');
+    const span = (className: string) => {
+        const element = document.createElement('span');
+        element.className = className;
+        return element;
+    };
+    const number = span('clip-result-number');
+    const label = span('clip-result-label');
+    const streamer = span('clip-result-streamer');
+    const status = span('clip-result-status');
+    const symbol = span('clip-result-symbol');
+    symbol.setAttribute('aria-hidden', 'true');
+    const content = document.createElement('div');
+    content.className = 'clip-result-content';
+    const meta = document.createElement('div');
+    meta.className = 'clip-result-meta';
+    meta.append(streamer, status);
+    content.append(label, meta);
+    row.append(number, content, symbol);
+    return { row, number, label, streamer, status, symbol };
+}
+
+function updateClipBatchSymbol(elements: ClipBatchRow, kind: string): void {
+    if (elements.symbolKind === kind) return;
+    elements.symbolKind = kind;
+    if (kind === 'loading') {
+        const loader = document.createElement('span');
+        loader.className = 'clip-result-loader';
+        elements.symbol.replaceChildren(loader);
+        return;
+    }
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '24');
+    svg.setAttribute('height', '24');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    circle.setAttribute('cx', '12');
+    circle.setAttribute('cy', '12');
+    circle.setAttribute('r', kind === 'done' ? '12' : '9');
+    circle.setAttribute('fill', kind === 'done' ? '#2E9E5B' : 'none');
+    if (kind !== 'done') {
+        circle.setAttribute('stroke', 'currentColor');
+        circle.setAttribute('stroke-width', '1.5');
+    }
+    path.setAttribute('d', kind === 'done' ? 'M6.6 12.3 10.4 16 17.4 8.6' : kind === 'error' ? 'M12 7v6m0 4h.01' : 'M8 12h8');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', kind === 'done' ? 'white' : 'currentColor');
+    path.setAttribute('stroke-width', kind === 'done' ? '2.2' : '1.8');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.append(circle, path);
+    elements.symbol.replaceChildren(svg);
+}
+
+function clipBatchTitle(item: ClipBatchItem): string {
+    const de = currentLanguage === 'de';
+    if (item.state === 'invalid') return de ? 'Ungültiger Link' : 'Invalid link';
+    if (item.metadataState === 'ready') return item.label || (de ? 'Clip ohne Titel' : 'Untitled clip');
+    if (item.metadataState === 'missing') return de ? 'Clip nicht gefunden' : 'Clip not found';
+    if (item.metadataState === 'unavailable') return de ? 'Titel nicht verfügbar' : 'Title unavailable';
+    return de ? 'Titel wird geladen …' : 'Loading title …';
 }
 
 function renderClipBatch(): void {
@@ -2078,38 +2191,52 @@ function renderClipBatch(): void {
     const retry = byId<HTMLButtonElement>('clipsRetryBtn');
     retry.hidden = !clipBatchItems.some(item => item.state === 'failed');
     retry.disabled = clipDownloadInFlight || clipBatchLimitExceeded;
-    const list = byId('clipsDownloadList');
+    const list = byId<HTMLElement>('clipsDownloadList');
     const scrollTop = list.scrollTop;
-    const fragment = document.createDocumentFragment();
+    const urls = new Set(clipBatchItems.map(item => item.url));
+    for (const [url, elements] of clipBatchRows) {
+        if (!urls.has(url)) {
+            elements.row.remove();
+            clipBatchRows.delete(url);
+        }
+    }
+    const setText = (element: HTMLElement, value: string) => {
+        if (element.textContent !== value) element.textContent = value;
+    };
     if (!clipBatchItems.length) {
-        const empty = document.createElement('li');
-        empty.className = 'clips-list-empty';
-        empty.textContent = UI_TEXT.clips.listEmpty;
-        fragment.append(empty);
+        let empty = list.querySelector<HTMLLIElement>('.clips-list-empty');
+        if (!empty) {
+            empty = document.createElement('li');
+            empty.className = 'clips-list-empty';
+            list.append(empty);
+        }
+        setText(empty, UI_TEXT.clips.listEmpty);
+    } else {
+        list.querySelector('.clips-list-empty')?.remove();
     }
     clipBatchItems.forEach((item, index) => {
-        const row = document.createElement('li');
-        row.className = 'clip-result-row ' + item.state;
-        const number = document.createElement('span');
-        number.className = 'clip-result-number';
-        number.textContent = formatUiNumber(index + 1);
-        const content = document.createElement('div');
-        content.className = 'clip-result-content';
-        const label = document.createElement('span');
-        label.className = 'clip-result-label';
-        label.textContent = item.label;
-        const status = document.createElement('span');
-        status.className = 'clip-result-status';
-        status.textContent = item.state === 'invalid' ? UI_TEXT.clips.invalidUrl : item.error || UI_TEXT.clips[item.state];
-        content.append(label, status);
-        const symbol = document.createElement('span');
-        symbol.className = 'clip-result-symbol';
-        symbol.setAttribute('aria-hidden', 'true');
-        symbol.textContent = item.state === 'done' ? '✓' : item.state === 'failed' || item.state === 'invalid' ? '!' : item.state === 'active' ? '↻' : '–';
-        row.append(number, content, symbol);
-        fragment.append(row);
+        let elements = clipBatchRows.get(item.url);
+        if (!elements) {
+            elements = createClipBatchRow();
+            elements.row.dataset.clipUrl = item.url;
+            clipBatchRows.set(item.url, elements);
+        }
+        const rowClass = 'clip-result-row ' + item.state;
+        if (elements.row.className !== rowClass) elements.row.className = rowClass;
+        setText(elements.number, formatUiNumber(index + 1));
+        const title = clipBatchTitle(item);
+        setText(elements.label, title);
+        elements.label.title = item.metadataState === 'ready' ? title : item.url;
+        setText(elements.streamer, item.streamer);
+        elements.streamer.hidden = !item.streamer;
+        elements.streamer.title = item.streamer;
+        const status = item.state === 'invalid' ? UI_TEXT.clips.invalidUrl : item.error || UI_TEXT.clips[item.state];
+        setText(elements.status, status);
+        elements.status.title = status;
+        const kind = item.state === 'done' ? 'done' : item.state === 'failed' || item.state === 'invalid' ? 'error' : item.state === 'active' || item.metadataState === 'loading' ? 'loading' : 'ready';
+        updateClipBatchSymbol(elements, kind);
+        if (list.children[index] !== elements.row) list.insertBefore(elements.row, list.children[index] || null);
     });
-    list.replaceChildren(fragment);
     list.scrollTop = scrollTop;
 }
 
@@ -2131,7 +2258,9 @@ async function downloadClip(retryFailed = false): Promise<void> {
     for (const item of pending) {
         item.state = 'ready';
         item.error = undefined;
+        if (item.metadataState === 'missing' || item.metadataState === 'unavailable') item.metadataState = 'pending';
     }
+    requestClipMetadata();
     try {
         for (const item of pending) {
             if (clipBatchStopRequested) {
@@ -2144,6 +2273,10 @@ async function downloadClip(retryFailed = false): Promise<void> {
                 const result = await window.api.downloadClip(item.url);
                 item.state = result?.success ? 'done' : 'failed';
                 if (!result?.success) item.error = result?.error?.trim() || UI_TEXT.clips.unknownError;
+                else if (item.metadataState === 'missing' || item.metadataState === 'unavailable') {
+                    item.metadataState = 'pending';
+                    requestClipMetadata();
+                }
             } catch {
                 item.state = 'failed';
                 item.error = UI_TEXT.clips.unknownError;
@@ -2157,7 +2290,11 @@ async function downloadClip(retryFailed = false): Promise<void> {
     }
     const done = clipBatchItems.filter(item => item.state === 'done').length;
     const failed = clipBatchItems.filter(item => item.state === 'failed' || item.state === 'invalid').length;
-    showClipNotice(UI_TEXT.clips.finished.replace('{done}', formatUiNumber(done)).replace('{failed}', formatUiNumber(failed)), failed > 0);
+    const result = [
+        done > 0 ? (done === 1 ? UI_TEXT.clips.finishedOne : UI_TEXT.clips.finished.replace('{done}', formatUiNumber(done))) : '',
+        failed > 0 ? UI_TEXT.clips.failedCount.replace('{failed}', formatUiNumber(failed)) : ''
+    ].filter(Boolean).join(' · ');
+    showClipNotice(result, failed > 0);
 }
 
 const segmentedIndicatorFrames = new WeakMap<HTMLElement, number>();

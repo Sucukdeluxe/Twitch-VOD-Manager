@@ -2001,7 +2001,6 @@ function updateCutterExportPresentation(): void {
     const texts: Record<string, string> = {
         cutterProfileQualityLabel: t.profileQuality, cutterProfileBalancedLabel: t.profileBalanced,
         cutterProfileFastLabel: t.profileFast, cutterProfileArchiveLabel: t.profileArchive,
-        cutterProfileHelp: { quality: t.profileQualityHelp, balanced: t.profileBalancedHelp, fast: t.profileFastHelp, archive: t.profileArchiveHelp }[cutterExportProfile],
         cutterFormatBadge: archive ? 'MKV' : 'MP4',
         cutterExportCodecs: [archive ? 'FFV1' : 'H.264', stream ? archive ? 'FLAC' : 'AAC' : t.noAudio].join(' · '),
         cutterAudioHelp: stream ? [stream.codec.toUpperCase(), channelText].filter(Boolean).join(' · ') : '',

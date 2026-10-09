@@ -4,7 +4,7 @@ import {
 import {
     isPlainObject,
     normalizeLogin,
-    VALID_STREAMLINK_QUALITIES,
+    normalizeStreamlinkQuality,
 } from './config-normalize';
 import { isSecretBearingKey } from './config-export';
 
@@ -197,8 +197,7 @@ export function sanitizeConfigInput(value: unknown): Record<string, unknown> {
         }
 
         if (key === 'streamlink_quality') {
-            const quality = normalizedEnum(entry, VALID_STREAMLINK_QUALITIES);
-            if (quality) sanitized[key] = quality;
+            sanitized[key] = normalizeStreamlinkQuality(entry);
             continue;
         }
 

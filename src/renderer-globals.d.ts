@@ -474,6 +474,7 @@ interface ApiBridge {
     cancelDownload(): Promise<boolean>;
     isDownloading(): Promise<boolean>;
     downloadClip(url: string): Promise<{ success: boolean; error?: string }>;
+    getClipInfo(url: string): Promise<{ title: string; broadcaster_name: string } | null>;
     selectFolder(): Promise<(FileCapabilityReference & { displayPath: string }) | null>;
     selectVideoFile(): Promise<FileCapabilityReference | null>;
     selectMultipleVideos(): Promise<FileCapabilityReference[] | null>;

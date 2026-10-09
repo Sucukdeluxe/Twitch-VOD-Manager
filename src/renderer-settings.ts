@@ -108,7 +108,7 @@ function validateFilenameTemplates(showAlert = false): boolean {
 
     if (!uniqueUnknown.length) {
         lintNode.className = 'template-lint ok';
-        lintNode.textContent = UI_TEXT.static.templateLintOk;
+        lintNode.textContent = '';
         return true;
     }
 
@@ -288,23 +288,22 @@ function filterSettings(query: string): void {
     }
 }
 
-const SETTINGS_GROUPS: Record<string, { de: [string, string]; en: [string, string] }> = {
-    general: { de: ['Allgemein', 'Darstellung, Sprache und Updates.'], en: ['General', 'Appearance, language and updates.'] },
-    api: { de: ['Twitch-Verbindung', 'Zugangsdaten für die Twitch API verwalten.'], en: ['Twitch connection', 'Manage credentials for the Twitch API.'] },
-    downloads: { de: ['Downloads', 'Speicherort, Aufteilung, Dateinamen und Download-Verhalten.'], en: ['Downloads', 'Location, parts, filenames and download behavior.'] },
-    automation: { de: ['Automatisierung', 'Automatische Aufnahmen, VODs und Benachrichtigungen.'], en: ['Automation', 'Automatic recordings, VODs and notifications.'] },
-    storage: { de: ['Speicher & Sicherung', 'Speicherplatz, Aufräumen und Konfigurationssicherung.'], en: ['Storage & backup', 'Disk usage, cleanup and configuration backups.'] },
-    system: { de: ['System & Diagnose', 'Werkzeuge prüfen und technische Informationen einsehen.'], en: ['System & diagnostics', 'Check tools and view technical information.'] }
+const SETTINGS_GROUPS: Record<string, { de: string; en: string }> = {
+    general: { de: 'Allgemein', en: 'General' },
+    api: { de: 'Twitch-Verbindung', en: 'Twitch connection' },
+    downloads: { de: 'Downloads', en: 'Downloads' },
+    automation: { de: 'Automatisierung', en: 'Automation' },
+    storage: { de: 'Speicher & Sicherung', en: 'Storage & backup' },
+    system: { de: 'System & Diagnose', en: 'System & diagnostics' }
 };
 
 function refreshSettingsGroupLabels(): void {
     const language = currentLanguage === 'en' ? 'en' : 'de';
     const pane = byId<HTMLElement>('settingsTab').dataset.settingsPane || 'general';
     const labels = SETTINGS_GROUPS[pane] || SETTINGS_GROUPS.general;
-    byId('settingsGroupTitle').textContent = labels[language][0];
-    byId('settingsGroupDescription').textContent = labels[language][1];
+    byId('settingsGroupTitle').textContent = labels[language];
     for (const [id, group] of Object.entries({ settingsGeneralNav: 'general', settingsAutomationNav: 'automation', settingsStorageNav: 'storage', settingsSystemNav: 'system' })) {
-        byId(id).textContent = SETTINGS_GROUPS[group][language][0];
+        byId(id).textContent = SETTINGS_GROUPS[group][language];
     }
 }
 
@@ -942,7 +941,7 @@ function collectDownloadSettingsPayload(): Partial<AppConfig> {
         auto_cleanup_days: parseInt(byId<HTMLInputElement>('autoCleanupDays').value, 10) || 30,
         auto_cleanup_target: byId<HTMLSelectElement>('autoCleanupTarget').value === 'all' ? 'all' : 'live_only',
         auto_cleanup_action: byId<HTMLSelectElement>('autoCleanupAction').value === 'delete' ? 'delete' : 'archive',
-        streamlink_quality: byId<HTMLSelectElement>('streamlinkQuality').value,
+        streamlink_quality: 'source',
         metadata_cache_minutes: parseInt(byId<HTMLInputElement>('metadataCacheMinutes').value, 10) || 10,
         download_policy: parsedPolicy.value ?? config.download_policy ?? { throttle: null, windows: [] }
     };
@@ -1007,7 +1006,7 @@ function getSettingsFingerprint(payload: Partial<AppConfig>): string {
         effective.auto_cleanup_days ?? 30,
         effective.auto_cleanup_target ?? 'live_only',
         effective.auto_cleanup_action ?? 'archive',
-        effective.streamlink_quality ?? 'best',
+        'source',
         effective.metadata_cache_minutes ?? 10,
         effective.download_policy?.throttle?.maxBytesPerSecond ?? null,
         effective.download_policy?.windows ?? [],
@@ -1050,7 +1049,7 @@ function syncSettingsFormFromConfig(syncSecrets = true): void {
     byId<HTMLInputElement>('autoCleanupDays').value = String((config.auto_cleanup_days as number) || 30);
     byId<HTMLSelectElement>('autoCleanupTarget').value = (config.auto_cleanup_target as string) === 'all' ? 'all' : 'live_only';
     byId<HTMLSelectElement>('autoCleanupAction').value = (config.auto_cleanup_action as string) === 'delete' ? 'delete' : 'archive';
-    byId<HTMLSelectElement>('streamlinkQuality').value = (config.streamlink_quality as string) || 'best';
+    byId<HTMLInputElement>('streamlinkQuality').value = 'Source';
     byId<HTMLInputElement>('metadataCacheMinutes').value = String((config.metadata_cache_minutes as number) || 10);
     byId<HTMLInputElement>('vodFilenameTemplate').value = (config.filename_template_vod as string) || '{title}.mp4';
     byId<HTMLInputElement>('partsFilenameTemplate').value = (config.filename_template_parts as string) || '{date}_Part{part_padded}.mp4';

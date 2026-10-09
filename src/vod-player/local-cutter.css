@@ -27,7 +27,6 @@
 #cutterTab .cutter-profile-grid label:has(input:disabled) { opacity: .5; cursor: default; }
 #cutterTab .cutter-profile-grid input { position: relative; padding: 0; width: 13px; height: 13px; margin: 0; opacity: 1; accent-color: #9e82c7; flex: 0 0 auto; }
 #cutterTab .cutter-field-help { margin: 6px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
-#cutterTab #cutterProfileHelp { min-height: 33px; }
 #cutterTab .cutter-export-field { display: grid; min-width: 0; }
 #cutterTab .cutter-export-field select { appearance: none; width: 100%; min-width: 0; height: 36px; padding: 6px 36px 6px 10px; padding-right: 36px !important; font-size: 12px; color: var(--text); background-color: var(--workspace-control, var(--bg-main)); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23969da8'%3E%3Cpath d='m4 6 4 4 4-4z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-size: 14px; background-position: right 14px center; border: 1px solid var(--workspace-border, var(--border)); border-radius: 6px; user-select: none; }
 #cutterTab .cutter-export-field select:disabled { opacity: .65; }
@@ -38,7 +37,6 @@
 #cutterTab .cutter-format-details { font-size: 12px; line-height: 1.5; border-top: 1px solid var(--workspace-border, var(--border)); padding-top: 10px; }
 #cutterTab .cutter-format-details summary { cursor: pointer; padding: 2px 0; color: var(--text-secondary); user-select: none; }
 #cutterTab .cutter-format-details[open] summary { margin-bottom: 12px; }
-#cutterTab #cutterEncodingHint { margin: 0; font-size: 11px; line-height: 1.5; }
 #cutterTab .cutter-export-footer { flex: 0 0 auto; padding: 12px 14px; border-top: 1px solid var(--workspace-border, var(--border)); }
 #cutterTab .cutter-actions { display: flex; gap: 8px; margin: 0; flex-wrap: wrap; }
 #cutterTab .cutter-actions #btnCut { flex: 1 1 100%; width: 100%; min-width: 0; min-height: 38px; font-weight: 600; }

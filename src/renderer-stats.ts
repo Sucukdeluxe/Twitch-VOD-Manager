@@ -44,7 +44,7 @@ function renderArchiveStats(stats: ArchiveStats): void {
     const lifetime = stats.lifetime;
     setText('statsTrackingSince', lifetime?.available && lifetime.trackedSince
         ? UI_TEXT.static.statsTrackedSince.replace('{date}', formatUiDate(new Date(lifetime.trackedSince))) : '');
-    setText('statsHistoryNote', lifetime?.available ? UI_TEXT.static.statsHistoryHint : UI_TEXT.static.statsHistoryUnavailable);
+    setText('statsHistoryNote', lifetime?.available ? '' : UI_TEXT.static.statsHistoryUnavailable);
     setText('statsInventoryStatus', stats.rootExists ? '' : UI_TEXT.static.statsNoRoot);
     renderStatsSummary(stats);
     renderStatsInventory(stats);
@@ -60,10 +60,10 @@ function renderStatsSummary(stats: ArchiveStats | null): void {
     const available = !!lifetime?.available;
     const number = (value: number | undefined) => available ? formatUiNumber(value || 0) : '—';
     const cards = [
-        { label: UI_TEXT.static.statsVodRecordings, value: number(lifetime?.vodDownloads), sub: UI_TEXT.static.statsVodCountHint, kind: 'vod' },
-        { label: UI_TEXT.static.statsLiveRecordings, value: number(lifetime?.liveRecordings), sub: UI_TEXT.static.statsCompleted, kind: 'live' },
-        { label: UI_TEXT.static.statsClipDownloads, value: number(lifetime?.clipDownloads), sub: UI_TEXT.static.statsCompleted, kind: 'clips' },
-        { label: UI_TEXT.static.statsDownloadedBytes, value: available ? formatBytes(lifetime?.totalBytes || 0) : '—', sub: UI_TEXT.static.statsBytesHint, kind: 'bytes' }
+        { label: UI_TEXT.static.statsVodRecordings, value: number(lifetime?.vodDownloads), kind: 'vod' },
+        { label: UI_TEXT.static.statsLiveRecordings, value: number(lifetime?.liveRecordings), kind: 'live' },
+        { label: UI_TEXT.static.statsClipDownloads, value: number(lifetime?.clipDownloads), kind: 'clips' },
+        { label: UI_TEXT.static.statsDownloadedBytes, value: available ? formatBytes(lifetime?.totalBytes || 0) : '—', kind: 'bytes' }
     ];
     const fragments = cards.map(card => {
         const item = document.createElement('article');
@@ -74,10 +74,7 @@ function renderStatsSummary(stats: ArchiveStats | null): void {
         const value = document.createElement('div');
         value.className = 'stats-kpi-value';
         value.textContent = card.value;
-        const sub = document.createElement('div');
-        sub.className = 'stats-kpi-sub';
-        sub.textContent = card.sub;
-        item.append(label, value, sub);
+        item.append(label, value);
         return item;
     });
     grid.replaceChildren(...fragments);

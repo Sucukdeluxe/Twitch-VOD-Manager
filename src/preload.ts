@@ -134,6 +134,7 @@ contextBridge.exposeInMainWorld('api', {
     cancelDownload: () => ipcRenderer.invoke('cancel-download'),
     isDownloading: () => ipcRenderer.invoke('is-downloading'),
     downloadClip: (url: string) => ipcRenderer.invoke('download-clip', url),
+    getClipInfo: (url: string): Promise<{ title: string; broadcaster_name: string } | null> => ipcRenderer.invoke('get-clip-info', url),
 
     // Files
     selectFolder: () => ipcRenderer.invoke('select-folder'),
