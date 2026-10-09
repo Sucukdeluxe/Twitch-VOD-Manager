@@ -1559,7 +1559,7 @@ body :is(select, .select-compact) {
     font-size: 14px;
 }
 
-#settingsTab .settings-card :is(p, label, span, button, input, select, textarea, pre, td, th, .form-note, .form-sublabel) {
+#settingsTab .settings-card :is(p, label, span, button, input, select, textarea, pre, td, th, .form-note, .form-sublabel, .template-lint) {
     font-size: 14px;
     line-height: 1.5;
 }
