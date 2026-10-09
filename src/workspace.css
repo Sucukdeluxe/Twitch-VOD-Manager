@@ -834,12 +834,17 @@ textarea:disabled,
     color: #ff7770;
 }
 
+.context-sidebar .section-title {
+    padding-inline: 12px;
+    border: 0;
+}
+
 .context-sidebar .streamer-section-counter {
     display: inline-flex;
     min-height: 20px;
     align-items: center;
     margin-left: auto;
-    margin-right: 6px;
+    margin-right: 0;
     padding: 0 7px;
     color: var(--workspace-text-muted);
     background: var(--workspace-control);
