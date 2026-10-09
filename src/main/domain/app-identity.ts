@@ -31,7 +31,7 @@ export interface WindowsTaskbarDetails {
 
 export function getWindowsAppIdentity(isDevelopment: boolean): WindowsAppIdentity {
     return {
-        name: 'Twitch VOD Manager',
+        name: isDevelopment ? 'Twitch VOD Manager · Entwickler-Version' : 'Twitch VOD Manager',
         appUserModelId: isDevelopment
             ? 'io.github.sucukdeluxe.twitch-vod-manager.development'
             : 'io.github.sucukdeluxe.twitch-vod-manager'

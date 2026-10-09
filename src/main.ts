@@ -145,6 +145,13 @@ const IS_HOT_DEVELOPMENT = process.env.TWITCH_VOD_MANAGER_DEV === '1';
 const WINDOWS_APP_IDENTITY = getWindowsAppIdentity(IS_HOT_DEVELOPMENT);
 app.setName(WINDOWS_APP_IDENTITY.name);
 app.setAppUserModelId(WINDOWS_APP_IDENTITY.appUserModelId);
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+});
 const WINDOWS_APP_ICON_PATH = process.platform === 'win32'
     ? resolveWindowsAppIconPath({
         isPackaged: app.isPackaged && !IS_HOT_DEVELOPMENT,
@@ -7281,7 +7288,7 @@ function createWindow(): void {
         height: 900,
         minWidth: 1200,
         minHeight: 700,
-        title: `Twitch VOD Manager [v${APP_VERSION}]`,
+        title: `${WINDOWS_APP_IDENTITY.name} [v${APP_VERSION}]`,
         backgroundColor: '#0e0e10',
         icon: windowIconPath,
         autoHideMenuBar: true,
@@ -7301,7 +7308,10 @@ function createWindow(): void {
             isDevelopment: IS_HOT_DEVELOPMENT,
         }));
     }
-    mainWindow.show();
+    mainWindow.once('ready-to-show', () => {
+        mainWindow?.show();
+        appendDebugLog('window-ready', { elapsedMs: Math.round(performance.now()) });
+    });
 
     if (process.platform !== 'darwin') {
         mainWindow.removeMenu();
@@ -7318,7 +7328,7 @@ function createWindow(): void {
         }
     });
     mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    mainWindow.loadFile(rendererFile);
+    mainWindow.loadFile(rendererFile, { query: IS_HOT_DEVELOPMENT ? { development: '1' } : {} });
 
     mainWindow.webContents.on('did-finish-load', () => {
         emitQueueUpdated(true);

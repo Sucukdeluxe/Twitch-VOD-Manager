@@ -16,6 +16,7 @@
     "scripts/build-player.mjs",
     "scripts/build-renderer.mjs",
     "scripts/build.mjs",
+    "scripts/build-state.mjs",
     "scripts/capture-readme-screenshot.js",
     "scripts/dev.mjs",
     "scripts/public-release-files.json",

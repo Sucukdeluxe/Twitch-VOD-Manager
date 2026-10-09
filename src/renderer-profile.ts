@@ -166,8 +166,7 @@ function renderStreamerProfileCard(p: StreamerProfile): void {
                 </div>
             </div>
             <div class="streamer-profile-actions">
-                <button type="button" class="streamer-profile-btn primary" onclick="openTwitchChannel('${safeUrl}')">${escapeHtml(UI_TEXT.profile.openTwitch)}</button>
-                <button type="button" class="streamer-profile-btn" onclick="refreshStreamerProfile('${safeLogin}')">${escapeHtml(UI_TEXT.profile.refresh)}</button>
+                <button type="button" class="streamer-profile-btn twitch-channel-button" onclick="openTwitchChannel('${safeUrl}')"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M4 2 2 6v15h5v3l3-3h4l8-8V2H4zm16 10-4 4h-5l-3 3v-3H5V4h15v8zM15 6h2v6h-2V6zm-5 0h2v6h-2V6z"/></svg><span>${escapeHtml(UI_TEXT.profile.openTwitch)}</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 18 18 6M6 6h12v12"/></svg></button>
             </div>
         </div>
         ${liveCard}

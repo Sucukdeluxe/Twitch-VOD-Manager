@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Reorganize settings into six groups with larger text, clearer system status, compact forms and stable language/theme selection.
+- Refine VOD filters, streamer actions and sidebar counters; add visible dropdown chevrons and remove click focus rings.
+- Replace sliding top navigation with a short crossfade and identify development builds in the window title and header.
+- Reuse verified development builds, serialize startup preparation, prevent duplicate app instances and show the window after its first render.
+
 ## 1.0.24 - 2026-10-09
 
 - Improve frame-accurate VOD trimming with immediate playback controls, current-position omission preview and visible excluded ranges in fine seeking.

@@ -1,3 +1,6 @@
+import { isBuildCurrent } from './build-state.mjs';
+import { open, readFile, unlink, mkdir, stat } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
@@ -97,20 +100,50 @@ function stop(child) {
     if (child && !child.killed) child.kill();
 }
 
-const initialCompile = run(process.execPath, [resolve(rootDirectory, 'scripts', 'build.mjs')]);
-const initialExitCode = await waitForExit(initialCompile);
-if (initialExitCode !== 0) process.exit(initialExitCode);
-
-if (process.platform === 'win32') {
-    const helperPath = pathToFileURL(resolve(outputDirectory, 'main', 'dev-executable.js')).href;
-    const { prepareWindowsDevExecutable } = await import(helperPath);
-    electronExecutable = await prepareWindowsDevExecutable({
-        sourcePath: electronSourceExecutable,
-        destinationPath: resolve(rootDirectory, 'node_modules', 'electron', 'dist', 'Twitch VOD Manager.exe'),
-        iconPath: resolve(rootDirectory, 'build', 'icon.ico'),
-        version: developmentAppVersion,
-    });
+async function ensureDevelopmentBuild() {
+    await mkdir(developmentProgramData, { recursive: true });
+    const lockPath = resolve(developmentProgramData, 'build.lock');
+    let lock;
+    while (!lock) {
+        try {
+            lock = await open(lockPath, 'wx');
+            await lock.writeFile(String(process.pid));
+        } catch (error) {
+            if (error.code !== 'EEXIST') throw error;
+            try {
+                const owner = Number(await readFile(lockPath, 'utf8'));
+                if (owner > 0) process.kill(owner, 0);
+                else if (Date.now() - (await stat(lockPath)).mtimeMs > 5000) await unlink(lockPath);
+            } catch (ownerError) {
+                if (ownerError.code === 'ESRCH') await unlink(lockPath).catch(() => {});
+            }
+            await delay(200);
+        }
+    }
+    try {
+        if (!await isBuildCurrent(rootDirectory)) {
+            const initialCompile = run(process.execPath, [resolve(rootDirectory, 'scripts', 'build.mjs')]);
+            const exitCode = await waitForExit(initialCompile);
+            if (exitCode !== 0) throw new Error('Development build failed: ' + exitCode);
+        }
+        if (process.platform === 'win32') {
+            const helperPath = pathToFileURL(resolve(outputDirectory, 'main', 'dev-executable.js')).href;
+            const { prepareWindowsDevExecutable } = await import(helperPath);
+            electronExecutable = await prepareWindowsDevExecutable({
+                sourcePath: electronSourceExecutable,
+                destinationPath: resolve(rootDirectory, 'node_modules', 'electron', 'dist', 'Twitch VOD Manager.exe'),
+                iconPath: resolve(rootDirectory, 'build', 'icon.ico'),
+                version: developmentAppVersion,
+            });
+        }
+    } finally {
+        await lock.close();
+        await unlink(lockPath);
+    }
 }
+
+await ensureDevelopmentBuild();
+
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => {

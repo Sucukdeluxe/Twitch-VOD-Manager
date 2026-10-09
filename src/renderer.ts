@@ -23,7 +23,7 @@ async function init(): Promise<void> {
     byId('versionText').textContent = `v${version}`;
     byId('versionInfo').textContent = `Version: v${version}`;
     appVersion = version;
-    document.title = `${UI_TEXT.appName} v${version}`;
+    setPageTitle(UI_TEXT.appName);
 
     byId<HTMLInputElement>('clientId').value = config.client_id ?? '';
     byId<HTMLInputElement>('clientSecret').value = secretStatus.clientSecretConfigured ? SECRET_INPUT_MASK : '';
@@ -31,7 +31,7 @@ async function init(): Promise<void> {
     byId<HTMLSelectElement>('themeSelect').value = config.theme ?? 'twitch';
     byId<HTMLSelectElement>('languageSelect').value = config.language ?? 'en';
     updateLanguagePicker(config.language ?? 'en');
-    setSettingsPane(byId<HTMLElement>('settingsTab').dataset.settingsPane || 'design');
+    setSettingsPane(byId<HTMLElement>('settingsTab').dataset.settingsPane || 'general');
     byId<HTMLSelectElement>('downloadMode').value = config.download_mode ?? 'full';
     byId<HTMLInputElement>('partMinutes').value = String(config.part_minutes ?? 120);
     byId<HTMLSelectElement>('performanceMode').value = (config.performance_mode as string) || 'balanced';
@@ -42,7 +42,7 @@ async function init(): Promise<void> {
     byId<HTMLInputElement>('defaultClipFilenameTemplate').value = (config.filename_template_clip as string) || DEFAULT_CLIP_TEMPLATE;
     initSettingsAutoSave();
 
-    changeTheme(config.theme ?? 'twitch');
+    applyRendererTheme(config.theme ?? 'twitch');
     renderStreamers();
     void hydrateStreamerDisplayNames();
     renderQueue();
@@ -79,7 +79,6 @@ async function init(): Promise<void> {
     initCutterEditor();
 
     // Restore last active tab from previous session (default 'vods')
-    initTopNavActiveIndicator();
     initSegmentedIndicators();
     showTab(loadPersistedActiveTab());
 
@@ -941,9 +940,16 @@ let appVersion = '';
 function setPageTitle(text: string): void {
     const titleEl = document.getElementById('pageTitle');
     if (titleEl) titleEl.textContent = text;
-    const appName = UI_TEXT.appName;
+    const isDevelopment = new URLSearchParams(location.search).get('development') === '1';
+    const developmentLabel = currentLanguage === 'en' ? 'Development version' : 'Entwickler-Version';
+    const badge = document.getElementById('developmentBadge');
+    if (badge) {
+        badge.hidden = !isDevelopment;
+        badge.textContent = developmentLabel;
+    }
+    const appName = UI_TEXT.appName + (isDevelopment ? ' · ' + developmentLabel : '');
     const versionSuffix = appVersion ? ` v${appVersion}` : '';
-    document.title = text && text !== appName
+    document.title = text && text !== UI_TEXT.appName
         ? `${text} - ${appName}${versionSuffix}`
         : `${appName}${versionSuffix}`;
 }
@@ -1280,7 +1286,6 @@ function showTab(tab: string): void {
     }
     navItem.classList.add('active');
     navItem.setAttribute('aria-current', 'page');
-    syncTopNavActiveIndicator();
     byId(tab + 'Tab').classList.add('active');
     if (tab === 'cutter' && typeof activateCutterEditor === 'function') activateCutterEditor();
     syncWorkspaceChrome(tab);
@@ -2029,43 +2034,12 @@ async function downloadClip(): Promise<void> {
     }
 }
 
-let topNavIndicatorFrame: number | null = null;
-
-function syncTopNavActiveIndicator(): void {
-    const topNav = document.querySelector<HTMLElement>('.top-nav');
-    const activeItem = topNav?.querySelector<HTMLElement>('.top-nav-item.active');
-    if (!topNav || !activeItem) return;
-    const navRect = topNav.getBoundingClientRect();
-    const itemRect = activeItem.getBoundingClientRect();
-    topNav.style.setProperty('--top-nav-active-x', `${itemRect.left - navRect.left}px`);
-    topNav.style.setProperty('--top-nav-active-y', `${itemRect.top - navRect.top}px`);
-    topNav.style.setProperty('--top-nav-active-width', `${itemRect.width}px`);
-    topNav.style.setProperty('--top-nav-active-height', `${itemRect.height}px`);
-}
-
-function scheduleTopNavActiveIndicatorSync(): void {
-    if (topNavIndicatorFrame !== null) return;
-    topNavIndicatorFrame = requestAnimationFrame(() => {
-        topNavIndicatorFrame = null;
-        syncTopNavActiveIndicator();
-    });
-}
-
-function initTopNavActiveIndicator(): void {
-    const topNav = document.querySelector<HTMLElement>('.top-nav');
-    if (!topNav) return;
-    const observer = new ResizeObserver(scheduleTopNavActiveIndicatorSync);
-    observer.observe(topNav);
-    topNav.querySelectorAll<HTMLElement>('.top-nav-item').forEach((item) => observer.observe(item));
-    window.addEventListener('resize', scheduleTopNavActiveIndicatorSync);
-}
-
 const segmentedIndicatorFrames = new WeakMap<HTMLElement, number>();
 
 function syncSegmentedIndicator(control: HTMLElement): void {
     const activeButton = control.querySelector<HTMLElement>('button.active');
-    if (!activeButton) {
-        control.classList.remove('segmented-indicator-visible');
+    if (!control.offsetWidth || !activeButton?.offsetWidth) {
+        control.classList.remove('segmented-indicator-ready', 'segmented-indicator-visible');
         return;
     }
     control.style.setProperty('--segment-active-x', `${activeButton.offsetLeft}px`);
@@ -2073,7 +2047,12 @@ function syncSegmentedIndicator(control: HTMLElement): void {
     control.style.setProperty('--segment-active-width', `${activeButton.offsetWidth}px`);
     control.style.setProperty('--segment-active-height', `${activeButton.offsetHeight}px`);
     control.classList.add('segmented-indicator-visible');
-    requestAnimationFrame(() => control.classList.add('segmented-indicator-ready'));
+    if (!control.classList.contains('segmented-indicator-ready')) {
+        control.getBoundingClientRect();
+        requestAnimationFrame(() => {
+            if (control.offsetWidth) control.classList.add('segmented-indicator-ready');
+        });
+    }
 }
 
 function scheduleSegmentedIndicatorSync(control: HTMLElement): void {
@@ -2086,17 +2065,17 @@ function scheduleSegmentedIndicatorSync(control: HTMLElement): void {
 }
 
 function scheduleSegmentedIndicatorsSync(): void {
-    document.querySelectorAll<HTMLElement>('.context-switcher, .language-picker, [data-context-for="settings"] .context-list').forEach(scheduleSegmentedIndicatorSync);
+    document.querySelectorAll<HTMLElement>('.context-switcher, .language-picker, .workspace-theme-picker, [data-context-for="settings"] .context-list').forEach(scheduleSegmentedIndicatorSync);
 }
 
 function initSegmentedIndicators(): void {
     const observer = new ResizeObserver((entries) => {
         entries.forEach((entry) => {
-            const control = entry.target.closest<HTMLElement>('.context-switcher, .language-picker, [data-context-for="settings"] .context-list');
+            const control = entry.target.closest<HTMLElement>('.context-switcher, .language-picker, .workspace-theme-picker, [data-context-for="settings"] .context-list');
             if (control) scheduleSegmentedIndicatorSync(control);
         });
     });
-    document.querySelectorAll<HTMLElement>('.context-switcher, .language-picker, [data-context-for="settings"] .context-list').forEach((control) => {
+    document.querySelectorAll<HTMLElement>('.context-switcher, .language-picker, .workspace-theme-picker, [data-context-for="settings"] .context-list').forEach((control) => {
         observer.observe(control);
         control.querySelectorAll<HTMLElement>('button').forEach((button) => observer.observe(button));
         syncSegmentedIndicator(control);

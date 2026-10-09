@@ -282,34 +282,54 @@ function filterSettings(query: string): void {
         return searchableText.includes(normalizedQuery);
     });
     const pane = match?.dataset.settingsPane;
-    if (pane) setSettingsPane(pane);
+    if (pane) {
+        setSettingsPane(pane);
+        match?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+}
+
+const SETTINGS_GROUPS: Record<string, { de: [string, string]; en: [string, string] }> = {
+    general: { de: ['Allgemein', 'Darstellung, Sprache und Updates.'], en: ['General', 'Appearance, language and updates.'] },
+    api: { de: ['Twitch-Verbindung', 'Zugangsdaten für die Twitch API verwalten.'], en: ['Twitch connection', 'Manage credentials for the Twitch API.'] },
+    downloads: { de: ['Downloads', 'Speicherort, Aufteilung, Dateinamen und Download-Verhalten.'], en: ['Downloads', 'Location, parts, filenames and download behavior.'] },
+    automation: { de: ['Automatisierung', 'Automatische Aufnahmen, VODs und Benachrichtigungen.'], en: ['Automation', 'Automatic recordings, VODs and notifications.'] },
+    storage: { de: ['Speicher & Sicherung', 'Speicherplatz, Aufräumen und Konfigurationssicherung.'], en: ['Storage & backup', 'Disk usage, cleanup and configuration backups.'] },
+    system: { de: ['System & Diagnose', 'Werkzeuge prüfen und technische Informationen einsehen.'], en: ['System & diagnostics', 'Check tools and view technical information.'] }
+};
+
+function refreshSettingsGroupLabels(): void {
+    const language = currentLanguage === 'en' ? 'en' : 'de';
+    const pane = byId<HTMLElement>('settingsTab').dataset.settingsPane || 'general';
+    const labels = SETTINGS_GROUPS[pane] || SETTINGS_GROUPS.general;
+    byId('settingsGroupTitle').textContent = labels[language][0];
+    byId('settingsGroupDescription').textContent = labels[language][1];
+    for (const [id, group] of Object.entries({ settingsGeneralNav: 'general', settingsAutomationNav: 'automation', settingsStorageNav: 'storage', settingsSystemNav: 'system' })) {
+        byId(id).textContent = SETTINGS_GROUPS[group][language][0];
+    }
 }
 
 function setSettingsPane(pane: string, source?: HTMLElement): void {
     const tab = byId<HTMLElement>('settingsTab');
     const cards = Array.from(tab.querySelectorAll<HTMLElement>('.settings-card[data-settings-pane]'));
-    const targetCard = cards.find((card) => card.dataset.settingsPane === pane);
-    if (!targetCard) return;
-
-    tab.dataset.settingsPane = pane;
+    const group = SETTINGS_GROUPS[pane] ? pane : cards.find((card) => card.dataset.settingsPane === pane)?.dataset.settingsGroup;
+    if (!group) return;
+    const changed = tab.dataset.settingsPane !== group;
+    tab.dataset.settingsPane = group;
     cards.forEach((card) => {
-        card.hidden = card !== targetCard;
+        card.hidden = card.dataset.settingsGroup !== group;
     });
-
     const panel = document.querySelector<HTMLElement>('[data-context-for="settings"]');
     const buttons = Array.from(panel?.querySelectorAll<HTMLButtonElement>('.context-link[data-settings-pane]') || []);
-    const targetButton = source || buttons.find((button) => button.dataset.settingsPane === pane);
     buttons.forEach((button) => {
-        const active = button === targetButton;
+        const active = button.dataset.settingsPane === group;
         button.classList.toggle('active', active);
         if (active) button.setAttribute('aria-current', 'page');
         else button.removeAttribute('aria-current');
     });
-
     if (source) byId<HTMLInputElement>('settingsSearchInput').value = '';
-    tab.scrollTop = 0;
-    const list = panel?.querySelector<HTMLElement>('.context-list');
-    if (list) scheduleSegmentedIndicatorSync(list);
+    if (changed) tab.scrollTop = 0;
+    refreshSettingsGroupLabels();
+    scheduleSegmentedIndicatorsSync();
 }
 
 function changeLanguage(lang: string): void {
@@ -351,6 +371,7 @@ function applyRendererLanguage(lang: string): LanguageCode {
     void refreshAutomationStatusLine();
     refreshLocalizedPreflightUi();
     validateFilenameTemplates();
+    refreshSettingsGroupLabels();
     filterSettings(byId<HTMLInputElement>('settingsSearchInput').value);
     return normalized;
 }
@@ -1305,11 +1326,15 @@ function syncWorkspaceThemePicker(theme: string): void {
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', String(active));
     });
+    scheduleSegmentedIndicatorSync(byId<HTMLElement>('workspaceThemePicker'));
 }
 
 function applyRendererTheme(theme: string): void {
     byId<HTMLSelectElement>('themeSelect').value = theme;
-    document.body.className = `theme-${theme}`;
+    for (const name of Array.from(document.body.classList)) {
+        if (name.startsWith('theme-')) document.body.classList.remove(name);
+    }
+    document.body.classList.add(`theme-${theme}`);
     config.theme = theme;
     syncWorkspaceThemePicker(theme);
 }

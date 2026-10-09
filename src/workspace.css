@@ -1455,9 +1455,9 @@ textarea:hover:not(:disabled) {
 input:not([type="checkbox"]):not([type="radio"]):focus,
 select:focus,
 textarea:focus {
-    border-color: var(--workspace-primary);
+    border-color: var(--workspace-border-strong);
     outline: 0;
-    box-shadow: 0 0 0 1px var(--workspace-primary);
+    box-shadow: none;
 }
 
 input[type="checkbox"] {
@@ -2304,17 +2304,17 @@ input[type="checkbox"].vod-select-checkbox:focus-visible {
 
 .app-toast.success,
 .toast.success {
-    border-left: 3px solid var(--workspace-success);
+    border-color: var(--workspace-success);
 }
 
 .app-toast.error,
 .toast.error {
-    border-left: 3px solid var(--workspace-danger);
+    border-color: var(--workspace-danger);
 }
 
 .app-toast.warning,
 .toast.warning {
-    border-left: 3px solid var(--workspace-warning);
+    border-color: var(--workspace-warning);
 }
 
 .context-menu {

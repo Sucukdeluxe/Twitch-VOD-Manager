@@ -208,7 +208,7 @@
         <div class="topbar-navigation-cluster">
             <div class="topbar-brand">
                 <img class="topbar-brand-mark" src="../build/icon.png" alt="" aria-hidden="true">
-                <span id="logoText">Twitch VOD Manager</span>
+                <span id="logoText">Twitch VOD Manager</span><span id="developmentBadge" class="development-badge" hidden>Entwickler-Version</span>
             </div>
             <nav class="nav top-nav" aria-label="Main navigation">
                 <button class="nav-item top-nav-item active" type="button" aria-current="page" data-tab="vods" onclick="showTab('vods')" title="Twitch VODs">
@@ -353,17 +353,12 @@
             <section class="context-panel" data-context-for="settings" hidden>
                 <div class="context-panel-heading" data-context-heading>Einstellungen</div>
                 <nav class="context-list" aria-label="Settings sections">
-                    <button type="button" class="context-link active" data-settings-pane="design" onclick="setSettingsPane('design', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"></path></svg><span data-label-source="designTitle">Design</span></button>
+                    <button type="button" class="context-link active" data-settings-pane="general" onclick="setSettingsPane('general', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"></path></svg><span id="settingsGeneralNav">Allgemein</span></button>
                     <button type="button" class="context-link" data-settings-pane="api" onclick="setSettingsPane('api', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 12h8M12 8v8"></path><circle cx="12" cy="12" r="9"></circle></svg><span data-label-source="apiTitle">Twitch API</span></button>
                     <button type="button" class="context-link" data-settings-pane="downloads" onclick="setSettingsPane('downloads', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 20h16"></path></svg><span data-label-source="downloadSettingsTitle">Downloads</span></button>
-                    <button type="button" class="context-link" data-settings-pane="automation" onclick="setSettingsPane('automation', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v6h6"></path></svg><span data-label-source="autoVodCardTitle">Automatisierung</span></button>
-                    <button type="button" class="context-link" data-settings-pane="notifications" onclick="setSettingsPane('notifications', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg><span data-label-source="discordCardTitle">Benachrichtigungen</span></button>
-                    <button type="button" class="context-link" data-settings-pane="storage" onclick="setSettingsPane('storage', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"></ellipse><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"></path></svg><span data-label-source="storageCardTitle">Storage</span></button>
-                    <button type="button" class="context-link" data-settings-pane="maintenance" onclick="setSettingsPane('maintenance', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16v13H4zM8 7V4h8v3M9 12h6"></path></svg><span data-label-source="backupCardTitle">Sicherung &amp; Wartung</span></button>
-                    <button type="button" class="context-link" data-settings-pane="updates" onclick="setSettingsPane('updates', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 19h16"></path></svg><span data-label-source="updateTitle">Updates</span></button>
-                    <button type="button" class="context-link" data-settings-pane="system" onclick="setSettingsPane('system', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7z"></path><path d="m9 12 2 2 4-4"></path></svg><span data-label-source="preflightTitle">System-Check</span></button>
-                    <button type="button" class="context-link" data-settings-pane="debug" onclick="setSettingsPane('debug', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h14v14H5zM8 9l2 2-2 2M12 15h4"></path></svg><span data-label-source="debugLogTitle">Debug-Log</span></button>
-                    <button type="button" class="context-link" data-settings-pane="metrics" onclick="setSettingsPane('metrics', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19V3"></path></svg><span data-label-source="runtimeMetricsTitle">Runtime Metrics</span></button>
+                    <button type="button" class="context-link" data-settings-pane="automation" onclick="setSettingsPane('automation', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v6h6"></path></svg><span id="settingsAutomationNav">Automatisierung</span></button>
+                    <button type="button" class="context-link" data-settings-pane="storage" onclick="setSettingsPane('storage', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"></ellipse><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"></path></svg><span id="settingsStorageNav">Speicher &amp; Sicherung</span></button>
+                    <button type="button" class="context-link" data-settings-pane="system" onclick="setSettingsPane('system', this)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7z"></path><path d="m9 12 2 2 4-4"></path></svg><span id="settingsSystemNav">System &amp; Diagnose</span></button>
                 </nav>
             </section>
         </aside>
@@ -371,8 +366,9 @@
         <main class="main workspace-main">
             <header class="header workspace-toolbar">
                 <div class="toolbar-context" data-toolbar-for="vods">
-                    <button type="button" class="toolbar-icon-button" id="toolbarRefreshVodsBtn" onclick="refreshVODs()" aria-label="Refresh VODs" title="Refresh VODs"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6 7M5.5 15A7 7 0 0 0 18 17"></path></svg></button>
-                    <button type="button" class="toolbar-primary" onclick="focusWorkspaceTarget('newStreamer')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg><span>Streamer</span></button>
+                    <div class="header-search workspace-search">
+                        <input type="text" id="newStreamer" placeholder="Streamer hinzufügen…" aria-label="Streamer hinzufügen" onkeydown="if(event.key==='Enter')addStreamer()">
+                    </div>
                 </div>
                 <div class="toolbar-context" data-toolbar-for="clips" hidden>
                     <button type="button" class="toolbar-primary" onclick="focusWorkspaceTarget('clipUrl')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg><span data-label-source="clipsHeading">Clip</span></button>
@@ -403,10 +399,8 @@
                 </div>
                 <h1 class="workspace-title" id="pageTitle">VODs</h1>
                 <div class="header-actions workspace-toolbar-actions" data-toolbar-search-for="vods">
-                    <div class="header-search workspace-search">
-                            <input type="text" id="newStreamer" placeholder="Streamer hinzufügen…" onkeypress="if(event.key==='Enter')addStreamer()">
-                        <button id="btnAddStreamer" type="button" onclick="addStreamer()" aria-label="Add streamer" title="Add streamer">+</button>
-                    </div>
+                    <button id="btnAddStreamer" class="toolbar-add-streamer" type="button" onclick="addStreamer()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg><span>Streamer</span></button>
+                    <button type="button" class="toolbar-icon-button" id="toolbarRefreshVodsBtn" onclick="refreshVODs()" aria-label="Refresh VODs" title="Refresh VODs"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6 7M5.5 15A7 7 0 0 0 18 17"></path></svg></button>
                     <span id="refreshText" class="sr-only">Aktualisieren</span>
                 </div>
             </header>
@@ -726,8 +720,9 @@
                 </div>
 
                 <!-- Settings Tab -->
-                <div class="tab-content" id="settingsTab" data-settings-pane="design">
-                    <div class="settings-card" data-settings-pane="design">
+                <div class="tab-content" id="settingsTab" data-settings-pane="general">
+                    <header class="settings-page-heading"><h2 id="settingsGroupTitle">Allgemein</h2><p id="settingsGroupDescription">Darstellung, Sprache und Updates.</p></header>
+                    <div class="settings-card" data-settings-pane="design" data-settings-group="general">
                         <h3 id="designTitle">Design</h3>
                         <div class="form-group">
                             <label id="themeLabel" for="themeSelect">Theme</label>
@@ -785,7 +780,7 @@
                         </div>
                     </div>
 
-                    <div class="settings-card" data-settings-pane="api" hidden>
+                    <div class="settings-card" data-settings-pane="api" data-settings-group="api" hidden>
                         <h3 id="apiTitle">Twitch API</h3>
                         <p id="apiHelpText" class="card-intro">
                             <span id="apiHelpIntro">Du brauchst eine Client-ID und ein Client-Secret von Twitch.</span>
@@ -802,7 +797,7 @@
                         <button type="button" class="btn-primary" id="saveSettingsBtn" onclick="saveSettings()">Speichern & Verbinden</button>
                     </div>
 
-                    <div class="settings-card" data-settings-pane="downloads" hidden>
+                    <div class="settings-card" data-settings-pane="downloads" data-settings-group="downloads" hidden>
                         <h3 id="downloadSettingsTitle">Download-Einstellungen</h3>
                         <div class="form-group download-settings-storage">
                             <label id="storageLabel" for="downloadPath">Speicherort</label>
@@ -814,7 +809,7 @@
                         </div>
                         <div class="download-settings-layout">
                             <div class="download-settings-column">
-                                <section class="download-settings-section">
+                                <section class="download-settings-section download-basics-grid">
                                     <h4 id="downloadBasicsTitle">Download und Qualität</h4>
                                     <div class="form-group">
                                         <label id="modeLabel" for="downloadMode">Download-Modus</label>
@@ -923,32 +918,34 @@
                         </div>
                     </div>
 
-                    <div class="settings-card" data-settings-pane="updates" hidden>
+                    <div class="settings-card" data-settings-pane="updates" data-settings-group="general" hidden>
                         <h3 id="updateTitle">Updates</h3>
                         <p id="versionInfo" class="card-intro">Version: v1.0.24</p>
                         <button type="button" class="btn-secondary" id="checkUpdateBtn" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
 
-                    <div class="settings-card" data-settings-pane="system" hidden>
+                    <div class="settings-card" data-settings-pane="system" data-settings-group="system" hidden>
                         <div class="form-row section-header">
                             <h3 id="preflightTitle">System-Check</h3>
                             <span class="health-badge unknown" id="healthBadge">System: Unbekannt</span>
                         </div>
+                        <div class="system-check-grid"><section>
                         <div class="form-row" style="margin-bottom: 10px;">
                             <button type="button" class="btn-secondary" id="btnPreflightRun" onclick="runPreflight(false)">Check ausführen</button>
                             <button type="button" class="btn-secondary" id="btnPreflightFix" onclick="runPreflight(true)">Auto-Fix Tools</button>
                         </div>
                         <pre id="preflightResult" class="log-panel">Noch kein Check ausgeführt.</pre>
-                        <h4 id="managedToolsTitle">Verwaltete Tools</h4>
+                        </section><section><h4 id="managedToolsTitle">Verwaltete Tools</h4>
                         <div class="form-row" style="margin-bottom: 10px;">
                             <button type="button" class="btn-secondary" id="btnRefreshManagedTools" onclick="refreshManagedToolStatus()">Tool-Status aktualisieren</button>
                             <button type="button" class="btn-secondary" id="btnRepairManagedTools" onclick="repairManagedTools()">Tools reparieren</button>
                             <button type="button" class="btn-secondary" id="btnResetManagedTools" onclick="resetManagedTools()">Tools zurücksetzen</button>
                         </div>
                         <pre id="managedToolStatus" class="log-panel">Noch kein Tool-Status geladen.</pre>
+                        </section></div>
                     </div>
 
-                    <div class="settings-card" data-settings-pane="debug" hidden>
+                    <div class="settings-card" data-settings-pane="debug" data-settings-group="system" hidden>
                         <h3 id="debugLogTitle">Live Debug-Log</h3>
                         <div class="form-row aligned">
                             <button type="button" class="btn-secondary" id="btnRefreshLog" onclick="refreshDebugLog()">Aktualisieren</button>
@@ -961,7 +958,7 @@
                         <pre id="debugLogOutput" class="log-panel">Lade...</pre>
                     </div>
 
-                    <div class="settings-card" data-settings-pane="storage" hidden>
+                    <div class="settings-card" data-settings-pane="storage" data-settings-group="storage" hidden>
                         <div class="form-row section-header">
                             <h3 id="storageCardTitle">Storage</h3>
                             <button type="button" class="btn-secondary" id="btnRefreshStorage" onclick="refreshStorageStats()">Aktualisieren</button>
@@ -1004,7 +1001,7 @@
                         <div id="cleanupReport" class="form-note" role="status" aria-live="polite"></div>
                     </div>
 
-                    <div class="settings-card" data-settings-pane="notifications" hidden>
+                    <div class="settings-card" data-settings-pane="notifications" data-settings-group="automation" hidden>
                         <h3 id="discordCardTitle">Discord-Webhook</h3>
                         <p id="discordCardIntro" class="card-intro">Sende Benachrichtigungen an einen Discord-Channel via Webhook — nützlich für Multi-Device-Setups oder eine dedizierte Archiv-Maschine.</p>
                         <div class="form-group">
@@ -1031,7 +1028,7 @@
                         </div>
                     </div>
 
-                    <div class="settings-card" data-settings-pane="automation" hidden>
+                    <div class="settings-card" data-settings-pane="automation" data-settings-group="automation" hidden>
                         <h3 id="autoVodCardTitle">Auto-VOD-Download</h3>
                         <p id="autoVodCardIntro" class="card-intro">Streamer mit aktiviertem VOD-Toggle werden in dem hier festgelegten Intervall auf neue Twitch-VODs geprüft. Neue VODs innerhalb des Alters-Fensters werden automatisch zur Download-Queue hinzugefügt.</p>
                         <div class="form-row aligned">
@@ -1047,7 +1044,7 @@
                         </div>
                     </div>
 
-                    <div class="settings-card" data-settings-pane="maintenance" hidden>
+                    <div class="settings-card" data-settings-pane="maintenance" data-settings-group="storage" hidden>
                         <h3 id="backupCardTitle">Sicherung &amp; Wartung</h3>
                         <p id="backupCardIntro" class="card-intro">Konfiguration sichern, auf einem anderen Gerät wiederherstellen, oder die Liste der bereits heruntergeladenen VODs zurücksetzen.</p>
                         <div class="form-row" style="margin-bottom: 10px; flex-wrap: wrap;">
@@ -1057,7 +1054,7 @@
                         </div>
                     </div>
 
-                    <div class="settings-card" data-settings-pane="metrics" hidden>
+                    <div class="settings-card" data-settings-pane="metrics" data-settings-group="system" hidden>
                         <h3 id="runtimeMetricsTitle">Runtime Metrics</h3>
                         <div class="form-row aligned">
                             <button type="button" class="btn-secondary" id="btnRefreshMetrics" onclick="refreshRuntimeMetrics()">Aktualisieren</button>
