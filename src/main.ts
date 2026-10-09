@@ -1,3 +1,4 @@
+import { createDevelopmentLiveUpdates } from './main/development-live';
 import { WorkspaceSessionStore, normalizeWorkspaceClips, type WorkspaceMergeFile, type MergeFileReference, type ClipTransferProgress } from './main/domain/workspace-session';
 import { createArchiveInventoryReader, searchArchiveInventory, summarizeArchiveInventory, type ArchiveStats, type ArchiveSearchFilter, type ArchiveSearchResult } from './main/domain/archive-inventory';
 import { randomUUID } from 'node:crypto';
@@ -6928,6 +6929,27 @@ function createWindow(): void {
         }
     });
     mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+    if (IS_HOT_DEVELOPMENT && fs.existsSync(path.resolve(__dirname, '../scripts/dev.mjs'))) {
+        const contents = mainWindow.webContents;
+        const live = createDevelopmentLiveUpdates(path.resolve(__dirname, '..'), update => {
+            appendDebugLog('development-live-update', { revision: update.revision, status: update.status, styles: update.styles.length });
+            if (!contents.isDestroyed() && !contents.isLoadingMainFrame()) contents.send('development-style-update', update);
+        }, error => appendDebugLog('development-live-update-failed', String(error)));
+        const deliverCurrent = () => {
+            if (!contents.isDestroyed()) contents.send('development-style-update', live.current());
+        };
+        const sendCurrent = (event: Electron.IpcMainEvent) => {
+            if (event.sender === contents && isTrustedRendererEvent(event)) deliverCurrent();
+        };
+        contents.on('did-finish-load', deliverCurrent);
+        ipcMain.on('development-style-ready', sendCurrent);
+        mainWindow.once('closed', () => {
+            ipcMain.removeListener('development-style-ready', sendCurrent);
+            contents.removeListener('did-finish-load', deliverCurrent);
+            live.stop();
+        });
+    }
     mainWindow.loadFile(rendererFile, { query: IS_HOT_DEVELOPMENT ? { development: '1' } : {} });
 
     mainWindow.webContents.on('did-finish-load', () => {
@@ -8454,7 +8476,7 @@ ipcMain.handle('import-config', async (event) => {
     }
 });
 
-function isTrustedRendererEvent(event: IpcMainInvokeEvent): boolean {
+function isTrustedRendererEvent(event: IpcMainInvokeEvent | Electron.IpcMainEvent): boolean {
     if (!mainWindow) return false;
     const rendererUrl = pathToFileURL(path.join(__dirname, 'renderer/index.html')).href;
     const senderUrl = event.senderFrame?.url || event.sender.getURL();

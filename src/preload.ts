@@ -1,6 +1,53 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { DownloadProgress, QueueAdditionResult, QueueItem } from './types';
 
+let developmentStyleRevision = -1;
+
+function applyDevelopmentStyles(update: import('./main/development-live').DevelopmentStyleUpdate): void {
+    if (new URLSearchParams(window.location.search).get('development') !== '1') return;
+    if (update.revision <= developmentStyleRevision) return;
+    const replacements = update.styles.map(({ name, css }) => {
+        const link = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')).find(element => {
+            const filename = new URL(element.href).pathname.split('/').pop() || '';
+            return filename === name + '.css' || filename.startsWith(name + '.') && /^[a-f0-9]{16}\.css$/.test(filename.slice(name.length + 1));
+        });
+        return { name, css, link };
+    });
+    if (replacements.some(item => !item.link)) return;
+    for (const { name, css, link } of replacements) {
+        let style = Array.from(document.querySelectorAll<HTMLStyleElement>('style[data-development-style]')).find(element => element.dataset.developmentStyle === name);
+        if (!style) {
+            style = document.createElement('style');
+            style.dataset.developmentStyle = name;
+            style.textContent = css;
+            link!.after(style);
+        } else if (style.textContent !== css) {
+            style.textContent = css;
+        }
+        link!.disabled = true;
+    }
+    developmentStyleRevision = update.revision;
+    document.documentElement.dataset.developmentUpdate = update.status;
+    const badge = document.getElementById('developmentBadge');
+    if (badge) {
+        const de = document.documentElement.lang !== 'en';
+        badge.title = update.status === 'error'
+            ? (de ? 'Änderung nicht geladen. Bisheriger Stand bleibt aktiv.' : 'Change not loaded. Previous state remains active.')
+            : update.status === 'restart'
+                ? (de ? 'Layout live. Funktionsänderungen werden nach einem Neustart aktiv.' : 'Layout is live. Logic changes apply after restarting.')
+                : (de ? 'Layoutänderungen werden live übernommen.' : 'Layout changes apply live.');
+    }
+}
+
+ipcRenderer.on('development-style-update', (_event, update: import('./main/development-live').DevelopmentStyleUpdate) => {
+    applyDevelopmentStyles(update);
+});
+window.addEventListener('DOMContentLoaded', () => {
+    if (new URLSearchParams(window.location.search).get('development') === '1') {
+        ipcRenderer.send('development-style-ready');
+    }
+}, { once: true });
+
 let chatReadSequence = 0;
 
 // Types

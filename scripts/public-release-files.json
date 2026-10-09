@@ -27,6 +27,7 @@
     "src/main.ts",
     "src/main/cutter/index.ts",
     "src/main/dev-executable.ts",
+    "src/main/development-live.ts",
     "src/main/domain/workspace-session.ts",
     "src/main/domain/app-identity.ts",
     "src/main/domain/app-state-store.ts",
