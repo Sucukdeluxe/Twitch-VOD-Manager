@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="./styles-overlays.css">
     <link rel="stylesheet" href="./workspace.css">
     <link rel="stylesheet" href="./workspace-refinements.css">
+    <link rel="stylesheet" href="./workspace-insights.css">
     <link rel="stylesheet" href="../dist/renderer-vod-player.css">
 </head>
 <body class="theme-twitch">
@@ -665,66 +666,51 @@
 
                 <!-- Statistics Tab -->
                 <div class="tab-content" id="statsTab">
-                    <div class="settings-card">
-                        <div class="form-row section-header">
-                            <h3 id="statsTitle">Archiv-Statistik</h3>
-                            <div class="section-header-actions">
-                                <span id="statsLastScannedLabel" class="form-sublabel" role="status" aria-live="polite"></span>
-                                <button type="button" class="btn-secondary" id="btnStatsRefresh" onclick="refreshArchiveStats()">Aktualisieren</button>
-                            </div>
+                    <div class="insights-workspace">
+                        <header class="insights-header">
+                            <div><h2 id="statsTitle">Statistik</h2><p id="statsIntro">Abgeschlossene Downloads bleiben auch nach dem Löschen der Dateien gezählt.</p></div>
+                            <button type="button" class="btn-secondary insights-refresh" id="btnStatsRefresh" onclick="refreshArchiveStats()">Aktualisieren</button>
+                        </header>
+                        <div class="insights-status-row"><span id="statsLastScannedLabel"></span><span id="statsStatus" role="status" aria-live="polite"></span></div>
+                        <section class="insights-section" aria-labelledby="statsSummaryTitle">
+                            <div class="insights-section-heading"><h3 id="statsSummaryTitle">Downloads insgesamt</h3><span id="statsTrackingSince"></span></div>
+                            <div id="statsSummaryGrid" class="stats-summary-grid"></div>
+                            <p id="statsHistoryNote" class="insights-note"></p>
+                        </section>
+                        <section class="insights-section stats-inventory-section" aria-labelledby="statsInventoryTitle">
+                            <div class="insights-section-heading"><h3 id="statsInventoryTitle">Aktuell im Download-Ordner</h3><span id="statsInventoryNote">Nur vorhandene Dateien</span></div>
+                            <div id="statsInventoryGrid" class="stats-inventory-grid"></div>
+                            <p id="statsInventoryStatus" class="insights-note"></p>
+                        </section>
+                        <div class="stats-charts-grid">
+                            <section class="insights-card stats-activity-card" aria-labelledby="statsActivityTitle">
+                                <h3 id="statsActivityTitle">Downloads der letzten 30 Tage</h3>
+                                <div id="statsActivity"></div>
+                            </section>
+                            <section class="insights-card stats-streamers-card" aria-labelledby="statsTopStreamersTitle">
+                                <h3 id="statsTopStreamersTitle">Speicher nach Streamer</h3>
+                                <div id="statsTopStreamers"></div>
+                            </section>
+                            <section class="insights-card stats-sizes-card" aria-labelledby="statsSizeBucketsTitle">
+                                <h3 id="statsSizeBucketsTitle">Dateigrößen im Archiv</h3>
+                                <div id="statsSizeBuckets"></div>
+                            </section>
                         </div>
-                        <p id="statsIntro" class="card-intro flush">Aggregiert über den Download-Ordner. Live-Aufnahmen liegen unter <code>{streamer}/live/</code>, VOD-Downloads direkt unter <code>{streamer}/</code>. Lade-Zeit skaliert mit der Anzahl Dateien.</p>
-                    </div>
-
-                    <div class="settings-card">
-                        <h3 id="statsSummaryTitle">Übersicht</h3>
-                        <div id="statsSummaryGrid" class="stats-summary-grid"></div>
-                    </div>
-
-                    <div class="settings-card">
-                        <h3 id="statsTopStreamersTitle">Top Streamer (nach Größe)</h3>
-                        <div id="statsTopStreamers"></div>
-                    </div>
-
-                    <div class="settings-card">
-                        <h3 id="statsActivityTitle">Aktivität (letzte 30 Tage)</h3>
-                        <div id="statsActivity"></div>
-                    </div>
-
-                    <div class="settings-card">
-                        <h3 id="statsSizeBucketsTitle">Aufnahme-Größen-Verteilung</h3>
-                        <div id="statsSizeBuckets"></div>
                     </div>
                 </div>
 
-                <!-- Archive Search Tab -->
                 <div class="tab-content" id="archiveTab">
-                    <div class="settings-card">
-                        <h3 id="archiveTitle">Archiv durchsuchen</h3>
-                        <p id="archiveIntro" class="card-intro">Suche nach Dateinamen, Streamern oder Datumsangaben. Treffer zeigen Aufnahmen (Live + VOD); zugehörige Chat- und Event-Dateien werden als zusätzliche Schaltflächen angeboten.</p>
-                        <div class="form-row search-bar">
-                            <input type="text" id="archiveSearchQuery" class="filter-input flex-1-1-240" placeholder="Suche...">
-                            <select id="archiveSearchType" class="select-compact">
-                                <option value="all">Alle Typen</option>
-                                <option value="live">Live-Aufnahmen</option>
-                                <option value="vod">VOD-Downloads</option>
-                            </select>
-                            <select id="archiveSearchStreamer" class="select-compact size-md">
-                                <option value="">Alle Streamer</option>
-                            </select>
-                            <select id="archiveSearchSort" class="select-compact">
-                                <option value="date_desc">Neueste zuerst</option>
-                                <option value="date_asc">Älteste zuerst</option>
-                                <option value="size_desc">Größte zuerst</option>
-                                <option value="size_asc">Kleinste zuerst</option>
-                                <option value="name_asc">Name (A-Z)</option>
-                            </select>
+                    <div class="insights-workspace archive-workspace">
+                        <header class="insights-header"><div><h2 id="archiveTitle">Archiv durchsuchen</h2><p id="archiveIntro">Vorhandene Aufnahmen suchen, öffnen und zugehörige Chats ansehen.</p></div></header>
+                        <section class="insights-card archive-filters" aria-labelledby="archiveTitle">
+                            <div class="archive-search-field"><label id="archiveQueryLabel" for="archiveSearchQuery">Suche</label><input type="search" id="archiveSearchQuery" placeholder="Dateiname oder Streamer" autocomplete="off"></div>
+                            <div class="archive-filter-field"><label id="archiveTypeLabel" for="archiveSearchType">Aufnahmeart</label><select id="archiveSearchType" class="select-compact"><option value="all">Alle Aufnahmen</option><option value="live">Live-Aufnahmen</option><option value="vod">VODs</option><option value="clip">Clips</option></select></div>
+                            <div class="archive-filter-field"><label id="archiveStreamerLabel" for="archiveSearchStreamer">Streamer</label><select id="archiveSearchStreamer" class="select-compact"><option value="">Alle Streamer</option></select></div>
+                            <div class="archive-filter-field"><label id="archiveSortLabel" for="archiveSearchSort">Sortierung</label><select id="archiveSearchSort" class="select-compact"><option value="date_desc">Neueste zuerst</option><option value="date_asc">Älteste zuerst</option><option value="size_desc">Größte zuerst</option><option value="size_asc">Kleinste zuerst</option><option value="name_asc">Name (A–Z)</option></select></div>
                             <button type="button" class="btn-secondary" id="btnArchiveSearch" onclick="performArchiveSearch()">Suchen</button>
-                        </div>
-                        <div id="archiveSearchSummary" class="form-sublabel" role="status" aria-live="polite"></div>
-                    </div>
-                    <div class="settings-card">
-                        <div id="archiveSearchResults"></div>
+                        </section>
+                        <div class="archive-results-heading"><h3 id="archiveResultsTitle">Ergebnisse</h3><span id="archiveSearchSummary" role="status" aria-live="polite"></span></div>
+                        <div id="archiveSearchResults" class="archive-results-list" aria-labelledby="archiveResultsTitle"></div>
                     </div>
                 </div>
 
@@ -1040,11 +1026,15 @@
                     <div class="settings-card" data-settings-pane="automation" data-settings-group="automation" hidden>
                         <h3 id="autoVodCardTitle">Auto-VOD-Download</h3>
                         <p id="autoVodCardIntro" class="card-intro">Streamer mit aktiviertem VOD-Toggle werden in dem hier festgelegten Intervall auf neue Twitch-VODs geprüft. Neue VODs innerhalb des Alters-Fensters werden automatisch zur Download-Queue hinzugefügt.</p>
-                        <div class="form-row aligned">
-                            <label id="autoVodPollMinutesLabel" class="form-sublabel" for="autoVodPollMinutes">Poll-Intervall (Minuten)</label>
-                            <input type="number" id="autoVodPollMinutes" min="5" max="360" value="15" class="input-narrow">
-                            <label id="autoVodMaxAgeHoursLabel" class="form-sublabel" for="autoVodMaxAgeHours" style="margin-left:12px;">Max. Alter (Stunden)</label>
-                            <input type="number" id="autoVodMaxAgeHours" min="1" max="720" value="24" class="input-narrow">
+                        <div class="form-row aligned compact-number-fields">
+                            <div class="form-stack">
+                                <label id="autoVodPollMinutesLabel" class="form-sublabel" for="autoVodPollMinutes">Poll-Intervall (Minuten)</label>
+                                <input type="number" id="autoVodPollMinutes" min="5" max="360" value="15" class="input-narrow">
+                            </div>
+                            <div class="form-stack">
+                                <label id="autoVodMaxAgeHoursLabel" class="form-sublabel" for="autoVodMaxAgeHours">Max. Alter (Stunden)</label>
+                                <input type="number" id="autoVodMaxAgeHours" min="1" max="720" value="24" class="input-narrow">
+                            </div>
                         </div>
                         <div class="form-row" style="align-items: center; gap: 12px; flex-wrap: wrap;">
                             <button type="button" class="btn-secondary" id="btnAutoVodScanNow" onclick="triggerManualAutoVodScan()">Jetzt scannen</button>

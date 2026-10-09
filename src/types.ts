@@ -29,6 +29,9 @@ export interface MergeGroup {
 export interface QueueItem {
     id: string;
     createdAt?: string;
+    completedAt?: string;
+    completionRecorded?: boolean;
+    outputBytes?: number;
     title: string;
     url: string;
     date: string;

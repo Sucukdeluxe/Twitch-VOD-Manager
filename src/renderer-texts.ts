@@ -110,6 +110,12 @@ function applyLanguageToStaticUI(): void {
     setText('archiveResultsNavText', UI_TEXT.static.archiveResults);
     setText('archiveTitle', UI_TEXT.static.archiveTitle);
     setText('archiveIntro', UI_TEXT.static.archiveIntro);
+    setText('archiveQueryLabel', UI_TEXT.static.archiveQueryLabel);
+    setText('archiveTypeLabel', UI_TEXT.static.archiveTypeLabel);
+    setText('archiveStreamerLabel', UI_TEXT.static.archiveStreamerLabel);
+    setText('archiveSortLabel', UI_TEXT.static.archiveSortLabel);
+    setText('archiveResultsTitle', UI_TEXT.static.archiveResults);
+    if (typeof refreshArchiveSearchTexts === 'function') refreshArchiveSearchTexts();
     setText('btnArchiveSearch', UI_TEXT.static.archiveSearchBtn);
     const archiveQueryInput = document.getElementById('archiveSearchQuery') as HTMLInputElement | null;
     if (archiveQueryInput) archiveQueryInput.placeholder = UI_TEXT.static.archiveSearchPlaceholder;
@@ -120,6 +126,7 @@ function applyLanguageToStaticUI(): void {
         if (opts[0]) opts[0].text = UI_TEXT.static.archiveAllTypes;
         if (opts[1]) opts[1].text = UI_TEXT.static.archiveTypeLive;
         if (opts[2]) opts[2].text = UI_TEXT.static.archiveTypeVod;
+        if (opts[3]) opts[3].text = UI_TEXT.static.archiveTypeClip;
     }
     const archiveSortSelect = document.getElementById('archiveSearchSort') as HTMLSelectElement | null;
     if (archiveSortSelect) {
@@ -135,6 +142,9 @@ function applyLanguageToStaticUI(): void {
     const statsIntroEl = document.getElementById('statsIntro');
     if (statsIntroEl) applyHtml(statsIntroEl, UI_TEXT.static.statsIntro);
     setText('statsSummaryTitle', UI_TEXT.static.statsSummaryTitle);
+    setText('statsInventoryTitle', UI_TEXT.static.statsInventoryTitle);
+    setText('statsInventoryNote', UI_TEXT.static.statsInventoryNote);
+    if (typeof refreshArchiveStatsTexts === 'function') refreshArchiveStatsTexts();
     setText('statsTopStreamersTitle', UI_TEXT.static.statsTopStreamersTitle);
     setText('statsActivityTitle', UI_TEXT.static.statsActivityTitle);
     setText('statsSizeBucketsTitle', UI_TEXT.static.statsSizeBucketsTitle);

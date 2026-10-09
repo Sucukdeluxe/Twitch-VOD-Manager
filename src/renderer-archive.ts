@@ -1,25 +1,40 @@
-let archiveStreamerSelectPopulated = false;
 let archiveSearchInFlight = false;
+let archiveSearchRequested = false;
 let archiveSearchDebounceTimer: number | null = null;
+let lastArchiveSearchResult: ArchiveSearchResult | null = null;
+let lastArchiveFilterKey = '';
+let archiveStreamerOptionsKey = '';
+const archiveKnownStreamers = new Set<string>();
 
 function populateArchiveStreamerSelect(): void {
-    if (archiveStreamerSelectPopulated) return;
     const select = document.getElementById('archiveSearchStreamer') as HTMLSelectElement | null;
     if (!select) return;
+    const selected = select.value;
+    const configured = (config.streamers as string[] | undefined) || [];
+    const names = new Map<string, string>();
+    for (const name of [...configured, ...archiveKnownStreamers, ...(selected ? [selected] : [])]) names.set(name.toLowerCase(), name);
+    const sorted = [...names.values()].sort((left, right) => left.localeCompare(right, getIntlLocale()));
+    const key = JSON.stringify([currentLanguage, sorted]);
+    if (key === archiveStreamerOptionsKey) return;
+    archiveStreamerOptionsKey = key;
+    select.replaceChildren(new Option(UI_TEXT.static.archiveAllStreamers, ''), ...sorted.map(name => new Option(name, name)));
+    select.value = sorted.find(name => name.toLowerCase() === selected.toLowerCase()) || '';
+}
 
-    const streamers = (config.streamers as string[] | undefined) || [];
-    const sorted = [...streamers].sort((a, b) => a.localeCompare(b));
-    const opts = sorted.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
-    applyHtml(select, `<option value="">${escapeHtml(UI_TEXT.static.archiveAllStreamers || 'Alle Streamer')}</option>${opts}`);
-    archiveStreamerSelectPopulated = true;
+function getArchiveSearchFilter() {
+    return {
+        query: (document.getElementById('archiveSearchQuery') as HTMLInputElement | null)?.value.trim() || '',
+        type: ((document.getElementById('archiveSearchType') as HTMLSelectElement | null)?.value || 'all') as 'all' | 'live' | 'vod' | 'clip' | 'chat' | 'events',
+        streamer: (document.getElementById('archiveSearchStreamer') as HTMLSelectElement | null)?.value || '',
+        sinceMs: null,
+        untilMs: null,
+        sort: ((document.getElementById('archiveSearchSort') as HTMLSelectElement | null)?.value || 'date_desc') as 'date_desc' | 'date_asc' | 'size_desc' | 'size_asc' | 'name_asc',
+        limit: 200
+    };
 }
 
 function onArchiveSearchInput(): void {
-    if (archiveSearchDebounceTimer !== null) {
-        window.clearTimeout(archiveSearchDebounceTimer);
-    }
-    // 250ms debounce — feels snappy without spamming the IO walker on
-    // every keystroke. The walk is fast but pointless to repeat mid-type.
+    if (archiveSearchDebounceTimer !== null) window.clearTimeout(archiveSearchDebounceTimer);
     archiveSearchDebounceTimer = window.setTimeout(() => {
         archiveSearchDebounceTimer = null;
         void performArchiveSearch();
@@ -27,149 +42,156 @@ function onArchiveSearchInput(): void {
 }
 
 async function performArchiveSearch(): Promise<void> {
+    if (archiveSearchDebounceTimer !== null) {
+        window.clearTimeout(archiveSearchDebounceTimer);
+        archiveSearchDebounceTimer = null;
+    }
+    archiveSearchRequested = true;
     if (archiveSearchInFlight) return;
-    populateArchiveStreamerSelect();
-
-    const queryEl = document.getElementById('archiveSearchQuery') as HTMLInputElement | null;
-    const typeEl = document.getElementById('archiveSearchType') as HTMLSelectElement | null;
-    const streamerEl = document.getElementById('archiveSearchStreamer') as HTMLSelectElement | null;
-    const sortEl = document.getElementById('archiveSearchSort') as HTMLSelectElement | null;
-    const summaryEl = document.getElementById('archiveSearchSummary');
-    const resultsEl = document.getElementById('archiveSearchResults');
-    const btn = document.getElementById('btnArchiveSearch') as HTMLButtonElement | null;
-    if (!resultsEl) return;
-
+    const results = document.getElementById('archiveSearchResults');
+    const summary = document.getElementById('archiveSearchSummary');
+    const button = document.getElementById('btnArchiveSearch') as HTMLButtonElement | null;
+    if (!results) return;
     archiveSearchInFlight = true;
-    if (btn) btn.disabled = true;
-    if (summaryEl) summaryEl.textContent = UI_TEXT.static.archiveSearching || 'Scanne...';
-
+    results.setAttribute('aria-busy', 'true');
+    if (button) button.disabled = true;
     try {
-        const filter = {
-            query: queryEl?.value || '',
-            type: ((typeEl?.value as 'all' | 'live' | 'vod') || 'all'),
-            streamer: streamerEl?.value || '',
-            sinceMs: null,
-            untilMs: null,
-            sort: ((sortEl?.value as 'date_desc') || 'date_desc'),
-            limit: 200
-        };
-        const result = await window.api.searchArchive(filter);
-        renderArchiveSearchResults(result);
-    } catch (e) {
-        if (summaryEl) summaryEl.textContent = `${UI_TEXT.static.errorPrefix}: ${String(e)}`;
-        applyHtml(resultsEl, '');
+        do {
+            archiveSearchRequested = false;
+            populateArchiveStreamerSelect();
+            const filter = getArchiveSearchFilter();
+            const key = JSON.stringify(filter);
+            if (summary) {
+                summary.textContent = UI_TEXT.static.archiveSearching;
+                summary.classList.remove('is-error');
+            }
+            try {
+                const result = await window.api.searchArchive(filter);
+                if (key !== JSON.stringify(getArchiveSearchFilter())) archiveSearchRequested = true;
+                if (archiveSearchRequested) continue;
+                const preserveScroll = key === lastArchiveFilterKey;
+                lastArchiveFilterKey = key;
+                lastArchiveSearchResult = result;
+                for (const streamer of result.streamers || result.hits.map(hit => hit.streamer)) archiveKnownStreamers.add(streamer);
+                populateArchiveStreamerSelect();
+                renderArchiveSearchResults(result, preserveScroll);
+            } catch (error) {
+                if (key !== JSON.stringify(getArchiveSearchFilter())) archiveSearchRequested = true;
+                if (!archiveSearchRequested && summary) {
+                    summary.textContent = UI_TEXT.static.errorPrefix + ': ' + (error instanceof Error ? error.message : String(error));
+                    summary.classList.add('is-error');
+                }
+            }
+        } while (archiveSearchRequested);
     } finally {
         archiveSearchInFlight = false;
-        if (btn) btn.disabled = false;
+        results.setAttribute('aria-busy', 'false');
+        if (button) button.disabled = false;
     }
 }
 
-function renderArchiveSearchResults(result: ArchiveSearchResult): void {
-    const summaryEl = document.getElementById('archiveSearchSummary');
-    const resultsEl = document.getElementById('archiveSearchResults');
-    if (!resultsEl) return;
+function refreshArchiveSearchTexts(): void {
+    populateArchiveStreamerSelect();
+    if (lastArchiveSearchResult) renderArchiveSearchResults(lastArchiveSearchResult, true);
+    if (archiveSearchInFlight) setText('archiveSearchSummary', UI_TEXT.static.archiveSearching);
+}
 
+function archiveElement(tag: string, className: string, text = ''): HTMLElement {
+    const element = document.createElement(tag);
+    element.className = className;
+    element.textContent = text;
+    return element;
+}
+
+function renderArchiveSearchResults(result: ArchiveSearchResult, preserveScroll = false): void {
+    const summary = document.getElementById('archiveSearchSummary');
+    const results = document.getElementById('archiveSearchResults');
+    if (!results) return;
+    const scrollTop = preserveScroll ? results.scrollTop : 0;
+    summary?.classList.remove('is-error');
     if (!result.rootExists) {
-        if (summaryEl) summaryEl.textContent = UI_TEXT.static.archiveNoRoot;
-        applyHtml(resultsEl, '');
+        if (summary) summary.textContent = '';
+        results.replaceChildren(archiveElement('div', 'insights-empty archive-empty', UI_TEXT.static.archiveNoRoot));
         return;
     }
-
-    if (summaryEl) {
-        const tmpl = result.truncated
-            ? UI_TEXT.static.archiveSummaryTruncated
-            : UI_TEXT.static.archiveSummary;
-        summaryEl.textContent = (tmpl || '')
-            .replace('{matchCount}', String(result.matchCount))
-            .replace('{scanned}', String(result.totalScanned))
-            .replace('{shown}', String(result.hits.length));
+    if (summary) {
+        summary.textContent = (result.truncated ? UI_TEXT.static.archiveSummaryTruncated : UI_TEXT.static.archiveSummary)
+            .replace('{matchCount}', formatUiNumber(result.matchCount))
+            .replace('{scanned}', formatUiNumber(result.totalScanned))
+            .replace('{shown}', formatUiNumber(result.hits.length));
     }
-
     if (result.hits.length === 0) {
-        applyHtml(resultsEl, `<div class="archive-no-matches">${escapeHtml(UI_TEXT.static.archiveNoMatches || 'Keine Treffer.')}</div>`);
+        results.replaceChildren(archiveElement('div', 'insights-empty archive-empty', UI_TEXT.static.archiveNoMatches));
         return;
     }
+    const fragment = document.createDocumentFragment();
+    for (const hit of result.hits) {
+        const row = archiveElement('article', 'archive-result-row');
+        const body = archiveElement('div', 'archive-result-body');
+        const meta = archiveElement('div', 'archive-result-meta');
+        const kind = hit.type === 'live' ? 'LIVE' : hit.type === 'clip' ? 'CLIP' : 'VOD';
+        meta.append(archiveElement('span', 'archive-type-badge ' + hit.type, kind), archiveElement('strong', 'archive-result-streamer', hit.streamer));
+        const filename = archiveElement('div', 'archive-result-filename', hit.fileName);
+        filename.title = hit.fullPath;
+        const details = archiveElement('div', 'archive-result-details');
+        details.append(archiveElement('span', 'archive-result-date', formatUiDateTime(new Date(hit.mtimeMs))), archiveElement('span', 'archive-result-size', formatBytes(hit.size)));
+        body.append(meta, filename, details);
+        const actions = archiveElement('div', 'archive-result-actions');
+        const action = (label: string, callback: () => void) => {
+            const element = document.createElement('button');
+            element.type = 'button';
+            element.className = 'queue-detail-btn';
+            element.textContent = label;
+            element.addEventListener('click', callback);
+            actions.append(element);
+        };
+        action(UI_TEXT.static.archiveOpen, () => openFilePath(hit.fullPath));
+        action(UI_TEXT.static.archiveShowInFolder, () => showFileInFolder(hit.fullPath));
+        if (hit.chatPath) action(UI_TEXT.static.archiveViewChat, () => openEventsOrChat(hit.chatPath!, hit.fileName, 'chat'));
+        if (hit.eventsPath) action(UI_TEXT.static.archiveViewEvents, () => openEventsOrChat(hit.eventsPath!, hit.fileName, 'events'));
+        row.append(body, actions);
+        fragment.append(row);
+    }
+    results.replaceChildren(fragment);
+    results.scrollTop = scrollTop;
+}
 
-    const rows = result.hits.map((hit) => {
-        const date = formatUiDateTime(new Date(hit.mtimeMs));
-        const typeBadge = `<span class="archive-type-badge ${hit.type === 'live' ? 'live' : 'vod'}">${hit.type === 'live' ? 'LIVE' : 'VOD'}</span>`;
-        const safeFullAttr = hit.fullPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        const chatBtn = hit.chatPath
-            ? `<button type="button" class="queue-detail-btn" onclick="openEventsOrChat('${safeFullAttr.replace(/\.(mp4|mkv|ts|m4v)$/i, '.chat.jsonl')}', '${escapeHtml(hit.fileName)}', 'chat')">${escapeHtml(UI_TEXT.static.archiveViewChat || 'Chat')}</button>`
-            : '';
-        const eventsBtn = hit.eventsPath
-            ? `<button type="button" class="queue-detail-btn" onclick="openEventsOrChat('${(hit.eventsPath || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")}', '${escapeHtml(hit.fileName)}', 'events')">${escapeHtml(UI_TEXT.static.archiveViewEvents || 'Events')}</button>`
-            : '';
-        return `
-            <div class="archive-result-row">
-                <div class="archive-result-body">
-                    <div class="archive-result-meta">
-                        ${typeBadge}
-                        <strong class="archive-result-streamer">${escapeHtml(hit.streamer)}</strong>
-                        <span class="archive-result-date">${escapeHtml(date)}</span>
-                    </div>
-                    <div class="archive-result-filename" title="${escapeHtml(hit.fullPath)}">${escapeHtml(hit.fileName)}</div>
-                    <div class="archive-result-size">${escapeHtml(formatBytes(hit.size))}</div>
-                </div>
-                <div class="archive-result-actions">
-                    <button type="button" class="queue-detail-btn" onclick="openFilePath('${safeFullAttr}')">${escapeHtml(UI_TEXT.static.archiveOpen || 'Öffnen')}</button>
-                    <button type="button" class="queue-detail-btn" onclick="showFileInFolder('${safeFullAttr}')">${escapeHtml(UI_TEXT.static.archiveShowInFolder || 'Ordner')}</button>
-                    ${chatBtn}
-                    ${eventsBtn}
-                </div>
-            </div>
-        `;
-    }).join('');
-
-    applyHtml(resultsEl, rows);
+function showArchiveActionError(): void {
+    const summary = document.getElementById('archiveSearchSummary');
+    if (!summary) return;
+    summary.textContent = UI_TEXT.static.archiveActionFailed;
+    summary.classList.add('is-error');
 }
 
 function openFilePath(filePath: string): void {
-    void window.api.openFile(filePath);
+    void window.api.openFile(filePath).then(success => { if (!success) showArchiveActionError(); }).catch(showArchiveActionError);
 }
 
 function showFileInFolder(filePath: string): void {
-    void window.api.showInFolder(filePath);
+    void window.api.showInFolder(filePath).then(success => { if (!success) showArchiveActionError(); }).catch(showArchiveActionError);
 }
 
 function openEventsOrChat(filePath: string, title: string, kind: 'chat' | 'events'): void {
-    if (kind === 'events') {
-        const fn = (window as unknown as { openEventsViewer?: (p: string, t: string) => void }).openEventsViewer;
-        if (typeof fn === 'function') fn(filePath, title);
-    } else {
-        const fn = (window as unknown as { openChatViewer?: (p: string, t: string) => void }).openChatViewer;
-        if (typeof fn === 'function') fn(filePath, title);
-    }
+    const api = window as unknown as { openEventsViewer?: (path: string, title: string) => void; openChatViewer?: (path: string, title: string) => void };
+    const open = kind === 'events' ? api.openEventsViewer : api.openChatViewer;
+    if (typeof open === 'function') open(filePath, title);
+    else showArchiveActionError();
 }
 
-(window as unknown as {
-    performArchiveSearch: typeof performArchiveSearch;
-    onArchiveSearchInput: typeof onArchiveSearchInput;
-    openFilePath: typeof openFilePath;
-    showFileInFolder: typeof showFileInFolder;
-    openEventsOrChat: typeof openEventsOrChat;
-}).performArchiveSearch = performArchiveSearch;
-(window as unknown as { onArchiveSearchInput: typeof onArchiveSearchInput }).onArchiveSearchInput = onArchiveSearchInput;
-(window as unknown as { openFilePath: typeof openFilePath }).openFilePath = openFilePath;
-(window as unknown as { showFileInFolder: typeof showFileInFolder }).showFileInFolder = showFileInFolder;
-(window as unknown as { openEventsOrChat: typeof openEventsOrChat }).openEventsOrChat = openEventsOrChat;
-
 function initArchiveSearchInput(): void {
-    const queryEl = document.getElementById('archiveSearchQuery') as HTMLInputElement | null;
-    if (queryEl && !queryEl.dataset.bound) {
-        queryEl.addEventListener('input', onArchiveSearchInput);
-        queryEl.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') void performArchiveSearch();
-        });
-        queryEl.dataset.bound = '1';
+    const query = document.getElementById('archiveSearchQuery') as HTMLInputElement | null;
+    if (query && !query.dataset.bound) {
+        query.addEventListener('input', onArchiveSearchInput);
+        query.addEventListener('keydown', event => { if (event.key === 'Enter') void performArchiveSearch(); });
+        query.dataset.bound = '1';
     }
-    const filters = ['archiveSearchType', 'archiveSearchStreamer', 'archiveSearchSort'];
-    for (const id of filters) {
-        const el = document.getElementById(id) as HTMLSelectElement | null;
-        if (el && !el.dataset.bound) {
-            el.addEventListener('change', () => { void performArchiveSearch(); });
-            el.dataset.bound = '1';
+    for (const id of ['archiveSearchType', 'archiveSearchStreamer', 'archiveSearchSort']) {
+        const select = document.getElementById(id) as HTMLSelectElement | null;
+        if (select && !select.dataset.bound) {
+            select.addEventListener('change', () => { void performArchiveSearch(); });
+            select.dataset.bound = '1';
         }
     }
 }
-(window as unknown as { initArchiveSearchInput: typeof initArchiveSearchInput }).initArchiveSearchInput = initArchiveSearchInput;
+
+Object.assign(window, { performArchiveSearch, onArchiveSearchInput, openFilePath, showFileInFolder, openEventsOrChat, initArchiveSearchInput });

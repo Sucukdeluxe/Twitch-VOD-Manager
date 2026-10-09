@@ -1,6 +1,7 @@
 import type { DbHandle } from '../infra/db';
 import { normalizeLogin } from './config-normalize';
 import { sanitizeConfigInput } from './config-input';
+import { createDownloadHistoryStore } from './download-history-store';
 
 export interface AppStateStore {
     loadConfig(): Record<string, unknown>;
@@ -42,6 +43,7 @@ function replaceConfig(db: DbHandle, normalized: Record<string, unknown>): void 
 }
 
 export function createAppStateStore(db: DbHandle): AppStateStore {
+    const downloadHistory = createDownloadHistoryStore(db);
     return {
         loadConfig() {
             const stored = Object.fromEntries(
@@ -69,6 +71,7 @@ export function createAppStateStore(db: DbHandle): AppStateStore {
                     const item = rawItem as Record<string, unknown>;
                     const id = typeof item.id === 'string' && item.id ? item.id : null;
                     if (!id) throw new Error('Queue item id must not be empty');
+                    downloadHistory.recordQueueItem(item);
                     db.run(
                         `INSERT OR REPLACE INTO queue_items
                          (id, queue_position, streamer_login, vod_id, clip_id, title, output_path, status,

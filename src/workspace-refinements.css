@@ -997,12 +997,12 @@
     margin: 7px 0 0 30px;
 }
 
-.workspace-shell.app[data-active-workspace="clips"] {
+.workspace-shell.app:is([data-active-workspace="clips"], [data-active-workspace="cutter"], [data-active-workspace="merge"], [data-active-workspace="stats"], [data-active-workspace="archive"]) {
     grid-template-columns: minmax(0, 1fr);
 }
 
-.workspace-shell[data-active-workspace="clips"] > .context-sidebar,
-.workspace-shell[data-active-workspace="clips"] .workspace-toolbar {
+.workspace-shell:is([data-active-workspace="clips"], [data-active-workspace="cutter"], [data-active-workspace="merge"], [data-active-workspace="stats"], [data-active-workspace="archive"]) > .context-sidebar,
+.workspace-shell:is([data-active-workspace="clips"], [data-active-workspace="stats"], [data-active-workspace="archive"]) .workspace-toolbar {
     display: none;
 }
 
@@ -1437,6 +1437,18 @@ body :is(select, .select-compact) {
     min-height: 64px;
 }
 
+.context-panel[data-context-for="vods"][data-vods-layout="split"] .section-title {
+    min-height: var(--workspace-toolbar-height);
+    flex: 0 0 var(--workspace-toolbar-height);
+    border-bottom: 1px solid var(--workspace-border);
+    border-radius: 0;
+}
+
+#toolbarRefreshVodsBtn {
+    width: 38px;
+    height: 38px;
+}
+
 .workspace-toolbar .toolbar-context[data-toolbar-for="vods"] {
     flex: 1 1 auto;
     min-width: 0;
@@ -1666,6 +1678,42 @@ body :is(select, .select-compact) {
 #settingsTab .form-stack :is(input, select) {
     width: 100%;
     max-width: 100%;
+}
+
+#settingsTab .settings-card input[type="number"] {
+    flex: 0 0 auto;
+    width: 110px;
+    max-width: 100%;
+    font-variant-numeric: tabular-nums;
+}
+
+#settingsTab .settings-card input[type="time"] {
+    flex: 0 0 auto;
+    width: 150px;
+    max-width: 100%;
+    font-variant-numeric: tabular-nums;
+}
+
+#settingsTab .form-stack:has(> input[type="number"]),
+#settingsTab .form-stack:has(> input[type="time"]) {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+#settingsTab .settings-card input[inputmode="decimal"] {
+    flex: 0 0 auto;
+    width: 140px;
+    max-width: 100%;
+    font-variant-numeric: tabular-nums;
+}
+
+#settingsTab #downloadWindows {
+    max-width: 360px;
+}
+
+#settingsTab .form-row.compact-number-fields {
+    align-items: flex-start;
+    gap: 16px 28px;
 }
 
 #settingsTab .download-settings-layout {

@@ -383,13 +383,14 @@ interface ArchiveSearchHit {
     fullPath: string;
     fileName: string;
     streamer: string;
-    type: 'live' | 'vod' | 'chat' | 'events' | 'other';
+    type: 'live' | 'vod' | 'clip' | 'chat' | 'events' | 'other';
     size: number;
     mtimeMs: number;
     chatPath: string | null;
     eventsPath: string | null;
 }
 interface ArchiveSearchResult {
+    streamers?: string[];
     totalScanned: number;
     matchCount: number;
     truncated: boolean;
@@ -399,6 +400,7 @@ interface ArchiveSearchResult {
 }
 
 interface ArchiveStatsTopStreamer {
+    clipBytes?: number;
     streamer: string;
     bytes: number;
     fileCount: number;
@@ -408,7 +410,24 @@ interface ArchiveStatsTopStreamer {
 }
 interface ArchiveStatsDay { date: string; count: number; bytes: number }
 interface ArchiveStatsBucket { label: string; count: number; bytes: number }
+interface ArchiveLifetimeStats {
+    available: boolean;
+    trackedSince: string | null;
+    totalDownloads: number;
+    completedJobs: number;
+    vodDownloads: number;
+    clipDownloads: number;
+    liveRecordings: number;
+    outputFiles: number;
+    totalBytes: number;
+    recoveredDownloads: number;
+    unknownDateDownloads: number;
+    dailyActivity: ArchiveStatsDay[];
+}
 interface ArchiveStats {
+    lifetime: ArchiveLifetimeStats;
+    clipCount: number;
+    clipBytes: number;
     totalFiles: number;
     totalBytes: number;
     liveCount: number;
@@ -477,7 +496,7 @@ interface ApiBridge {
     onLiveStatusBatchUpdate(callback: (info: { changes: Array<{ login: string; isLive: boolean }> }) => void): void;
     searchArchive(filter: {
         query?: string;
-        type?: 'all' | 'live' | 'vod' | 'chat' | 'events';
+        type?: 'all' | 'live' | 'vod' | 'clip' | 'chat' | 'events';
         streamer?: string;
         sinceMs?: number | null;
         untilMs?: number | null;

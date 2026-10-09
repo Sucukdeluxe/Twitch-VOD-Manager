@@ -89,6 +89,7 @@
       "src/styles-overlays.css",
       "src/workspace.css",
       "src/workspace-refinements.css",
+      "src/workspace-insights.css",
       "build/icon.png",
       "package.json",
       "!node_modules/better-sqlite3/build/**",

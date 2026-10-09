@@ -1,3 +1,6 @@
+import { createArchiveInventoryReader, searchArchiveInventory, summarizeArchiveInventory, type ArchiveStats, type ArchiveSearchFilter, type ArchiveSearchResult } from './main/domain/archive-inventory';
+import { randomUUID } from 'node:crypto';
+import { createDownloadHistoryStore, downloadOutputBytes, emptyLifetimeDownloadStats, type DownloadHistoryStore } from './main/domain/download-history-store';
 import { requestPublicClipInfo } from './main/twitch/clip-info';
 import { parseTwitchClipId } from './main/twitch/clip-url';
 import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, Notification, type IpcMainInvokeEvent } from 'electron';
@@ -728,6 +731,9 @@ function sanitizeQueueItem(raw: unknown): QueueItem | null {
         }
     }
     if (typeof raw.last_error === 'string') item.last_error = raw.last_error;
+    if (typeof raw.completedAt === 'string' && Number.isFinite(Date.parse(raw.completedAt))) item.completedAt = new Date(raw.completedAt).toISOString();
+    if (raw.completionRecorded === true) item.completionRecorded = true;
+    if (typeof raw.outputBytes === 'number' && Number.isSafeInteger(raw.outputBytes) && raw.outputBytes >= 0) item.outputBytes = raw.outputBytes;
     if (finalStatus === 'paused') {
         if (typeof raw.downloadedBytes === 'number' && Number.isFinite(raw.downloadedBytes)) item.downloadedBytes = raw.downloadedBytes;
         if (typeof raw.totalBytes === 'number' && Number.isFinite(raw.totalBytes)) item.totalBytes = raw.totalBytes;
@@ -811,6 +817,7 @@ function clearQueueFileFromDisk(): void {
 
 function writeQueueToDisk(queue: QueueItem[]): void {
     if (config.persist_queue_on_restart === false) {
+        for (const item of queue) downloadHistoryStore?.recordQueueItem(item);
         clearQueueFileFromDisk();
         return;
     }
@@ -860,6 +867,7 @@ function flushQueueSave(): void {
 // ==========================================
 let mainWindow: BrowserWindow | null = null;
 let appStateStore: AppStateStore | null = null;
+let downloadHistoryStore: DownloadHistoryStore | null = null;
 let appSecretStore: SecretStore | null = null;
 let config = normalizeConfigTemplates(defaultConfig);
 let lastPersistedConfig = cloneConfig(config);
@@ -5094,382 +5102,7 @@ function computeStorageStats(): StorageStatsResult {
 // ==========================================
 // ARCHIVE STATS — DASHBOARD AGGREGATION
 // ==========================================
-interface ArchiveStatsTopStreamer {
-    streamer: string;
-    bytes: number;
-    fileCount: number;
-    liveBytes: number;
-    vodBytes: number;
-    chatBytes: number;
-}
-interface ArchiveStatsDay { date: string; count: number; bytes: number }
-interface ArchiveStatsBucket { label: string; count: number; bytes: number }
-interface ArchiveStats {
-    totalFiles: number;
-    totalBytes: number;
-    liveCount: number;
-    liveBytes: number;
-    vodCount: number;
-    vodBytes: number;
-    chatCount: number;
-    chatBytes: number;
-    eventsCount: number;
-    streamerCount: number;
-    avgRecordingSizeBytes: number;
-    topStreamers: ArchiveStatsTopStreamer[];
-    dailyActivity: ArchiveStatsDay[];
-    sizeBuckets: ArchiveStatsBucket[];
-    scannedAt: string;
-    downloadPath: string;
-    rootExists: boolean;
-}
-
-const SIZE_BUCKETS: Array<{ label: string; min: number; max: number }> = [
-    { label: '< 100 MB', min: 0, max: 100 * 1024 * 1024 },
-    { label: '100 MB - 500 MB', min: 100 * 1024 * 1024, max: 500 * 1024 * 1024 },
-    { label: '500 MB - 1 GB', min: 500 * 1024 * 1024, max: 1024 * 1024 * 1024 },
-    { label: '1 GB - 5 GB', min: 1024 * 1024 * 1024, max: 5 * 1024 * 1024 * 1024 },
-    { label: '5 GB - 10 GB', min: 5 * 1024 * 1024 * 1024, max: 10 * 1024 * 1024 * 1024 },
-    { label: '> 10 GB', min: 10 * 1024 * 1024 * 1024, max: Number.POSITIVE_INFINITY }
-];
-
-type ArchiveFileType = 'live' | 'vod' | 'chat' | 'events' | 'other';
-
-function classifyArchiveFile(relativePath: string): ArchiveFileType {
-    if (/\.chat\.jsonl?$/i.test(relativePath)) return 'chat';
-    if (/\.events\.jsonl$/i.test(relativePath)) return 'events';
-    const norm = relativePath.replace(/\\/g, '/').toLowerCase();
-    if (norm.startsWith('live/')) return 'live';
-    if (/\.(mp4|mkv|ts|m4v)$/i.test(relativePath)) return 'vod';
-    return 'other';
-}
-
-function extractFilenameDate(name: string): string | null {
-    const m = /(\d{4})-(\d{2})-(\d{2})/.exec(name);
-    if (!m) return null;
-    return `${m[1]}-${m[2]}-${m[3]}`;
-}
-
-function bucketIndexForSize(bytes: number): number {
-    for (let i = 0; i < SIZE_BUCKETS.length; i++) {
-        if (bytes < SIZE_BUCKETS[i].max) return i;
-    }
-    return SIZE_BUCKETS.length - 1;
-}
-
-interface ArchiveFileRecord { size: number; mtimeMs: number; type: ArchiveFileType; date: string }
-
-function walkForArchiveStats(
-    folderPath: string,
-    relPrefix: string,
-    accum: { files: ArchiveFileRecord[] }
-): void {
-    let entries: fs.Dirent[];
-    try {
-        entries = fs.readdirSync(folderPath, { withFileTypes: true });
-    } catch {
-        return;
-    }
-    for (const entry of entries) {
-        const full = path.join(folderPath, entry.name);
-        const rel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
-        try {
-            if (entry.isDirectory()) {
-                walkForArchiveStats(full, rel, accum);
-            } else if (entry.isFile()) {
-                const st = fs.statSync(full);
-                const type = classifyArchiveFile(rel);
-                const dateFromName = extractFilenameDate(entry.name);
-                const date = dateFromName || new Date(st.mtimeMs).toISOString().slice(0, 10);
-                accum.files.push({ size: st.size, mtimeMs: st.mtimeMs, type, date });
-            }
-        } catch { /* permission blip — skip */ }
-    }
-}
-
-// Search a single file matches the live query. Empty query matches all.
-// streamerFolder is the top-level directory under root (which we equate
-// with the channel name); relativePath is everything below that.
-interface ArchiveSearchFilter {
-    query: string;
-    type: 'all' | 'live' | 'vod' | 'chat' | 'events';
-    streamer: string;
-    sinceMs: number | null;
-    untilMs: number | null;
-    sort: 'date_desc' | 'date_asc' | 'size_desc' | 'size_asc' | 'name_asc';
-    limit: number;
-}
-
-interface ArchiveSearchHit {
-    fullPath: string;
-    fileName: string;
-    streamer: string;
-    type: ArchiveFileType;
-    size: number;
-    mtimeMs: number;
-    chatPath: string | null;
-    eventsPath: string | null;
-}
-
-interface ArchiveSearchResult {
-    totalScanned: number;
-    matchCount: number;
-    truncated: boolean;
-    hits: ArchiveSearchHit[];
-    scannedAt: string;
-    rootExists: boolean;
-}
-
-function matchSearchFilter(
-    streamerFolder: string,
-    relativePath: string,
-    fileName: string,
-    fileSize: number,
-    mtimeMs: number,
-    type: ArchiveFileType,
-    filter: ArchiveSearchFilter
-): boolean {
-    if (filter.type !== 'all' && filter.type !== type) return false;
-    if (filter.streamer && streamerFolder.toLowerCase() !== filter.streamer.toLowerCase()) return false;
-    if (filter.sinceMs !== null && mtimeMs < filter.sinceMs) return false;
-    if (filter.untilMs !== null && mtimeMs > filter.untilMs) return false;
-    if (filter.query) {
-        const q = filter.query.toLowerCase();
-        const hay = `${fileName} ${streamerFolder} ${relativePath}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-    }
-    return true;
-}
-
-function searchArchive(filter: ArchiveSearchFilter): ArchiveSearchResult {
-    const root = config.download_path;
-    const result: ArchiveSearchResult = {
-        totalScanned: 0,
-        matchCount: 0,
-        truncated: false,
-        hits: [],
-        scannedAt: new Date().toISOString(),
-        rootExists: false
-    };
-    if (!root || !fs.existsSync(root)) return result;
-    result.rootExists = true;
-
-    const maxHits = Math.max(10, Math.min(2000, Math.floor(filter.limit) || 200));
-
-    let topEntries: fs.Dirent[];
-    try {
-        topEntries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-        return result;
-    }
-
-    // To attach chat/events sibling paths to a recording hit, we collect
-    // every file in a streamer's tree first, then make a second pass to
-    // pair up companions by stripping the .mp4 base.
-    for (const entry of topEntries) {
-        if (!entry.isDirectory()) continue;
-        const streamerFolder = entry.name;
-        const streamerRoot = path.join(root, streamerFolder);
-        const filesInTree: Array<{ fullPath: string; rel: string; name: string; size: number; mtimeMs: number; type: ArchiveFileType }> = [];
-        // We re-walk here instead of reusing walkForArchiveStats because
-        // we need the full path + rel path on each file, not just the
-        // type/size aggregates. The cost is one redundant tree walk per
-        // search; acceptable for an interactive search.
-        const walkWithPaths = (folderPath: string, relPrefix: string): void => {
-            let entries2: fs.Dirent[];
-            try {
-                entries2 = fs.readdirSync(folderPath, { withFileTypes: true });
-            } catch { return; }
-            for (const e2 of entries2) {
-                const full = path.join(folderPath, e2.name);
-                const rel = relPrefix ? `${relPrefix}/${e2.name}` : e2.name;
-                try {
-                    if (e2.isDirectory()) {
-                        walkWithPaths(full, rel);
-                    } else if (e2.isFile()) {
-                        const st = fs.statSync(full);
-                        const type = classifyArchiveFile(rel);
-                        filesInTree.push({ fullPath: full, rel, name: e2.name, size: st.size, mtimeMs: st.mtimeMs, type });
-                    }
-                } catch { /* skip */ }
-            }
-        };
-        walkWithPaths(streamerRoot, '');
-
-        if (filesInTree.length === 0) continue;
-        result.totalScanned += filesInTree.length;
-
-        // Build a quick lookup so a recording file can attach its sibling
-        // .chat.* and .events.jsonl by stripping the .mp4/.mkv extension.
-        const companionByBase = new Map<string, { chat: string | null; events: string | null }>();
-        for (const f of filesInTree) {
-            if (f.type !== 'chat' && f.type !== 'events') continue;
-            // Strip companion suffix to get the base name shared with the
-            // recording: foo.mp4 + foo.chat.jsonl + foo.events.jsonl.
-            const base = f.fullPath.replace(/\.chat\.jsonl?$/i, '').replace(/\.events\.jsonl$/i, '');
-            const existing = companionByBase.get(base) || { chat: null, events: null };
-            if (f.type === 'chat') existing.chat = f.fullPath;
-            else if (f.type === 'events') existing.events = f.fullPath;
-            companionByBase.set(base, existing);
-        }
-
-        for (const f of filesInTree) {
-            // We only surface recordings (live/vod) as search hits — chat
-            // and events files attach as companions and don't appear as
-            // standalone rows. Users searching for chat usually want the
-            // recording it belongs to anyway.
-            if (f.type !== 'live' && f.type !== 'vod') continue;
-            if (!matchSearchFilter(streamerFolder, f.rel, f.name, f.size, f.mtimeMs, f.type, filter)) continue;
-
-            const recordingBase = f.fullPath.replace(/\.(mp4|mkv|ts|m4v)$/i, '');
-            const companions = companionByBase.get(recordingBase) || { chat: null, events: null };
-
-            result.hits.push({
-                fullPath: f.fullPath,
-                fileName: f.name,
-                streamer: streamerFolder,
-                type: f.type,
-                size: f.size,
-                mtimeMs: f.mtimeMs,
-                chatPath: companions.chat,
-                eventsPath: companions.events
-            });
-            result.matchCount++;
-        }
-    }
-
-    // Sort then truncate. We sort the FULL match set (not the truncated
-    // one) so the user gets the genuinely largest/newest results, not
-    // arbitrary order.
-    const cmp: Record<typeof filter.sort, (a: ArchiveSearchHit, b: ArchiveSearchHit) => number> = {
-        date_desc: (a, b) => b.mtimeMs - a.mtimeMs,
-        date_asc: (a, b) => a.mtimeMs - b.mtimeMs,
-        size_desc: (a, b) => b.size - a.size,
-        size_asc: (a, b) => a.size - b.size,
-        name_asc: (a, b) => a.fileName.localeCompare(b.fileName)
-    };
-    result.hits.sort(cmp[filter.sort] || cmp.date_desc);
-    if (result.hits.length > maxHits) {
-        result.truncated = true;
-        result.hits = result.hits.slice(0, maxHits);
-    }
-
-    return result;
-}
-
-function computeArchiveStats(): ArchiveStats {
-    const root = config.download_path;
-    const stats: ArchiveStats = {
-        totalFiles: 0,
-        totalBytes: 0,
-        liveCount: 0,
-        liveBytes: 0,
-        vodCount: 0,
-        vodBytes: 0,
-        chatCount: 0,
-        chatBytes: 0,
-        eventsCount: 0,
-        streamerCount: 0,
-        avgRecordingSizeBytes: 0,
-        topStreamers: [],
-        dailyActivity: [],
-        sizeBuckets: SIZE_BUCKETS.map((b) => ({ label: b.label, count: 0, bytes: 0 })),
-        scannedAt: new Date().toISOString(),
-        downloadPath: root || '',
-        rootExists: false
-    };
-    if (!root || !fs.existsSync(root)) return stats;
-    stats.rootExists = true;
-
-    let topEntries: fs.Dirent[];
-    try {
-        topEntries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-        return stats;
-    }
-
-    const perStreamer = new Map<string, ArchiveStatsTopStreamer>();
-    const dailyMap = new Map<string, ArchiveStatsDay>();
-    let recordingCount = 0;
-    let recordingBytes = 0;
-
-    for (const entry of topEntries) {
-        if (!entry.isDirectory()) continue;
-        const streamerFolder = entry.name;
-        const full = path.join(root, streamerFolder);
-        const accum: { files: ArchiveFileRecord[] } = { files: [] };
-        walkForArchiveStats(full, '', accum);
-        if (accum.files.length === 0) continue;
-
-        const ts: ArchiveStatsTopStreamer = {
-            streamer: streamerFolder,
-            bytes: 0,
-            fileCount: 0,
-            liveBytes: 0,
-            vodBytes: 0,
-            chatBytes: 0
-        };
-
-        for (const f of accum.files) {
-            stats.totalFiles++;
-            stats.totalBytes += f.size;
-            ts.fileCount++;
-            ts.bytes += f.size;
-
-            if (f.type === 'live') {
-                stats.liveCount++;
-                stats.liveBytes += f.size;
-                ts.liveBytes += f.size;
-                recordingCount++;
-                recordingBytes += f.size;
-                stats.sizeBuckets[bucketIndexForSize(f.size)].count++;
-                stats.sizeBuckets[bucketIndexForSize(f.size)].bytes += f.size;
-            } else if (f.type === 'vod') {
-                stats.vodCount++;
-                stats.vodBytes += f.size;
-                ts.vodBytes += f.size;
-                recordingCount++;
-                recordingBytes += f.size;
-                stats.sizeBuckets[bucketIndexForSize(f.size)].count++;
-                stats.sizeBuckets[bucketIndexForSize(f.size)].bytes += f.size;
-            } else if (f.type === 'chat') {
-                stats.chatCount++;
-                stats.chatBytes += f.size;
-                ts.chatBytes += f.size;
-            } else if (f.type === 'events') {
-                stats.eventsCount++;
-            }
-
-            if (f.type === 'live' || f.type === 'vod') {
-                const cur = dailyMap.get(f.date) || { date: f.date, count: 0, bytes: 0 };
-                cur.count++;
-                cur.bytes += f.size;
-                dailyMap.set(f.date, cur);
-            }
-        }
-
-        perStreamer.set(streamerFolder, ts);
-    }
-
-    stats.streamerCount = perStreamer.size;
-    stats.avgRecordingSizeBytes = recordingCount > 0 ? Math.round(recordingBytes / recordingCount) : 0;
-    stats.topStreamers = Array.from(perStreamer.values())
-        .sort((a, b) => b.bytes - a.bytes)
-        .slice(0, 10);
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const days: ArchiveStatsDay[] = [];
-    for (let i = 29; i >= 0; i--) {
-        const d = new Date(today);
-        d.setDate(d.getDate() - i);
-        const key = d.toISOString().slice(0, 10);
-        days.push(dailyMap.get(key) || { date: key, count: 0, bytes: 0 });
-    }
-    stats.dailyActivity = days;
-
-    return stats;
-}
+const readArchiveInventory = createArchiveInventoryReader();
 
 // ==========================================
 // DISCORD WEBHOOK NOTIFICATIONS
@@ -6967,6 +6600,13 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
             item.outputFiles = [...finalResult.outputFiles];
         }
 
+        if (finalResult.success) {
+            item.completedAt = new Date().toISOString();
+            item.completionRecorded = true;
+            item.outputBytes = downloadOutputBytes(item.outputFiles ?? []);
+            saveQueue(downloadQueue, true);
+        }
+
         // Discord webhook for non-live VOD completion. Live recordings
         // already get their own end-of-recording webhook in downloadLiveStream.
         if (finalResult.success && !item.isLive && config.discord_notify_vod_complete) {
@@ -8415,6 +8055,7 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
     // overwrite the previous download. itemId is the clipId — if the user
     // cancels via cancel-download, that's the handle.
     const filename = ensureUniqueFilename(path.join(folder, `${safeTitle}.mp4`), clipId);
+    const downloadAttemptId = randomUUID();
 
     return new Promise<{ success: boolean; error?: string; filename?: string }>((resolve) => {
         const streamlinkCmd = getStreamlinkCommand();
@@ -8495,6 +8136,11 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
 
             const finalized = await finalizeDownloadedMp4(partialFilename, filename, null, null, tracking);
             if (!finalized.success) { finish(finalized); return; }
+            try {
+                downloadHistoryStore?.recordClip({ attemptId: downloadAttemptId, clipId, filename });
+            } catch (error) {
+                appendDebugLog('clip-history-save-failed', { clipId, error: String(error) });
+            }
             appendDebugLog('clip-download-success', { clipId, bytes: stats.size, filename });
             finish({ success: true, filename });
         });
@@ -8570,9 +8216,9 @@ ipcMain.handle('open-debug-log-file', (event): boolean => {
     return true;
 });
 
-ipcMain.handle('get-archive-stats', (event): ArchiveStats => {
+ipcMain.handle('get-archive-stats', async (event): Promise<ArchiveStats> => {
     if (!isTrustedRendererEvent(event)) throw new Error('File access denied');
-    return computeArchiveStats();
+    return summarizeArchiveInventory(await readArchiveInventory(config.download_path), downloadHistoryStore?.summarize() ?? emptyLifetimeDownloadStats());
 });
 
 ipcMain.handle('get-streamer-profile', async (_, login: string, forceRefresh?: boolean): Promise<StreamerProfile | null> => {
@@ -8593,12 +8239,12 @@ ipcMain.handle('get-live-status-snapshot', (): Record<string, boolean> => {
     return snap;
 });
 
-ipcMain.handle('search-archive', (event, filter: Partial<ArchiveSearchFilter>): ArchiveSearchResult => {
+ipcMain.handle('search-archive', async (event, filter: Partial<ArchiveSearchFilter>): Promise<ArchiveSearchResult> => {
     if (!isTrustedRendererEvent(event)) throw new Error('File access denied');
     const normalized: ArchiveSearchFilter = {
         query: typeof filter?.query === 'string' ? filter.query.trim() : '',
-        type: (['all', 'live', 'vod', 'chat', 'events'] as const).includes(filter?.type as 'all' | 'live' | 'vod' | 'chat' | 'events')
-            ? filter!.type as 'all' | 'live' | 'vod' | 'chat' | 'events'
+        type: (['all', 'live', 'vod', 'clip', 'chat', 'events'] as const).includes(filter?.type as 'all' | 'live' | 'vod' | 'clip' | 'chat' | 'events')
+            ? filter!.type as 'all' | 'live' | 'vod' | 'clip' | 'chat' | 'events'
             : 'all',
         streamer: typeof filter?.streamer === 'string' ? filter.streamer.trim() : '',
         sinceMs: Number.isFinite(filter?.sinceMs as number) ? Number(filter?.sinceMs) : null,
@@ -8608,7 +8254,7 @@ ipcMain.handle('search-archive', (event, filter: Partial<ArchiveSearchFilter>): 
             : 'date_desc',
         limit: Number.isFinite(filter?.limit as number) ? Number(filter?.limit) : 200
     };
-    const result = searchArchive(normalized);
+    const result = searchArchiveInventory(await readArchiveInventory(config.download_path), normalized);
     for (const hit of result.hits) {
         rememberRendererPath('open-file', hit.fullPath);
         rememberRendererPath('show-in-folder', hit.fullPath);
@@ -9070,6 +8716,9 @@ app.whenReady().then(() => {
         if (fatalMigrationErrors.length > 0) {
             throw new Error(fatalMigrationErrors.map((entry: { source: string; message: string }) => `${entry.source}: ${entry.message}`).join('; '));
         }
+        downloadHistoryStore = createDownloadHistoryStore(database);
+        const recoveredDownloads = downloadHistoryStore.recoverCompletedQueue();
+        if (recoveredDownloads > 0) appendDebugLog('download-history-recovered', { jobs: recoveredDownloads });
         appStateStore = createAppStateStore(database);
         config = loadConfig();
         lastPersistedConfig = cloneConfig(config);
@@ -9107,6 +8756,7 @@ app.whenReady().then(() => {
         try { appDb?.close(); } catch { }
         appDb = null;
         appStateStore = null;
+        downloadHistoryStore = null;
         appSecretStore = null;
         config = normalizeConfigTemplates(defaultConfig);
         lastPersistedConfig = cloneConfig(config);
