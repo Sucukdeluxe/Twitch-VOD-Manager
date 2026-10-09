@@ -484,7 +484,14 @@
     overflow: visible;
 }
 
-.workspace-toolbar .toolbar-context[data-toolbar-for="cutter"] {
+.workspace-toolbar .toolbar-context:not([data-toolbar-for="vods"]) {
+    margin-inline-start: auto;
+    justify-content: flex-end;
+}
+
+.merge-header > button,
+.insights-header > button,
+.clips-header-actions {
     margin-inline-start: auto;
 }
 
