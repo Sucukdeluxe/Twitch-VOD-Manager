@@ -549,6 +549,7 @@ const UI_TEXT_DE = {
         failedCount: "{failed} fehlgeschlagen",
         limitReached: "Maximal 200 Links. Liste aufteilen.",
         emptyBatch: "Keine neuen Clips zum Herunterladen.",
+        linkCountOne: "1 Clip",
         linksCount: "{count} Clips",
         timeEarlier: 'Um 0,1 Sekunden verringern',
         timeLater: 'Um 0,1 Sekunden erhöhen',

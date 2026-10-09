@@ -549,6 +549,7 @@ const UI_TEXT_EN = {
         failedCount: "{failed} failed",
         limitReached: "Up to 200 links. Split the list.",
         emptyBatch: "No new clips to download.",
+        linkCountOne: "1 clip",
         linksCount: "{count} clips",
         timeEarlier: 'Decrease by 0.1 seconds',
         timeLater: 'Increase by 0.1 seconds',

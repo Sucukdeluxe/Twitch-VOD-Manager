@@ -2169,7 +2169,7 @@ function renderClipBatch(): void {
     const failed = clipBatchItems.filter(item => item.state === 'failed' || item.state === 'invalid').length;
     const ready = clipBatchItems.some(item => item.state === 'ready' || item.state === 'stopped');
     const format = (message: string) => message.replace('{done}', formatUiNumber(done)).replace('{total}', formatUiNumber(clipBatchItems.length)).replace('{failed}', formatUiNumber(failed));
-    byId('clipsLinkCount').textContent = UI_TEXT.clips.linksCount.replace('{count}', formatUiNumber(clipBatchItems.length));
+    byId('clipsLinkCount').textContent = clipBatchItems.length === 1 ? UI_TEXT.clips.linkCountOne : UI_TEXT.clips.linksCount.replace('{count}', formatUiNumber(clipBatchItems.length));
     byId('clipsResults').dataset.empty = String(clipBatchItems.length === 0);
     byId('clipsBatchSummary').textContent = format(UI_TEXT.clips.summary);
     const progress = clipBatchItems.length ? Math.round((done + failed) * 100 / clipBatchItems.length) : 0;
