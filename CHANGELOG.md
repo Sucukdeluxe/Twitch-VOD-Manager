@@ -2,10 +2,27 @@
 
 ## Unreleased
 
-- Scan storage asynchronously so large download folders no longer freeze the application.
-- Include files in the download root and nested chat files in storage totals.
-- Keep the storage table within its settings card, wrap long folder names, and format file counts for the selected language.
-- Save streamer additions, removals and ordering before applying them locally. Failed writes preserve the previous list and allow retrying; concurrent edits are serialized.
+## 1.0.27 - 2026-10-09
+
+This update fixes six issues in storage analysis and streamer management.
+
+### Storage
+
+- Large download folders are scanned without blocking the application. In the verified 10,005-file test, the longest main-process pause fell from over 500 ms to under 10 ms.
+- Files directly in the download folder are included in file counts and storage totals.
+- Chat files in nested folders are included in chat storage totals.
+- The storage table stays inside its settings card. Long folder names wrap, and narrow layouts can scroll horizontally without covering nearby controls.
+- File counts follow the selected language, including thousands separators.
+
+### Streamer management
+
+- Adding a streamer can be retried after a failed save. The input and previous list are preserved until saving succeeds.
+- Removing and reordering streamers use the same recovery behavior. Concurrent list changes are saved in order, and text entered during a pending save is preserved.
+
+### Verification
+
+- 847 automated tests and 20 browser test runs passed, with additional checks in Chromium and WebKit for long names, narrow layouts and failed-save recovery.
+- Native checks covered download cancellation, reload and restart recovery, video merging and export.
 
 ## 1.0.26 - 2026-10-09
 
