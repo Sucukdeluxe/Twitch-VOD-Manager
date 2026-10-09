@@ -1,6 +1,6 @@
 import { createDevelopmentLiveUpdates } from './main/development-live';
 import { WorkspaceSessionStore, normalizeWorkspaceClips, type WorkspaceMergeFile, type MergeFileReference, type ClipTransferProgress } from './main/domain/workspace-session';
-import { createArchiveInventoryReader, searchArchiveInventory, summarizeArchiveInventory, type ArchiveStats, type ArchiveSearchFilter, type ArchiveSearchResult } from './main/domain/archive-inventory';
+import { createArchiveInventoryReader, searchArchiveInventory, summarizeArchiveInventory, summarizeStorageInventory, type StorageStatsResult, type ArchiveStats, type ArchiveSearchFilter, type ArchiveSearchResult } from './main/domain/archive-inventory';
 import { randomUUID } from 'node:crypto';
 import { createDownloadHistoryStore, downloadOutputBytes, emptyLifetimeDownloadStats, type DownloadHistoryStore } from './main/domain/download-history-store';
 import { requestPublicClipInfo } from './main/twitch/clip-info';
@@ -5001,124 +5001,19 @@ function restartAutoCleanupTimer(): void {
     }, 60 * 1000);
 }
 
-// ==========================================
-// STORAGE STATS
-// ==========================================
-// Walks the download folder once on demand and reports per-streamer disk
-// usage so the user can see which streamers are eating their archive
-// budget. Only enumerates direct subfolders that match a known streamer
-// name (from config.streamers) plus a special "Clips" bucket. Refusing
-// to recurse the entire filesystem means a user with a huge unrelated
-// download_path doesn't pay for it here.
-interface StreamerStorageEntry {
-    name: string;
-    fileCount: number;
-    totalBytes: number;
-    liveBytes: number;
-    chatBytes: number;
-    folderPath: string;
-}
-interface StorageStatsResult {
-    downloadPath: string;
-    rootExists: boolean;
-    freeBytes: number | null;
-    totalFiles: number;
-    totalBytes: number;
-    streamers: StreamerStorageEntry[];
-    extras: StreamerStorageEntry[];
-    scannedAt: string;
-}
+const readStorageInventory = createArchiveInventoryReader(15000, true);
 
-function walkFolderForStats(folderPath: string): { files: number; bytes: number; liveBytes: number; chatBytes: number } {
-    const result = { files: 0, bytes: 0, liveBytes: 0, chatBytes: 0 };
-    let entries: fs.Dirent[];
-    try {
-        entries = fs.readdirSync(folderPath, { withFileTypes: true });
-    } catch {
-        return result;
-    }
-    for (const entry of entries) {
-        const full = path.join(folderPath, entry.name);
-        try {
-            if (entry.isDirectory()) {
-                const sub = walkFolderForStats(full);
-                result.files += sub.files;
-                result.bytes += sub.bytes;
-                if (entry.name === 'live') {
-                    result.liveBytes += sub.bytes;
-                }
-            } else if (entry.isFile()) {
-                const st = fs.statSync(full);
-                result.files += 1;
-                result.bytes += st.size;
-                if (/\.chat\.json(l)?$/i.test(entry.name)) {
-                    result.chatBytes += st.size;
-                }
-            }
-        } catch {
-            // Symlink / permissions blip — skip the entry, continue.
-        }
-    }
-    return result;
-}
-
-function computeStorageStats(): StorageStatsResult {
+async function computeStorageStats(): Promise<StorageStatsResult> {
     const root = config.download_path;
-    const result: StorageStatsResult = {
-        downloadPath: root,
-        rootExists: false,
-        freeBytes: null,
-        totalFiles: 0,
-        totalBytes: 0,
-        streamers: [],
-        extras: [],
-        scannedAt: new Date().toISOString()
-    };
-
-    if (!root || !fs.existsSync(root)) return result;
-    result.rootExists = true;
-    result.freeBytes = getFreeDiskBytes(root);
-
-    const knownStreamers = new Set<string>(
-        ((config.streamers as string[]) || []).map((s) => s.toLowerCase())
-    );
-
-    let topEntries: fs.Dirent[];
-    try {
-        topEntries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-        return result;
-    }
-
-    for (const entry of topEntries) {
-        if (!entry.isDirectory()) continue;
-        const full = path.join(root, entry.name);
-        const safeName = entry.name.replace(/[^a-zA-Z0-9_-]/g, '');
-        const isKnownStreamer = knownStreamers.has(safeName.toLowerCase());
-        // Treat Clips/ + anything that matches known streamers as a tracked
-        // bucket; everything else (random user folders) lives in `extras`.
-        const sub = walkFolderForStats(full);
-        const stats: StreamerStorageEntry = {
-            name: entry.name,
-            fileCount: sub.files,
-            totalBytes: sub.bytes,
-            liveBytes: sub.liveBytes,
-            chatBytes: sub.chatBytes,
-            folderPath: full
-        };
-        if (isKnownStreamer || entry.name === 'Clips') {
-            result.streamers.push(stats);
-        } else {
-            result.extras.push(stats);
-        }
-        result.totalFiles += sub.files;
-        result.totalBytes += sub.bytes;
-    }
-
-    // Largest first — that's what the user wants to see.
-    result.streamers.sort((a, b) => b.totalBytes - a.totalBytes);
-    result.extras.sort((a, b) => b.totalBytes - a.totalBytes);
-    return result;
+    const streamers = [...(config.streamers || [])];
+    const [inventory, freeBytes] = await Promise.all([
+        readStorageInventory(root, true),
+        root ? fs.promises.statfs(root).then(info => {
+            const bytes = info.bsize * info.bavail;
+            return Number.isFinite(bytes) && bytes >= 0 ? Math.floor(bytes) : null;
+        }).catch(() => null) : Promise.resolve(null),
+    ]);
+    return summarizeStorageInventory(inventory, streamers, freeBytes);
 }
 
 // ==========================================
@@ -8343,9 +8238,9 @@ ipcMain.handle('search-archive', async (event, filter: Partial<ArchiveSearchFilt
     return result;
 });
 
-ipcMain.handle('get-storage-stats', (event): StorageStatsResult => {
+ipcMain.handle('get-storage-stats', async (event): Promise<StorageStatsResult> => {
     if (!isTrustedRendererEvent(event)) throw new Error('File access denied');
-    const result = computeStorageStats();
+    const result = await computeStorageStats();
     for (const row of [...result.streamers, ...result.extras]) rememberRendererPath('selected-folder', row.folderPath);
     return result;
 });

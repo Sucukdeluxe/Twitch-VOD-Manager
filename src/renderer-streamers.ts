@@ -785,6 +785,29 @@ function clearActiveStreamerSelection(): void {
     if (typeof setTitle === 'function') setTitle(UI_TEXT.tabs.vods);
 }
 
+let streamerListSaveQueue: Promise<boolean> = Promise.resolve(true);
+let streamerAddInFlight = false;
+
+function persistStreamerList(change: (current: string[]) => string[]): Promise<boolean> {
+    const save = async (): Promise<boolean> => {
+        const previous = [...(config.streamers || [])];
+        const streamers = change(previous);
+        if (JSON.stringify(streamers) === JSON.stringify(config.streamers || [])) return true;
+        try {
+            const saved = await window.api.saveConfig({ streamers });
+            config = { ...config, streamers: saved.streamers };
+            renderStreamers();
+            return true;
+        } catch {
+            showAppToast(currentLanguage === 'de' ? 'Streamerliste konnte nicht gespeichert werden.' : 'Could not save the streamer list.', 'warn');
+            return false;
+        }
+    };
+    const pending = streamerListSaveQueue.then(save, save);
+    streamerListSaveQueue = pending;
+    return pending;
+}
+
 async function bulkRemoveStreamers(): Promise<void> {
     const all = (config.streamers ?? []) as string[];
     if (all.length === 0) return;
@@ -797,9 +820,7 @@ async function bulkRemoveStreamers(): Promise<void> {
     const messageTemplate = q ? UI_TEXT.static.streamerBulkRemoveFiltered : UI_TEXT.static.streamerBulkRemoveAll;
     if (!confirm(messageTemplate.replace('{count}', String(targets.length)))) return;
 
-    const remaining = all.filter((s) => !targets.includes(s));
-    config.streamers = remaining;
-    config = await window.api.saveConfig({ streamers: remaining });
+    if (!await persistStreamerList(current => current.filter(name => !targets.includes(name)))) return;
     if (currentStreamer && targets.includes(currentStreamer)) {
         clearActiveStreamerSelection();
     }
@@ -841,16 +862,15 @@ function initStreamerDragDrop(): void {
         const targetName = target.dataset.streamerName;
         if (!targetName || targetName === draggedStreamerName) return;
 
-        const streamers = [...(config.streamers ?? [])];
-        const fromIdx = streamers.indexOf(draggedStreamerName);
-        const toIdx = streamers.indexOf(targetName);
-        if (fromIdx < 0 || toIdx < 0) return;
-        const [moved] = streamers.splice(fromIdx, 1);
-        streamers.splice(toIdx, 0, moved);
-
-        config.streamers = streamers;
-        renderStreamers();
-        config = await window.api.saveConfig({ streamers });
+        const dragged = draggedStreamerName;
+        await persistStreamerList(current => {
+            const from = current.indexOf(dragged);
+            const to = current.indexOf(targetName);
+            if (from < 0 || to < 0) return current;
+            const [moved] = current.splice(from, 1);
+            current.splice(to, 0, moved);
+            return current;
+        });
     });
 
     list.addEventListener('dragend', () => {
@@ -865,6 +885,7 @@ function initStreamerDragDrop(): void {
 }
 
 async function addStreamer(): Promise<void> {
+    if (streamerAddInFlight) return;
     const input = byId<HTMLInputElement>('newStreamer');
     const name = input.value.trim().toLowerCase();
     if (!name) {
@@ -883,17 +904,23 @@ async function addStreamer(): Promise<void> {
         return;
     }
 
-    config.streamers = [...(config.streamers ?? []), name];
-    config = await window.api.saveConfig({ streamers: config.streamers });
-    input.value = '';
-    renderStreamers();
+    streamerAddInFlight = true;
+    const button = byId<HTMLButtonElement>('btnAddStreamer');
+    button.disabled = true;
+    try {
+        if (!await persistStreamerList(current => current.includes(name) ? current : [...current, name])) return;
+        if (input.value.trim().toLowerCase() === name) input.value = '';
+    } finally {
+        streamerAddInFlight = false;
+        button.disabled = false;
+    }
     void hydrateStreamerDisplayNames();
-    await selectStreamer(name);
+    try { await selectStreamer(name); }
+    catch { showAppToast(currentLanguage === 'de' ? 'VODs konnten nicht geladen werden.' : 'Could not load VODs.', 'warn'); }
 }
 
 async function removeStreamer(name: string): Promise<void> {
-    config.streamers = (config.streamers ?? []).filter((s: string) => s !== name);
-    config = await window.api.saveConfig({ streamers: config.streamers });
+    if (!await persistStreamerList(current => current.filter(streamer => streamer !== name))) return;
     if (currentStreamer === name) clearActiveStreamerSelection();
     renderStreamers();
 }

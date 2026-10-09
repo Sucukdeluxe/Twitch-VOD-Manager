@@ -27,7 +27,7 @@ export interface ArchiveSearchResult {
     scannedAt: string; rootExists: boolean; streamers: string[]; offset: number;
 }
 interface ArchiveInventoryFile { fullPath: string; relativePath: string; fileName: string; streamer: string; type: ArchiveFileType; size: number; mtimeMs: number; date: string }
-export interface ArchiveInventory { root: string; rootExists: boolean; scannedAt: string; files: ArchiveInventoryFile[] }
+export interface ArchiveInventory { root: string; rootExists: boolean; scannedAt: string; files: ArchiveInventoryFile[]; folders?: string[] }
 
 const MEDIA_EXTENSION = /\.(mp4|mkv|ts|m4v|webm|mov)$/i;
 const SIZE_BUCKETS = [
@@ -63,8 +63,8 @@ function classify(relativePath: string): { type: ArchiveFileType; streamer: stri
     return { type, streamer };
 }
 
-export async function scanArchiveInventory(root: string): Promise<ArchiveInventory> {
-    const inventory: ArchiveInventory = { root, rootExists: false, scannedAt: new Date().toISOString(), files: [] };
+export async function scanArchiveInventory(root: string, includeHidden = false): Promise<ArchiveInventory> {
+    const inventory: ArchiveInventory = { root, rootExists: false, scannedAt: new Date().toISOString(), files: [], folders: [] };
     if (!root) return inventory;
     try { if (!(await fs.stat(root)).isDirectory()) return inventory; } catch { return inventory; }
     inventory.rootExists = true;
@@ -75,9 +75,13 @@ export async function scanArchiveInventory(root: string): Promise<ArchiveInvento
         try { entries = await fs.readdir(folder, { withFileTypes: true }); } catch { continue; }
         for (let offset = 0; offset < entries.length; offset += 32) {
             await Promise.all(entries.slice(offset, offset + 32).map(async entry => {
-                if (entry.name.startsWith('.')) return;
+                if (!includeHidden && entry.name.startsWith('.')) return;
                 const fullPath = path.join(folder, entry.name);
-                if (entry.isDirectory()) { pending.push(fullPath); return; }
+                if (entry.isDirectory()) {
+                    if (folder === root) inventory.folders!.push(entry.name);
+                    pending.push(fullPath);
+                    return;
+                }
                 if (!entry.isFile()) return;
                 try {
                     const stat = await fs.stat(fullPath);
@@ -92,7 +96,7 @@ export async function scanArchiveInventory(root: string): Promise<ArchiveInvento
     return inventory;
 }
 
-export function createArchiveInventoryReader(maxAgeMs = 15000) {
+export function createArchiveInventoryReader(maxAgeMs = 15000, includeHidden = false) {
     const cache = new Map<string, { inventory: ArchiveInventory; expires: number }>();
     const active = new Map<string, { request: Promise<ArchiveInventory>; refresh: boolean }>();
     const resolveRoot = (root: string) => root ? path.resolve(root) : '';
@@ -103,7 +107,7 @@ export function createArchiveInventoryReader(maxAgeMs = 15000) {
         const existing = active.get(key);
         if (existing && (!refresh || existing.refresh)) return existing.request;
         cache.delete(key);
-        const request = scanArchiveInventory(key).then(inventory => {
+        const request = scanArchiveInventory(key, includeHidden).then(inventory => {
             if (active.get(key)?.request === request) {
                 if (cache.size >= 4) cache.delete(cache.keys().next().value!);
                 cache.set(key, { inventory, expires: Date.now() + maxAgeMs });
@@ -204,4 +208,61 @@ export function summarizeArchiveInventory(inventory: ArchiveInventory, lifetime:
         stats.dailyActivity.push(days.get(date) ?? { date, count: 0, bytes: 0 });
     }
     return stats;
+}
+
+
+export interface StorageFolderEntry {
+    name: string;
+    fileCount: number;
+    totalBytes: number;
+    liveBytes: number;
+    chatBytes: number;
+    folderPath: string;
+}
+
+export interface StorageStatsResult {
+    downloadPath: string;
+    rootExists: boolean;
+    freeBytes: number | null;
+    totalFiles: number;
+    totalBytes: number;
+    streamers: StorageFolderEntry[];
+    extras: StorageFolderEntry[];
+    scannedAt: string;
+}
+
+export function summarizeStorageInventory(inventory: ArchiveInventory, streamers: readonly string[], freeBytes: number | null): StorageStatsResult {
+    const result: StorageStatsResult = {
+        downloadPath: inventory.root, rootExists: inventory.rootExists, freeBytes,
+        totalFiles: 0, totalBytes: 0, streamers: [], extras: [], scannedAt: inventory.scannedAt,
+    };
+    const folders = new Map<string, StorageFolderEntry>();
+    const folderEntry = (name: string): StorageFolderEntry => {
+        let row = folders.get(name);
+        if (!row) {
+            row = { name: name || path.basename(inventory.root) || inventory.root, folderPath: path.join(inventory.root, name), fileCount: 0, totalBytes: 0, liveBytes: 0, chatBytes: 0 };
+            folders.set(name, row);
+        }
+        return row;
+    };
+    for (const name of inventory.folders || []) folderEntry(name);
+    for (const file of inventory.files) {
+        const pieces = file.relativePath.split(path.sep);
+        const row = folderEntry(pieces.length > 1 ? pieces[0] : '');
+        row.fileCount++;
+        row.totalBytes += file.size;
+        if (file.type === 'chat') row.chatBytes += file.size;
+        if (pieces.slice(1, -1).some(piece => piece.toLowerCase() === 'live')) row.liveBytes += file.size;
+        result.totalFiles++;
+        result.totalBytes += file.size;
+    }
+    const known = new Set(streamers.map(name => name.toLowerCase()));
+    for (const [name, row] of folders) {
+        const tracked = name && (known.has(name.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase()) || name.toLowerCase() === 'clips');
+        (tracked ? result.streamers : result.extras).push(row);
+    }
+    const sort = (a: StorageFolderEntry, b: StorageFolderEntry) => b.totalBytes - a.totalBytes || a.name.localeCompare(b.name);
+    result.streamers.sort(sort);
+    result.extras.sort(sort);
+    return result;
 }

@@ -1978,3 +1978,31 @@ body :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea):foc
 #mergeTab .file-unavailable .file-duration { color: var(--workspace-danger); }
 .clip-result-status { font-variant-numeric: tabular-nums; }
 @media (max-width: 700px) { #mergeTab .file-item { gap: 8px; } #mergeTab .file-drag { flex-basis: 22px; width: 22px; } }
+
+#settingsTab .settings-card:has(#storageList) {
+    grid-column: 1 / -1;
+}
+
+.storage-table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+}
+
+.storage-table-scroll .storage-stats-table {
+    min-width: 620px;
+    table-layout: fixed;
+}
+
+.storage-table-scroll .storage-stats-table :is(th, td) {
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.storage-table-scroll .storage-stats-table :is(th, td):first-child {
+    width: 30%;
+}
+
+.storage-table-scroll .storage-stats-table :is(th, td):last-child {
+    width: 104px;
+}

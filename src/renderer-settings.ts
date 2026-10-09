@@ -638,14 +638,14 @@ function renderStorageStats(stats: StorageStatsResult): void {
     }
 
     summary.textContent = UI_TEXT.static.storageSummary
-        .replace('{files}', String(stats.totalFiles))
+        .replace('{files}', formatUiNumber(stats.totalFiles))
         .replace('{size}', formatBytesForMetrics(stats.totalBytes))
         .replace('{free}', stats.freeBytes !== null ? formatBytesForMetrics(stats.freeBytes) : '-');
 
     list.replaceChildren();
     if (stats.streamers.length === 0 && stats.extras.length === 0) return;
 
-    const buildTable = (rows: StreamerStorageEntry[]): HTMLTableElement => {
+    const buildTable = (rows: StreamerStorageEntry[]): HTMLElement => {
         const table = document.createElement('table');
         table.className = 'storage-stats-table';
 
@@ -677,7 +677,7 @@ function renderStorageStats(stats: StorageStatsResult): void {
             const tr = document.createElement('tr');
             const cells: Array<string | HTMLElement> = [
                 row.name,
-                String(row.fileCount),
+                formatUiNumber(row.fileCount),
                 formatBytesForMetrics(row.totalBytes),
                 row.liveBytes > 0 ? formatBytesForMetrics(row.liveBytes) : '-',
                 row.chatBytes > 0 ? formatBytesForMetrics(row.chatBytes) : '-'
@@ -701,7 +701,13 @@ function renderStorageStats(stats: StorageStatsResult): void {
             tbody.appendChild(tr);
         }
         table.appendChild(tbody);
-        return table;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'storage-table-scroll';
+        wrapper.tabIndex = 0;
+        wrapper.setAttribute('role', 'region');
+        wrapper.setAttribute('aria-label', UI_TEXT.static.storageCardTitle);
+        wrapper.appendChild(table);
+        return wrapper;
     };
 
     if (stats.streamers.length > 0) {

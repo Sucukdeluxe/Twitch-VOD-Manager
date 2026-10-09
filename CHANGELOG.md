@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Scan storage asynchronously so large download folders no longer freeze the application.
+- Include files in the download root and nested chat files in storage totals.
+- Keep the storage table within its settings card, wrap long folder names, and format file counts for the selected language.
+- Save streamer additions, removals and ordering before applying them locally. Failed writes preserve the previous list and allow retrying; concurrent edits are serialized.
+
 ## 1.0.26 - 2026-10-09
 
 This update removes startup stalls, keeps large download queues responsive, and restores clip and merge workspaces after reopening the app. It also improves error recovery, archive browsing and the video editor.
