@@ -9,6 +9,68 @@ let lastArchiveSearchResult: ArchiveSearchResult | null = null;
 let lastArchiveFilterKey = '';
 let archiveStreamerOptionsKey = '';
 const archiveKnownStreamers = new Set<string>();
+const archiveSelection = new Map<string, ArchiveSearchHit>();
+let archiveActionInFlight = false;
+
+function archiveDateBoundary(id: string, end: boolean): number | null {
+    const value = (document.getElementById(id) as HTMLInputElement | null)?.value;
+    if (!value) return null;
+    const date = new Date(value + 'T00:00:00');
+    if (!Number.isFinite(date.getTime())) return null;
+    if (end) date.setHours(23, 59, 59, 999);
+    return date.getTime();
+}
+
+function refreshArchiveSelection(): void {
+    const count = document.getElementById('archiveSelectedCount');
+    if (count) count.textContent = formatUiNumber(archiveSelection.size);
+    const merge = document.getElementById('archiveMergeSelected') as HTMLButtonElement | null;
+    if (merge) merge.disabled = archiveActionInFlight || archiveSelection.size < 2;
+    const clear = document.getElementById('archiveClearSelection') as HTMLButtonElement | null;
+    if (clear) clear.disabled = archiveActionInFlight || !archiveSelection.size;
+    const all = document.getElementById('archiveSelectPage') as HTMLInputElement | null;
+    if (all) {
+        const hits = lastArchiveSearchResult?.hits || [];
+        const selected = hits.filter(hit => archiveSelection.has(hit.fullPath)).length;
+        all.checked = hits.length > 0 && selected === hits.length;
+        all.indeterminate = selected > 0 && selected < hits.length;
+        all.disabled = archiveActionInFlight || !hits.length;
+    }
+}
+
+function setArchivePageSelection(selected: boolean): void {
+    for (const hit of lastArchiveSearchResult?.hits || []) {
+        if (selected && archiveSelection.size < 500) archiveSelection.set(hit.fullPath, hit);
+        else if (!selected) archiveSelection.delete(hit.fullPath);
+    }
+    if (lastArchiveSearchResult) renderArchiveSearchResults(lastArchiveSearchResult, true);
+}
+
+function clearArchiveSelection(): void {
+    archiveSelection.clear();
+    if (lastArchiveSearchResult) renderArchiveSearchResults(lastArchiveSearchResult, true);
+}
+
+async function editArchiveVideos(paths: string[], target: 'cutter' | 'merge'): Promise<void> {
+    if (archiveActionInFlight || !paths.length || (target === 'cutter' && paths.length !== 1)) return;
+    archiveActionInFlight = true;
+    refreshArchiveSelection();
+    try {
+        const files = await window.api.prepareArchiveVideos(paths, target);
+        if (files.length !== paths.length) throw new Error('File access denied');
+        if (target === 'cutter') {
+            showTab('cutter');
+            await requestCutterVideoReplacement(files[0]);
+        } else {
+            await addArchiveToMerge(files);
+        }
+    } catch { showArchiveActionError(); }
+    finally { archiveActionInFlight = false; refreshArchiveSelection(); }
+}
+
+function mergeArchiveSelection(): void {
+    void editArchiveVideos([...archiveSelection.keys()], 'merge');
+}
 
 function populateArchiveStreamerSelect(): void {
     const select = document.getElementById('archiveSearchStreamer') as HTMLSelectElement | null;
@@ -30,8 +92,8 @@ function getArchiveSearchFilter() {
         query: (document.getElementById('archiveSearchQuery') as HTMLInputElement | null)?.value.trim() || '',
         type: ((document.getElementById('archiveSearchType') as HTMLSelectElement | null)?.value || 'all') as 'all' | 'live' | 'vod' | 'clip' | 'chat' | 'events',
         streamer: (document.getElementById('archiveSearchStreamer') as HTMLSelectElement | null)?.value || '',
-        sinceMs: null,
-        untilMs: null,
+        sinceMs: archiveDateBoundary('archiveSearchSince', false),
+        untilMs: archiveDateBoundary('archiveSearchUntil', true),
         sort: ((document.getElementById('archiveSearchSort') as HTMLSelectElement | null)?.value || 'date_desc') as 'date_desc' | 'date_asc' | 'size_desc' | 'size_asc' | 'name_asc',
         limit: 200
     };
@@ -99,6 +161,7 @@ async function performArchiveSearch(refresh = false): Promise<void> {
             try {
                 const refresh = archiveRefreshRequested;
                 archiveRefreshRequested = false;
+                if (filter.sinceMs !== null && filter.untilMs !== null && filter.sinceMs > filter.untilMs) throw new Error(currentLanguage === 'de' ? 'Zeitraum prüfen.' : 'Check the date range.');
                 const result = await window.api.searchArchive({ ...filter, refresh });
                 if (key !== JSON.stringify(getArchiveSearchFilter())) archiveSearchRequested = true;
                 if (archiveSearchRequested) continue;
@@ -129,6 +192,8 @@ async function performArchiveSearch(refresh = false): Promise<void> {
 
 function refreshArchiveSearchTexts(): void {
     populateArchiveStreamerSelect();
+    const texts = currentLanguage === 'de' ? { archiveSinceLabel: 'Von', archiveUntilLabel: 'Bis', archiveSelectPageLabel: 'Seite auswählen', archiveClearSelection: 'Auswahl aufheben', archiveMergeSelected: 'Zusammenfügen' } : { archiveSinceLabel: 'From', archiveUntilLabel: 'Until', archiveSelectPageLabel: 'Select page', archiveClearSelection: 'Clear selection', archiveMergeSelected: 'Merge' };
+    for (const [id, text] of Object.entries(texts)) setText(id, text);
     if (lastArchiveSearchResult) renderArchiveSearchResults(lastArchiveSearchResult, true);
     if (archiveSearchInFlight) setText('archiveSearchSummary', UI_TEXT.static.archiveSearching);
 }
@@ -147,6 +212,7 @@ function renderArchiveSearchResults(result: ArchiveSearchResult, preserveScroll 
     const scrollTop = preserveScroll ? results.scrollTop : 0;
     summary?.classList.remove('is-error');
     renderArchivePagination();
+    refreshArchiveSelection();
     if (!result.rootExists) {
         if (summary) summary.textContent = '';
         results.replaceChildren(archiveElement('div', 'insights-empty archive-empty', UI_TEXT.static.archiveNoRoot));
@@ -167,6 +233,17 @@ function renderArchiveSearchResults(result: ArchiveSearchResult, preserveScroll 
     const fragment = document.createDocumentFragment();
     for (const hit of result.hits) {
         const row = archiveElement('article', 'archive-result-row');
+        const selection = document.createElement('input');
+        selection.type = 'checkbox';
+        selection.className = 'archive-row-select';
+        selection.checked = archiveSelection.has(hit.fullPath);
+        selection.setAttribute('aria-label', (currentLanguage === 'de' ? 'Auswählen: ' : 'Select: ') + hit.fileName);
+        selection.addEventListener('change', () => {
+            if (selection.checked && archiveSelection.size < 500) archiveSelection.set(hit.fullPath, hit);
+            else { archiveSelection.delete(hit.fullPath); selection.checked = false; }
+            refreshArchiveSelection();
+        });
+        row.append(selection);
         const body = archiveElement('div', 'archive-result-body');
         const meta = archiveElement('div', 'archive-result-meta');
         const kind = hit.type === 'live' ? 'LIVE' : hit.type === 'clip' ? 'CLIP' : 'VOD';
@@ -185,6 +262,7 @@ function renderArchiveSearchResults(result: ArchiveSearchResult, preserveScroll 
             element.addEventListener('click', callback);
             actions.append(element);
         };
+        action(currentLanguage === 'de' ? 'Schneiden' : 'Edit', () => { void editArchiveVideos([hit.fullPath], 'cutter'); });
         action(UI_TEXT.static.archiveOpen, () => openFilePath(hit.fullPath));
         action(UI_TEXT.static.archiveShowInFolder, () => showFileInFolder(hit.fullPath));
         if (hit.chatPath) action(UI_TEXT.static.archiveViewChat, () => openEventsOrChat(hit.chatPath!, hit.fileName, 'chat'));
@@ -225,7 +303,7 @@ function initArchiveSearchInput(): void {
         query.addEventListener('keydown', event => { if (event.key === 'Enter') void performArchiveSearch(); });
         query.dataset.bound = '1';
     }
-    for (const id of ['archiveSearchType', 'archiveSearchStreamer', 'archiveSearchSort']) {
+    for (const id of ['archiveSearchType', 'archiveSearchStreamer', 'archiveSearchSort', 'archiveSearchSince', 'archiveSearchUntil']) {
         const select = document.getElementById(id) as HTMLSelectElement | null;
         if (select && !select.dataset.bound) {
             select.addEventListener('change', () => { void performArchiveSearch(); });
@@ -234,4 +312,4 @@ function initArchiveSearchInput(): void {
     }
 }
 
-Object.assign(window, { changeArchivePage, performArchiveSearch, onArchiveSearchInput, openFilePath, showFileInFolder, openEventsOrChat, initArchiveSearchInput });
+Object.assign(window, { setArchivePageSelection, clearArchiveSelection, mergeArchiveSelection, changeArchivePage, performArchiveSearch, onArchiveSearchInput, openFilePath, showFileInFolder, openEventsOrChat, initArchiveSearchInput });

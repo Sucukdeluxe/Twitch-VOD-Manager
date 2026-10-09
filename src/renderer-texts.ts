@@ -394,7 +394,12 @@ function applyLanguageToStaticUI(): void {
     document.getElementById('cutProgressGauge')?.setAttribute('aria-label', UI_TEXT.streamers.cutProgressAria);
     document.getElementById('mergeProgressGauge')?.setAttribute('aria-label', UI_TEXT.streamers.mergeProgressAria);
     document.getElementById('updateProgressGauge')?.setAttribute('aria-label', UI_TEXT.streamers.updateProgressAria);
+    setText('clipsDiscoverButton', currentLanguage === 'de' ? 'Clips suchen' : 'Find clips');
     setText('backupCardTitle', UI_TEXT.static.backupCardTitle);
+    setText('btnCreateBackup', UI_TEXT.static.backupCreate);
+    setText('btnRestoreBackup', UI_TEXT.static.backupRestore);
+    setText('backupScopeText', UI_TEXT.static.backupScope);
+    setText('backupSettingsOnly', UI_TEXT.static.backupSettingsOnly);
     setText('btnExportConfig', UI_TEXT.static.exportConfig);
     setText('btnImportConfig', UI_TEXT.static.importConfig);
     setText('btnResetDownloadedIds', UI_TEXT.static.resetDownloadedIds);
@@ -473,6 +478,7 @@ function applyLanguageToStaticUI(): void {
     if (typeof workspaceSync === 'function') {
         workspaceSync(activeTabId.replace(/Tab$/, ''));
     }
+    if (typeof refreshEditingWorkflowLanguage === 'function') refreshEditingWorkflowLanguage();
     if (typeof refreshCutterLocalizedUi === 'function') refreshCutterLocalizedUi();
     if (typeof renderCutterEditor === 'function') renderCutterEditor();
 }

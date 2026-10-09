@@ -563,47 +563,87 @@ async function resetManagedTools(): Promise<void> {
     }
 }
 
-async function runCleanupDryRun(): Promise<void> {
-    await runCleanupOnce(true);
-}
-
-async function runCleanupNow(): Promise<void> {
-    await runCleanupOnce(false);
-}
-
-async function runCleanupOnce(dryRun: boolean): Promise<void> {
-    const reportEl = byId('cleanupReport');
-    const dryBtn = byId<HTMLButtonElement>('btnCleanupDryRun');
-    const runBtn = byId<HTMLButtonElement>('btnCleanupRunNow');
-    dryBtn.disabled = true;
-    runBtn.disabled = true;
-    reportEl.textContent = UI_TEXT.static.storageScanning;
-
-    try {
-        const report = await window.api.runStorageCleanup({ dryRun });
-        if (report.candidates === 0) {
-            reportEl.textContent = UI_TEXT.static.cleanupReportEmpty.replace('{days}', String(report.cutoffDays));
-        } else if (dryRun) {
-            reportEl.textContent = UI_TEXT.static.cleanupReportPreview
-                .replace('{count}', String(report.candidates))
-                .replace('{size}', formatBytesForMetrics(report.bytesFreed));
-        } else {
-            const failedSuffix = report.failed > 0
-                ? UI_TEXT.static.cleanupReportFailedSuffix.replace('{failed}', String(report.failed))
-                : '';
-            reportEl.textContent = UI_TEXT.static.cleanupReportDone
-                .replace('{count}', String(report.processed))
-                .replace('{size}', formatBytesForMetrics(report.bytesFreed))
-                .replace('{failed}', failedSuffix);
-            // Refresh the storage list since files moved/disappeared.
-            void refreshStorageStats();
-        }
-    } catch (e) {
-        reportEl.textContent = String(e);
-    } finally {
-        dryBtn.disabled = false;
-        runBtn.disabled = false;
+let cleanupPreviewToken: string | null = null;
+let cleanupPreviewItems: CleanupReport['items'] = [];
+let cleanupPreviewPage = 0;
+let cleanupRequestBusy = false;
+let cleanupSettingsRevision = 0;
+function initializeCleanupPreview(): void {
+    const host = byId('cleanupReport');
+    const preview = document.createElement('div');
+    preview.id = 'cleanupPreview'; preview.className = 'cleanup-preview'; preview.hidden = true;
+    host.after(preview);
+    for (const id of ['autoCleanupDays', 'autoCleanupTarget', 'autoCleanupAction', 'autoCleanupEnabledToggle', 'downloadPath']) {
+        byId(id).addEventListener('input', () => {
+            cleanupSettingsRevision++; cleanupPreviewToken = null; cleanupPreviewItems = [];
+            preview.hidden = true; byId<HTMLButtonElement>('btnCleanupRunNow').disabled = true;
+        });
     }
+    byId<HTMLButtonElement>('btnCleanupRunNow').disabled = true;
+}
+function renderCleanupPreview(report: CleanupReport): void {
+    const host = byId('cleanupPreview'); host.replaceChildren();
+    host.hidden = !cleanupPreviewItems.length && !report.recoveryPaths.length;
+    if (report.recoveryPaths.length) {
+        const recovery = document.createElement('button'); recovery.type = 'button'; recovery.className = 'btn-secondary';
+        recovery.textContent = currentLanguage === 'de' ? 'Unterbrochene Bereinigung wiederherstellen' : 'Restore interrupted cleanup';
+        recovery.addEventListener('click', async () => {
+            recovery.disabled = true;
+            try { await window.api.recoverStorageCleanup(); await runCleanupOnce(true); }
+            catch { showAppToast(currentLanguage === 'de' ? 'Wiederherstellung fehlgeschlagen.' : 'Restore failed.', 'warn'); recovery.disabled = false; }
+        }); host.append(recovery);
+    }
+    const list = document.createElement('ul'); list.className = 'cleanup-preview-list';
+    for (const item of cleanupPreviewItems.slice(cleanupPreviewPage * 100, (cleanupPreviewPage + 1) * 100)) {
+        const row = document.createElement('li');
+        const name = document.createElement('strong'); name.textContent = item.videoPath.split(/[\\/]/).pop() || item.videoPath; name.title = item.videoPath;
+        const metadata = document.createElement('span'); metadata.textContent = [formatUiNumber(item.ageDays) + (currentLanguage === 'de' ? ' Tage' : ' days'), formatBytesForMetrics(item.bytes), item.sidecarPaths.length ? formatUiNumber(item.sidecarPaths.length) + (currentLanguage === 'de' ? ' Begleitdateien' : ' sidecars') : ''].filter(Boolean).join(' · ');
+        row.append(name, metadata); list.append(row);
+    }
+    host.append(list);
+    if (cleanupPreviewItems.length > 100) {
+        const navigation = document.createElement('div'); navigation.className = 'cleanup-preview-navigation';
+        for (const direction of [-1, 1]) {
+            const button = document.createElement('button'); button.type = 'button'; button.className = 'btn-secondary';
+            button.textContent = direction < 0 ? (currentLanguage === 'de' ? 'Zurück' : 'Previous') : (currentLanguage === 'de' ? 'Weiter' : 'Next');
+            button.disabled = direction < 0 ? cleanupPreviewPage === 0 : (cleanupPreviewPage + 1) * 100 >= cleanupPreviewItems.length;
+            button.addEventListener('click', () => { cleanupPreviewPage += direction; renderCleanupPreview(report); }); navigation.append(button);
+        }
+        const count = document.createElement('span'); count.textContent = formatUiNumber(cleanupPreviewPage + 1) + ' / ' + formatUiNumber(Math.ceil(cleanupPreviewItems.length / 100)); navigation.append(count); host.append(navigation);
+    }
+}
+async function runCleanupDryRun(): Promise<void> { await runCleanupOnce(true); }
+async function runCleanupNow(): Promise<void> { await runCleanupOnce(false); }
+async function runCleanupOnce(dryRun: boolean): Promise<void> {
+    if (cleanupRequestBusy || !dryRun && !cleanupPreviewToken) return;
+    const revision = cleanupSettingsRevision;
+    const token = cleanupPreviewToken;
+    cleanupPreviewToken = null; cleanupRequestBusy = true;
+    const reportEl = byId('cleanupReport');
+    const dryBtn = byId<HTMLButtonElement>('btnCleanupDryRun'), runBtn = byId<HTMLButtonElement>('btnCleanupRunNow');
+    dryBtn.disabled = runBtn.disabled = true; reportEl.textContent = UI_TEXT.static.storageScanning;
+    try {
+        const report = await window.api.runStorageCleanup({ dryRun, token: token || undefined });
+        if (revision !== cleanupSettingsRevision) return;
+        cleanupPreviewItems = report.items; cleanupPreviewPage = 0;
+        if (report.dryRun) {
+            cleanupPreviewToken = report.recoveryPaths.length ? null : report.token;
+            reportEl.textContent = formatUiNumber(report.candidates) + (currentLanguage === 'de' ? ' Videos · ' : ' videos · ') + formatBytesForMetrics(report.bytesAffected);
+        } else {
+            const action = report.action === 'delete' ? (currentLanguage === 'de' ? ' Videos im Papierkorb' : ' videos in Recycle Bin') : (currentLanguage === 'de' ? ' Videos archiviert' : ' videos archived');
+            reportEl.textContent = formatUiNumber(report.processed) + action + ' · ' + formatBytesForMetrics(report.bytesAffected);
+            if (report.skipped) reportEl.textContent += ' · ' + formatUiNumber(report.skipped) + (currentLanguage === 'de' ? ' geändert oder in Verwendung' : ' changed or in use');
+            if (report.failed) reportEl.textContent += ' · ' + formatUiNumber(report.failed) + (currentLanguage === 'de' ? ' fehlgeschlagen' : ' failed');
+            cleanupPreviewItems = []; void refreshStorageStats();
+        }
+        renderCleanupPreview(report);
+        if (report.failures.length) {
+            const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = currentLanguage === 'de' ? 'Details' : 'Details';
+            const text = document.createElement('pre'); text.textContent = report.failures.map(item => item.path + ': ' + item.error).join('\n'); details.append(summary, text); byId('cleanupPreview').append(details); byId('cleanupPreview').hidden = false;
+        }
+    } catch (error) {
+        reportEl.textContent = String(error).includes('preview-') ? (currentLanguage === 'de' ? 'Vorschau erneuern.' : 'Refresh preview.') : (currentLanguage === 'de' ? 'Bereinigung fehlgeschlagen.' : 'Cleanup failed.');
+    } finally { cleanupRequestBusy = false; dryBtn.disabled = false; runBtn.disabled = !cleanupPreviewToken || !cleanupPreviewItems.length; }
 }
 
 async function refreshStorageStats(): Promise<void> {
@@ -1483,3 +1523,14 @@ async function triggerManualAutoRecordScan(): Promise<void> {
 
 (window as unknown as { triggerManualAutoVodScan: typeof triggerManualAutoVodScan }).triggerManualAutoVodScan = triggerManualAutoVodScan;
 (window as unknown as { triggerManualAutoRecordScan: typeof triggerManualAutoRecordScan }).triggerManualAutoRecordScan = triggerManualAutoRecordScan;
+
+async function runApplicationBackup(restore: boolean): Promise<void> {
+    const buttons = ['btnCreateBackup', 'btnRestoreBackup'].map(id => byId<HTMLButtonElement>(id));
+    buttons.forEach(button => button.disabled = true);
+    try {
+        const result = await (restore ? window.api.restoreApplicationBackup() : window.api.exportApplicationBackup());
+        if (result.cancelled || (restore && result.success)) return;
+        showAppToast(result.success ? UI_TEXT.static.backupSaved : result.error === 'busy' ? UI_TEXT.static.backupBusy : UI_TEXT.static.backupFailed, result.success ? 'info' : 'warn');
+    } catch { showAppToast(UI_TEXT.static.backupFailed, 'warn'); }
+    finally { buttons.forEach(button => button.disabled = false); }
+}

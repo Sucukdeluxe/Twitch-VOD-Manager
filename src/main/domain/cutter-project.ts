@@ -10,6 +10,8 @@ export interface CutterProjectSource {
 }
 
 export interface CutterProject {
+    allAudioStreams?: boolean;
+    colorMode?: 'source' | 'sdr';
     source: CutterProjectSource;
     duration: number;
     fps: number;
@@ -54,7 +56,9 @@ function isProjectSource(value: unknown): value is CutterProjectSource {
 function isProject(value: unknown): value is CutterProject {
     if (!value || typeof value !== 'object') return false;
     const project = value as Record<string, unknown>;
-    return isProjectSource(project.source)
+    return (project.allAudioStreams === undefined || typeof project.allAudioStreams === 'boolean')
+        && (project.colorMode === undefined || project.colorMode === 'source' || project.colorMode === 'sdr')
+        && isProjectSource(project.source)
         && typeof project.duration === 'number'
         && Number.isFinite(project.duration)
         && project.duration > 0

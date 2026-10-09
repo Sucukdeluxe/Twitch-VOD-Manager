@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import type { EditorSegment } from './video-editor';
+import { cutterVideoFormat, readVideoSourceFormat, type VideoSourceFormat, type CutterColorMode, type CutterSoftwareCodec } from './media-format';
 
 export type CutterExportProfile = 'quality' | 'balanced' | 'fast' | 'archive';
 export type CutterHardwareEncoder = 'h264_nvenc' | 'h264_qsv' | 'h264_amf';
@@ -27,6 +28,10 @@ export interface CutterExportPlanOptions {
     encoder?: CutterExportEncoder;
     availableHardwareEncoders?: readonly CutterHardwareEncoder[];
     audioStreamIndex?: number;
+    audioStreamIndices?: readonly number[];
+    audioStreams?: readonly { index: number; language: string | null }[];
+    sourceFormat?: VideoSourceFormat;
+    colorMode?: CutterColorMode;
     rotation?: number;
 }
 
@@ -36,8 +41,12 @@ export interface CutterExportPlan {
     filterComplex: string;
     ffmpegArgs: string[];
     profile: CutterExportProfile;
-    selectedEncoder: 'libx264' | 'ffv1' | CutterHardwareEncoder;
+    selectedEncoder: CutterSoftwareCodec | CutterHardwareEncoder;
     hardwareFallback: boolean;
+    pixelFormat: string;
+    bitDepth: number;
+    hdr: boolean;
+    audioStreamIndices: number[];
 }
 
 const precision = 9;
@@ -105,26 +114,25 @@ function videoRotationFilter(rotation: 0 | 90 | 180 | 270): string | null {
     return null;
 }
 
-function createFilterComplex(segments: readonly EditorSegment[], hasAudio: boolean, audioStreamIndex: number, rotation: 0 | 90 | 180 | 270): string {
+function createFilterComplex(segments: readonly EditorSegment[], indices: readonly number[], rotation: 0 | 90 | 180 | 270, videoFormatFilters: readonly string[]): string {
     const filters: string[] = [];
     const concatInputs: string[] = [];
     const rotationFilter = videoRotationFilter(rotation);
-    const audioInput = audioStreamIndex === 0 ? '[0:a]' : `[0:a:${audioStreamIndex}]`;
-
     segments.forEach((segment, index) => {
         const start = formatSeconds(segment.start);
         const end = formatSeconds(segment.end);
-        const videoFilters = [`trim=start=${start}:end=${end}`, 'setpts=PTS-STARTPTS'];
+        const videoFilters = ["trim=start=" + start + ":end=" + end, 'setpts=PTS-STARTPTS', ...videoFormatFilters];
         if (rotationFilter) videoFilters.push(rotationFilter);
-        filters.push(`[0:v]${videoFilters.join(',')}[v${index}]`);
-        concatInputs.push(`[v${index}]`);
-        if (hasAudio) {
-            filters.push(`${audioInput}atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS[a${index}]`);
-            concatInputs.push(`[a${index}]`);
-        }
+        filters.push('[0:v]' + videoFilters.join(',') + '[v' + index + ']');
+        concatInputs.push('[v' + index + ']');
+        indices.forEach((stream, audioIndex) => {
+            const input = stream === 0 ? '[0:a]' : '[0:a:' + stream + ']';
+            const label = '[a' + index + (audioIndex ? '_' + audioIndex : '') + ']';
+            filters.push(input + 'atrim=start=' + start + ':end=' + end + ',asetpts=PTS-STARTPTS' + label);
+            concatInputs.push(label);
+        });
     });
-
-    filters.push(`${concatInputs.join('')}concat=n=${segments.length}:v=1:a=${hasAudio ? 1 : 0}[outv]${hasAudio ? '[outa]' : ''}`);
+    filters.push(concatInputs.join('') + 'concat=n=' + segments.length + ':v=1:a=' + indices.length + '[outv]' + indices.map((_, index) => '[outa' + (index || '') + ']').join(''));
     return filters.join(';');
 }
 
@@ -160,20 +168,28 @@ function hardwareVideoArgs(profile: Exclude<CutterExportProfile, 'archive'>, enc
 
 function audioArgs(profile: CutterExportProfile, hasAudio: boolean): string[] {
     if (!hasAudio) return ['-an'];
-    if (profile === 'archive') return ['-c:a', 'flac'];
+    if (profile === 'archive') return ['-c:a', 'pcm_f64le'];
     const bitrate = profile === 'quality' ? '192k' : profile === 'balanced' ? '160k' : '128k';
     return ['-c:a', 'aac', '-b:a', bitrate];
 }
 
-function createFfmpegArgs(inputFile: string, outputFile: string, filterComplex: string, hasAudio: boolean, profile: CutterExportProfile, selectedEncoder: CutterExportPlan['selectedEncoder'], rotation: 0 | 90 | 180 | 270): string[] {
+function createFfmpegArgs(inputFile: string, outputFile: string, filterComplex: string, indices: readonly number[], profile: CutterExportProfile, selectedEncoder: CutterExportPlan['selectedEncoder'], rotation: 0 | 90 | 180 | 270, format: ReturnType<typeof cutterVideoFormat>, audioStreams: CutterExportPlanOptions['audioStreams']): string[] {
     const args: string[] = [];
     if (rotation !== 0) args.push('-noautorotate');
     args.push('-i', inputFile, '-filter_complex', filterComplex, '-map', '[outv]');
-    if (hasAudio) args.push('-map', '[outa]');
+    indices.forEach((_, index) => args.push('-map', '[outa' + (index || '') + ']'));
     if (selectedEncoder === 'ffv1') args.push('-c:v', 'ffv1', '-level', '3', '-g', '1');
-    else if (selectedEncoder === 'libx264') args.push(...softwareVideoArgs(profile));
-    else args.push(...hardwareVideoArgs(profile as Exclude<CutterExportProfile, 'archive'>, selectedEncoder));
-    args.push('-pix_fmt', 'yuv420p', ...audioArgs(profile, hasAudio));
+    else if (selectedEncoder === 'libx264' || selectedEncoder === 'libx265' || selectedEncoder === 'libx264rgb') {
+        const software = softwareVideoArgs(profile);
+        software[1] = selectedEncoder;
+        args.push(...software);
+        if (selectedEncoder === 'libx265') args.push('-tag:v', 'hvc1', '-x265-params', 'pools=2:frame-threads=2');
+    } else args.push(...hardwareVideoArgs(profile as Exclude<CutterExportProfile, 'archive'>, selectedEncoder));
+    args.push('-pix_fmt', format.pixelFormat, ...format.args, ...audioArgs(profile, indices.length > 0));
+    indices.forEach((stream, index) => {
+        const language = audioStreams?.find(entry => entry.index === stream)?.language;
+        if (language) args.push('-metadata:s:a:' + index, 'language=' + language);
+    });
     if (profile !== 'archive') args.push('-movflags', '+faststart');
     args.push('-progress', 'pipe:1', '-y', outputFile);
     return args;
@@ -214,19 +230,27 @@ export function createCutterExportPlan(options: CutterExportPlanOptions): Cutter
     }
     const segments = normalizeSegments(options.segments);
     const audioStreamIndex = normalizeAudioStreamIndex(options.audioStreamIndex);
+    const indices = options.hasAudio ? (options.audioStreamIndices ? [...new Set(options.audioStreamIndices.map(normalizeAudioStreamIndex))] : [audioStreamIndex]) : [];
+    if (indices.length > 32) throw new Error('Too many audio streams');
+    const format = cutterVideoFormat(options.sourceFormat ?? readVideoSourceFormat({ pix_fmt: 'yuv420p' }), profile === 'archive', options.colorMode);
     const rotation = normalizeRotation(options.rotation);
     const requestedEncoder = options.encoder ?? 'software';
-    const encoder = resolveEncoder(profile, requestedEncoder, options.availableHardwareEncoders ?? []);
+    const canUseHardware = format.codec === 'libx264' && format.pixelFormat === 'yuv420p';
+    const encoder = canUseHardware ? resolveEncoder(profile, requestedEncoder, options.availableHardwareEncoders ?? []) : { selectedEncoder: format.codec, hardwareFallback: requestedEncoder !== 'software' };
     const remainingDuration = round(segments.reduce((total, segment) => total + segment.end - segment.start, 0));
-    const filterComplex = createFilterComplex(segments, options.hasAudio, audioStreamIndex, rotation);
+    const filterComplex = createFilterComplex(segments, indices, rotation, format.filters);
     return {
         segments,
         remainingDuration,
         filterComplex,
-        ffmpegArgs: createFfmpegArgs(inputFile, outputFile, filterComplex, options.hasAudio, profile, encoder.selectedEncoder, rotation),
+        ffmpegArgs: createFfmpegArgs(inputFile, outputFile, filterComplex, indices, profile, encoder.selectedEncoder, rotation, format, options.audioStreams),
         profile,
         selectedEncoder: encoder.selectedEncoder,
         hardwareFallback: encoder.hardwareFallback,
+        pixelFormat: format.pixelFormat,
+        bitDepth: format.bitDepth,
+        hdr: format.hdr,
+        audioStreamIndices: indices,
     };
 }
 

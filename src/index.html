@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="./styles-overlays.css">
     <link rel="stylesheet" href="./workspace.css">
     <link rel="stylesheet" href="./workspace-refinements.css">
+    <link rel="stylesheet" href="./editing-workflows.css">
     <link rel="stylesheet" href="./workspace-insights.css">
     <link rel="stylesheet" href="../dist/renderer-vod-player.css">
 </head>
@@ -377,8 +378,8 @@
                 </div>
                 <div class="toolbar-context" data-toolbar-for="cutter" hidden>
                     <button type="button" class="toolbar-primary" id="cutterNewVideoBtn" onclick="selectCutterVideo()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path></svg><span id="cutterNewVideoText">Neues Video</span></button>
-                    <button type="button" class="toolbar-icon-button" id="cutterOpenProjectBtn" onclick="openCutterProject()" disabled aria-label="Projekt öffnen" title="Projekt öffnen"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path><path d="m9 13 3 3 3-3"></path></svg></button>
-                    <button type="button" class="toolbar-icon-button" id="cutterSaveProjectBtn" onclick="saveCutterProject()" disabled aria-label="Projekt speichern" title="Projekt speichern"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5z"></path><path d="M8 4v6h8V4M8 20v-6h8v6"></path></svg></button>
+                    <button type="button" class="toolbar-icon-button" id="cutterOpenProjectBtn" onclick="openNamedEditingProject()" aria-label="Projekt öffnen" title="Projekt öffnen"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"></path><path d="m9 13 3 3 3-3"></path></svg></button>
+                    <button type="button" class="toolbar-icon-button" id="cutterSaveProjectBtn" onclick="saveNamedEditingProject()" disabled aria-label="Projekt speichern" title="Projekt speichern"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5z"></path><path d="M8 4v6h8V4M8 20v-6h8v6"></path></svg></button>
                     <button type="button" class="toolbar-icon-button" id="toolbarCutBtn" onclick="startCutting()" aria-label="Cut video" title="Cut video"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="6" cy="7" r="3"></circle><circle cx="6" cy="17" r="3"></circle><path d="m8.5 8.5 11 7M8.5 15.5 20 8"></path></svg></button>
                 </div>
                 <div class="toolbar-context" data-toolbar-for="merge" hidden>
@@ -449,7 +450,8 @@
                         <section class="clip-input" aria-labelledby="clipsHeading">
                             <header class="clips-card-header">
                                 <div><h2 id="clipsHeading">Twitch Clips</h2><p id="clipsBatchHint">Ein Link pro Zeile.</p></div>
-                                <div class="clips-header-actions"><span class="clips-count" id="clipsLinkCount">0</span><button type="button" class="btn-secondary" id="clipsInfoButton" aria-controls="clipsInfoPopover" aria-expanded="false" onclick="toggleClipInfo()"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/></svg><span id="clipsInfoTitle">Info</span></button></div>
+                                <div class="clips-header-actions">
+                                <button type="button" class="btn-secondary" id="clipsDiscoverButton" onclick="RendererClipDiscovery.open()">Clips suchen</button><span class="clips-count" id="clipsLinkCount">0</span><button type="button" class="btn-secondary" id="clipsInfoButton" aria-controls="clipsInfoPopover" aria-expanded="false" onclick="toggleClipInfo()"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/></svg><span id="clipsInfoTitle">Info</span></button></div>
                             </header>
                             <label for="clipUrl" id="clipsLinksLabel">Twitch-Links</label>
                             <textarea id="clipUrl" disabled rows="6" maxlength="820000" spellcheck="false" oninput="updateClipLinks()" aria-describedby="clipsBatchHint" placeholder="https://clips.twitch.tv/…"></textarea>
@@ -570,6 +572,10 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
                                             <label for="cutterExportEncoder" id="cutterExportEncoderLabel">Verarbeitung</label>
                                             <select id="cutterExportEncoder" onchange="setCutterExportEncoder(this.value)" disabled><option value="software" id="cutterEncoderSoftwareOption">Software (CPU)</option></select>
                                         </div>
+                                        <div class="cutter-export-field">
+                                            <label for="cutterColorMode" id="cutterColorLabel">Farbraum</label>
+                                            <select id="cutterColorMode" onchange="setCutterColorMode(this.value)" disabled><option value="source" id="cutterColorSource">Quelle beibehalten</option><option value="sdr" id="cutterColorSdr">SDR · 8 Bit</option></select>
+                                        </div>
                                         <div class="cutter-info" id="cutterInfo">
                                             <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoDurationLabel">Originaldauer</span><span class="cutter-info-value" id="infoDuration">--:--:--</span></div>
                                             <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoResolutionLabel">Auflösung</span><span class="cutter-info-value" id="infoResolution">----×----</span></div>
@@ -666,6 +672,12 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
                             <div><h2 id="statsTitle">Statistik</h2></div>
                             <button type="button" class="btn-secondary insights-refresh" id="btnStatsRefresh" onclick="refreshArchiveStats()">Aktualisieren</button>
                         </header>
+
+<div class="stats-filter-toolbar">
+<label for="statsRange"><span id="statsRangeLabel">Zeitraum</span><select id="statsRange" onchange="changeStatsRange()"><option value="all">Gesamt</option><option value="7">7 Tage</option><option value="30">30 Tage</option><option value="90">90 Tage</option><option value="custom">Benutzerdefiniert</option></select></label>
+<div id="statsCustomRange" class="stats-custom-range" hidden><label for="statsSince"><span id="statsSinceLabel">Von</span><input type="date" id="statsSince" onchange="changeStatsRange()"></label><label for="statsUntil"><span id="statsUntilLabel">Bis</span><input type="date" id="statsUntil" onchange="changeStatsRange()"></label></div>
+<button type="button" id="statsExportCsv" class="btn-secondary" onclick="exportStatsCsv()">Statistik als CSV</button>
+</div>
                         <div class="insights-status-row"><span id="statsLastScannedLabel"></span><span id="statsStatus" role="status" aria-live="polite"></span></div>
                         <section class="insights-section" aria-labelledby="statsSummaryTitle">
                             <div class="insights-section-heading"><h3 id="statsSummaryTitle">Downloads</h3><span id="statsTrackingSince"></span></div>
@@ -691,6 +703,13 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
                                 <div id="statsSizeBuckets"></div>
                             </section>
                         </div>
+
+<section class="insights-card download-history-card" aria-labelledby="statsHistoryTitle">
+<div class="insights-section-heading"><h3 id="statsHistoryTitle">Downloadverlauf</h3><span id="downloadHistoryStatus" role="status"></span></div>
+<div class="history-filters"><label for="historyQuery"><span id="historyQueryLabel">Titel oder Streamer</span><input type="search" id="historyQuery" oninput="onDownloadHistoryInput()" autocomplete="off"></label><label for="historyKind"><span id="historyKindLabel">Typ</span><select id="historyKind" onchange="onDownloadHistoryInput()"><option value="all">Alle</option><option value="vod">VOD</option><option value="clip">Clip</option><option value="live">Live</option></select></label></div>
+<div id="downloadHistory" class="download-history-list"></div>
+<nav class="archive-pagination"><button type="button" class="btn-secondary" id="historyPrevious" onclick="changeDownloadHistoryPage(-1)" disabled>Zurück</button><button type="button" class="btn-secondary" id="historyNext" onclick="changeDownloadHistoryPage(1)" disabled>Weiter</button></nav>
+</section>
                     </div>
                 </div>
 
@@ -702,9 +721,18 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
                             <div class="archive-filter-field"><label id="archiveTypeLabel" for="archiveSearchType">Aufnahmeart</label><select id="archiveSearchType" class="select-compact"><option value="all">Alle Aufnahmen</option><option value="live">Live-Aufnahmen</option><option value="vod">VODs</option><option value="clip">Clips</option></select></div>
                             <div class="archive-filter-field"><label id="archiveStreamerLabel" for="archiveSearchStreamer">Streamer</label><select id="archiveSearchStreamer" class="select-compact"><option value="">Alle Streamer</option></select></div>
                             <div class="archive-filter-field"><label id="archiveSortLabel" for="archiveSearchSort">Sortierung</label><select id="archiveSearchSort" class="select-compact"><option value="date_desc">Neueste zuerst</option><option value="date_asc">Älteste zuerst</option><option value="size_desc">Größte zuerst</option><option value="size_asc">Kleinste zuerst</option><option value="name_asc">Name (A–Z)</option></select></div>
+
+<div class="archive-date-filters"><div class="archive-filter-field"><label id="archiveSinceLabel" for="archiveSearchSince">Von</label><input type="date" id="archiveSearchSince"></div>
+<div class="archive-filter-field"><label id="archiveUntilLabel" for="archiveSearchUntil">Bis</label><input type="date" id="archiveSearchUntil"></div></div>
                             <button type="button" class="btn-secondary" id="btnArchiveSearch" onclick="performArchiveSearch(true)">Suchen</button>
                         </section>
                         <div class="archive-results-heading"><h3 id="archiveResultsTitle">Ergebnisse</h3><span id="archiveSearchSummary" role="status" aria-live="polite"></span></div>
+
+<div class="archive-selection-toolbar">
+<label><input type="checkbox" id="archiveSelectPage" onchange="setArchivePageSelection(this.checked)"><span id="archiveSelectPageLabel">Seite auswählen</span></label>
+<span id="archiveSelectedCount">0</span>
+<div class="archive-selection-actions"><button type="button" class="btn-secondary" id="archiveClearSelection" onclick="clearArchiveSelection()" disabled>Auswahl aufheben</button><button type="button" class="btn-secondary" id="archiveMergeSelected" onclick="mergeArchiveSelection()" disabled>Zusammenfügen</button></div>
+</div>
                         <div id="archiveSearchResults" class="archive-results-list" aria-labelledby="archiveResultsTitle"></div>
                         <nav class="archive-pagination" id="archivePagination" aria-label="Archiv-Seiten"><button type="button" class="btn-secondary" id="archivePrevious" onclick="changeArchivePage(-1)" disabled>Zurück</button><span id="archivePageLabel" role="status"></span><button type="button" class="btn-secondary" id="archiveNext" onclick="changeArchivePage(1)" disabled>Weiter</button></nav>
                     </div>
@@ -1033,12 +1061,16 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
 
                     <div class="settings-card" data-settings-pane="maintenance" data-settings-group="storage" hidden>
                         <h3 id="backupCardTitle">Sicherung &amp; Wartung</h3>
+                        <p id="backupScopeText" class="form-sublabel">Programmdaten ohne Videos und Anmeldungen.</p>
+                        <div class="form-row"><button type="button" class="btn-primary" id="btnCreateBackup" onclick="runApplicationBackup(false)">Sicherung erstellen</button><button type="button" class="btn-secondary" id="btnRestoreBackup" onclick="runApplicationBackup(true)">Wiederherstellen</button></div>
+                        <details class="settings-diagnostics"><summary id="backupSettingsOnly">Nur Einstellungen</summary>
 
                         <div class="form-row" style="margin-bottom: 10px; flex-wrap: wrap;">
                             <button type="button" class="btn-secondary" id="btnExportConfig" onclick="exportConfigToFile()">Konfiguration exportieren</button>
                             <button type="button" class="btn-secondary" id="btnImportConfig" onclick="importConfigFromFile()">Konfiguration importieren</button>
                             <button type="button" class="btn-secondary" id="btnResetDownloadedIds" onclick="resetDownloadedIds()">Download-Markierungen zurücksetzen</button>
                         </div>
+                        </details>
                     </div>
 
                     <div class="settings-card" data-settings-pane="metrics" data-settings-group="system" hidden>
@@ -1104,6 +1136,8 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
     <script defer src="../dist/renderer-command-palette.js"></script>
     <script defer src="../dist/renderer-cutter.js"></script>
     <script defer src="../dist/renderer-vod-player.js"></script>
+    <script defer src="../dist/renderer-editing-workflows.js"></script>
+    <script defer src="../dist/renderer-clip-discovery.js"></script>
     <script defer src="../dist/renderer.js"></script>
 </body>
 </html>

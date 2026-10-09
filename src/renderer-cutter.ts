@@ -80,6 +80,8 @@ let cutterDiscardResolver: ((discard: boolean) => void) | null = null;
 let cutterExportProfile: 'quality' | 'balanced' | 'fast' | 'archive' = 'balanced';
 let cutterExportEncoder: 'software' | 'h264_nvenc' | 'h264_qsv' | 'h264_amf' = 'software';
 let cutterAudioStreamIndex = 0;
+let cutterAllAudioStreams = true;
+let cutterColorMode: 'source' | 'sdr' = 'source';
 let cutterPendingProject: CutterProject | null = null;
 let cutterAutosaveTimer: number | null = null;
 let cutterExportOptions: CutterExportOptions | null | undefined;
@@ -168,6 +170,8 @@ function getCutterProjectPayload(): Omit<CutterProject, 'source' | 'duration' | 
         profile: cutterExportProfile,
         encoder: cutterExportEncoder,
         audioStreamIndex: cutterAudioStreamIndex,
+        allAudioStreams: cutterAllAudioStreams,
+        colorMode: cutterColorMode,
     };
 }
 
@@ -213,6 +217,12 @@ function updateCutterAudioStreams(): void {
         cutterAudioStreamIndex = 0;
         return;
     }
+    if (streams.length > 1) {
+        const option = document.createElement('option');
+        option.value = 'all';
+        option.textContent = UI_TEXT.cutter.allAudioStreams;
+        select.append(option);
+    }
     streams.forEach((stream) => {
         const option = document.createElement('option');
         option.value = String(stream.index);
@@ -225,7 +235,7 @@ function updateCutterAudioStreams(): void {
         select.append(option);
     });
     if (!streams.some((stream) => stream.index === cutterAudioStreamIndex)) cutterAudioStreamIndex = streams[0].index;
-    select.value = String(cutterAudioStreamIndex);
+    select.value = cutterAllAudioStreams && streams.length > 1 ? 'all' : String(cutterAudioStreamIndex);
     select.disabled = false;
 }
 
@@ -251,7 +261,7 @@ function updateCutterExportControls(options: CutterExportOptions | null | undefi
     software.value = 'software';
     software.textContent = UI_TEXT.cutter.encoderSoftware;
     encoder.append(software);
-    if (cutterExportProfile !== 'archive') {
+    if (!cutterRequiresSoftware()) {
         const hardwareEncoders = options?.hardwareEncoders
             ?? (options === undefined && cutterExportEncoder !== 'software' ? [cutterExportEncoder] : []);
         hardwareEncoders.forEach((value) => {
@@ -265,9 +275,9 @@ function updateCutterExportControls(options: CutterExportOptions | null | undefi
             encoder.append(option);
         });
     }
-    if (cutterExportProfile === 'archive' || (options !== undefined && !Array.from(encoder.options).some((option) => option.value === cutterExportEncoder))) cutterExportEncoder = 'software';
+    if (cutterRequiresSoftware() || (options !== undefined && !Array.from(encoder.options).some((option) => option.value === cutterExportEncoder))) cutterExportEncoder = 'software';
     encoder.value = cutterExportEncoder;
-    encoder.disabled = !cutterControlsEnabled || !options || cutterExportProfile === 'archive';
+    encoder.disabled = !cutterControlsEnabled || !options || cutterRequiresSoftware();
     updateCutterExportPresentation();
 }
 
@@ -304,6 +314,8 @@ function applyCutterProject(project: CutterProject): boolean {
     cutterExportProfile = project.profile;
     cutterExportEncoder = project.encoder;
     cutterAudioStreamIndex = project.audioStreamIndex;
+    cutterAllAudioStreams = project.allAudioStreams === true;
+    cutterColorMode = project.colorMode ?? 'source';
     updateCutterAudioStreams();
     updateCutterExportControls(cutterExportOptions);
     cutterHistoryPast = [];
@@ -365,9 +377,28 @@ function setCutterExportEncoder(value: string): void {
     scheduleCutterAutosave();
 }
 
+function setCutterColorMode(value: string): void {
+    if (value !== 'source' && value !== 'sdr') return;
+    cutterColorMode = value;
+    updateCutterExportControls(cutterExportOptions);
+    scheduleCutterAutosave();
+}
+
+function cutterRequiresSoftware(): boolean {
+    const format = cutterVideoInfo?.sourceFormat;
+    return cutterExportProfile === 'archive' || (cutterColorMode === 'source' && Boolean(format && (format.hdr || format.pixelFormat !== 'yuv420p')));
+}
+
 function setCutterAudioStream(value: string): void {
+    if (value === 'all') {
+        cutterAllAudioStreams = true;
+        updateCutterExportPresentation();
+        scheduleCutterAutosave();
+        return;
+    }
     const index = Number(value);
     if (!Number.isInteger(index) || index < 0 || !(cutterVideoInfo?.audioStreams ?? []).some((stream) => stream.index === index)) return;
+    cutterAllAudioStreams = false;
     cutterAudioStreamIndex = index;
     updateCutterExportPresentation();
     scheduleCutterAutosave();
@@ -934,11 +965,11 @@ function renderCutterEditor(): void {
 
 function setCutterControlsEnabled(enabled: boolean): void {
     cutterControlsEnabled = enabled;
-    for (const id of ['cutterZoom', 'cutterZoomInBtn', 'cutterZoomOutBtn', 'cutterNewCutBtn', 'cutterSaveProjectBtn', 'cutterOpenProjectBtn', 'cutterExportProfile', 'cutterFullRange', 'cutterMarkStart', 'cutterMarkEnd', 'startTime', 'endTime']) {
+    for (const id of ['cutterZoom', 'cutterZoomInBtn', 'cutterZoomOutBtn', 'cutterNewCutBtn', 'cutterSaveProjectBtn', 'cutterExportProfile', 'cutterColorMode', 'cutterFullRange', 'cutterMarkStart', 'cutterMarkEnd', 'startTime', 'endTime']) {
         const element = document.getElementById(id) as HTMLButtonElement | HTMLInputElement | HTMLSelectElement | null;
         if (element) element.disabled = !enabled;
     }
-    byId<HTMLSelectElement>('cutterExportEncoder').disabled = !enabled || !cutterExportOptions || cutterExportProfile === 'archive';
+    byId<HTMLSelectElement>('cutterExportEncoder').disabled = !enabled || !cutterExportOptions || cutterRequiresSoftware();
     byId<HTMLSelectElement>('cutterAudioStream').disabled = !enabled || (cutterVideoInfo?.audioStreams.length ?? 0) === 0;
     updateCutterEditActions();
     syncCutterPlayer();
@@ -1152,6 +1183,8 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
     cutterExportEncoder = 'software';
     cutterExportOptions = undefined;
     cutterAudioStreamIndex = media.info.audioStreams[0]?.index ?? 0;
+    cutterAllAudioStreams = true;
+    cutterColorMode = 'source';
     cutterRecoveryDecisionPending = true;
     renderCutterProjectRecovery(null);
     updateCutterAudioStreams();
@@ -1643,6 +1676,8 @@ async function startCutting(): Promise<void> {
             profile: cutterExportProfile,
             encoder: cutterExportEncoder,
             audioStreamIndex: cutterAudioStreamIndex,
+        allAudioStreams: cutterAllAudioStreams,
+        colorMode: cutterColorMode,
         });
         if (result.success) {
             showAppToast(UI_TEXT.cutter.exportSuccess, 'info');
@@ -1901,7 +1936,7 @@ function updateCutterEditActions(): void {
     byId<HTMLButtonElement>('cutterNewCutBtn').disabled = disabled || draft || (cutterEditorState?.cuts.length || 0) >= cutterMaximumCuts || getCutterPlayableDuration() < 2 / (cutterEditorState?.fps || 30) - cutterFrameTolerance;
     byId<HTMLButtonElement>('btnCut').disabled = disabled || draft || isCutting;
     byId<HTMLButtonElement>('cutterSaveProjectBtn').disabled = disabled || draft;
-    byId<HTMLButtonElement>('cutterOpenProjectBtn').disabled = disabled || draft;
+    byId<HTMLButtonElement>('cutterOpenProjectBtn').disabled = isCutting || draft;
     byId<HTMLButtonElement>('cutterFullRange').disabled = disabled || draft;
     for (const id of ['startTime', 'endTime', 'cutterMarkStart', 'cutterMarkEnd']) (byId(id) as HTMLInputElement).disabled = disabled || draft;
     byId('cutterTrimMode').setAttribute('aria-label', UI_TEXT.cutter.excerpt);
@@ -1996,14 +2031,21 @@ function getCutterAudioLanguage(language: string | null | undefined): string {
 function updateCutterExportPresentation(): void {
     const t = UI_TEXT.cutter;
     const archive = cutterExportProfile === 'archive';
+    const format = cutterVideoInfo?.sourceFormat;
+    const hdr = cutterColorMode === 'source' && format?.hdr;
+    const bitDepth = cutterColorMode === 'source' ? format?.bitDepth ?? 8 : 8;
+    const colorSelect = document.getElementById('cutterColorMode') as HTMLSelectElement | null;
+    if (colorSelect) colorSelect.value = cutterColorMode;
+    const multiple = cutterAllAudioStreams && (cutterVideoInfo?.audioStreams.length ?? 0) > 1;
     const stream = cutterVideoInfo?.audioStreams.find(entry => entry.index === cutterAudioStreamIndex);
     const channelText = !stream || stream.channels <= 0 ? '' : stream.channels === 1 ? t.mono : stream.channels === 2 ? t.stereo : formatUiNumber(stream.channels) + ' ' + t.channelPlural;
     const texts: Record<string, string> = {
         cutterProfileQualityLabel: t.profileQuality, cutterProfileBalancedLabel: t.profileBalanced,
         cutterProfileFastLabel: t.profileFast, cutterProfileArchiveLabel: t.profileArchive,
         cutterFormatBadge: archive ? 'MKV' : 'MP4',
-        cutterExportCodecs: [archive ? 'FFV1' : 'H.264', stream ? archive ? 'FLAC' : 'AAC' : t.noAudio].join(' · '),
-        cutterAudioHelp: stream ? [stream.codec.toUpperCase(), channelText].filter(Boolean).join(' · ') : '',
+        cutterExportCodecs: [archive ? 'FFV1' : hdr || bitDepth > 10 ? 'H.265' : 'H.264', bitDepth + '-Bit', hdr ? 'HDR' : '', stream ? archive ? 'PCM 64-Bit' : 'AAC' : t.noAudio].filter(Boolean).join(' · '),
+        cutterColorLabel: t.colorMode, cutterColorSource: t.colorSource, cutterColorSdr: t.colorSdr,
+        cutterAudioHelp: multiple ? t.audioStreamCount.replace('{count}', formatUiNumber(cutterVideoInfo!.audioStreams.length)) : stream ? [stream.codec.toUpperCase(), channelText].filter(Boolean).join(' · ') : '',
         cutterExportState: t.exportDraft,
     };
     for (const [id, text] of Object.entries(texts)) {

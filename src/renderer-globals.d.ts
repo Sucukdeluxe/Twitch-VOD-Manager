@@ -165,6 +165,7 @@ interface RuntimeMetricsSnapshot {
 }
 
 interface VideoInfo {
+    sourceFormat?: import('./main/domain/media-format').VideoSourceFormat;
     duration: number;
     width: number;
     height: number;
@@ -229,6 +230,8 @@ interface VideoEditorAssetProfile {
 }
 
 interface VideoEditExportRequest {
+    allAudioStreams?: boolean;
+    colorMode?: 'source' | 'sdr';
     inputCapability: string;
     outputName?: string;
     trimStart: number;
@@ -240,6 +243,8 @@ interface VideoEditExportRequest {
 }
 
 interface CutterProject {
+    allAudioStreams?: boolean;
+    colorMode?: 'source' | 'sdr';
     source: { path: string; size: number; mtimeMs: number };
     duration: number;
     fps: number;
@@ -327,19 +332,7 @@ interface StreamerStorageEntry {
     chatBytes: number;
     folderPath: string;
 }
-interface CleanupReport {
-    enabled: boolean;
-    dryRun: boolean;
-    cutoffDays: number;
-    target: 'live_only' | 'all';
-    action: 'delete' | 'archive';
-    scannedAt: string;
-    candidates: number;
-    processed: number;
-    failed: number;
-    bytesFreed: number;
-    failures: Array<{ path: string; error: string }>;
-}
+type CleanupReport = import('./main/domain/storage-cleanup').StorageCleanupPreview | import('./main/domain/storage-cleanup').StorageCleanupResult;
 interface StorageStatsResult {
     downloadPath: string;
     rootExists: boolean;
@@ -453,6 +446,9 @@ interface ArchiveStats {
 }
 
 interface ApiBridge {
+    discoverClips(request: import('./main/domain/clip-discovery').ClipDiscoveryRequest): Promise<import('./main/domain/clip-discovery').ClipDiscoveryResult>;
+    exportApplicationBackup(): Promise<{ success: boolean; cancelled?: boolean; error?: string }>;
+    restoreApplicationBackup(): Promise<{ success: boolean; cancelled?: boolean; error?: string }>;
     getConfig(): Promise<AppConfig>;
     getDownloadPolicyStatus(): Promise<DownloadPolicyStatus>;
     saveConfig(config: Partial<AppConfig>, fileCapability?: string): Promise<AppConfig>;
@@ -497,7 +493,11 @@ interface ApiBridge {
     openDebugLogFile(): Promise<boolean>;
     checkFolderWritable(capability: string): Promise<boolean>;
     getStorageStats(): Promise<StorageStatsResult>;
-    getArchiveStats(): Promise<ArchiveStats>;
+    getArchiveStats(range?: import('./main/domain/download-history-store').DownloadHistoryRange): Promise<ArchiveStats>;
+    prepareArchiveVideos(paths: string[], target: 'cutter' | 'merge'): Promise<MergeFileReference[]>;
+    searchDownloadHistory(filter?: import('./main/domain/download-history-store').DownloadHistoryFilter): Promise<import('./main/domain/download-history-store').DownloadHistoryResult>;
+    hasDownloadedClip(clipId: string): Promise<boolean>;
+    exportStatistics(range?: import('./main/domain/download-history-store').DownloadHistoryRange): Promise<boolean>;
     getStreamerProfile(login: string, forceRefresh?: boolean): Promise<StreamerProfile | null>;
     getStreamerDisplayNames(logins: string[]): Promise<Record<string, string>>;
     getVodStoryboard(vodId: string): Promise<VodStoryboard | null>;
@@ -517,7 +517,8 @@ interface ApiBridge {
         offset?: number;
         refresh?: boolean;
     }): Promise<ArchiveSearchResult>;
-    runStorageCleanup(options?: { dryRun?: boolean }): Promise<CleanupReport>;
+    recoverStorageCleanup(): Promise<boolean>;
+    runStorageCleanup(options?: { dryRun?: boolean; token?: string }): Promise<CleanupReport>;
     readChatFile(filePath: string, signal?: AbortSignal): Promise<{ success: boolean; error?: string; cancelled?: boolean; format?: 'replay' | 'live'; messages?: Array<Record<string, unknown>>; truncated?: boolean; total?: number }>;
     getAutomationStatus(): Promise<{
         autoRecord: { watching: number; lastRunAt: number; nextRunAt: number; lastTriggeredCount: number; inFlight: boolean };

@@ -37,6 +37,7 @@ export interface ClipTransferProgress {
     error?: string;
 }
 export interface WorkspaceSnapshot {
+    automationPaused?: boolean;
     clips: WorkspaceClip[];
     mergeFiles: MergeFileReference[];
     activeClip?: ClipTransferProgress;

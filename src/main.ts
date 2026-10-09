@@ -1,3 +1,8 @@
+import { createStorageCleanupService, type StorageCleanupPreview, type StorageCleanupResult } from './main/domain/storage-cleanup';
+import { discoverClips, type ClipDiscoveryRequest } from './main/domain/clip-discovery';
+import { registerEditingWorkflows } from './main/editing-workflows';
+import { createApplicationBackup, inspectApplicationBackup, queueApplicationRestore, applyPendingApplicationRestore } from './main/domain/application-backup';
+import { cutterVideoFormat, readVideoSourceFormat, type VideoSourceFormat, type CutterColorMode } from './main/domain/media-format';
 import { createDevelopmentLiveUpdates } from './main/development-live';
 import { WorkspaceSessionStore, normalizeWorkspaceClips, type WorkspaceMergeFile, type MergeFileReference, type ClipTransferProgress } from './main/domain/workspace-session';
 import { createArchiveInventoryReader, searchArchiveInventory, summarizeArchiveInventory, summarizeStorageInventory, type StorageStatsResult, type ArchiveStats, type ArchiveSearchFilter, type ArchiveSearchResult } from './main/domain/archive-inventory';
@@ -150,6 +155,10 @@ import {
 // CONFIG & CONSTANTS
 // ==========================================
 const APP_VERSION = app.getVersion();
+let applicationBackupBusy = false;
+let applicationAutomationPaused = false;
+let applicationWorkflowBusy: () => boolean = () => false;
+let applicationWorkflowFlush: () => Promise<void> = async () => undefined;
 const IS_HOT_DEVELOPMENT = process.env.TWITCH_VOD_MANAGER_DEV === '1';
 const WINDOWS_APP_IDENTITY = getWindowsAppIdentity(IS_HOT_DEVELOPMENT);
 app.setName(WINDOWS_APP_IDENTITY.name);
@@ -376,6 +385,7 @@ interface PreflightResult {
 }
 
 interface VideoInfo {
+    sourceFormat: VideoSourceFormat;
     duration: number;
     width: number;
     height: number;
@@ -421,6 +431,8 @@ interface VideoEditorAssetProfile {
 }
 
 interface VideoEditExportRequest {
+    allAudioStreams?: boolean;
+    colorMode?: CutterColorMode;
     inputFile: string;
     outputFile: string;
     trimStart: number;
@@ -432,6 +444,8 @@ interface VideoEditExportRequest {
 }
 
 interface RendererVideoEditExportRequest {
+    allAudioStreams?: boolean;
+    colorMode?: CutterColorMode;
     inputCapability: string;
     outputName?: string;
     trimStart: number;
@@ -2815,6 +2829,7 @@ async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProces
                     return;
                 }
 
+                const sourceFormat = readVideoSourceFormat(videoStream);
                 const videoCodec = String(videoStream.codec_name || '').toLowerCase();
                 const audioCodec = audioStream?.codec ?? null;
                 const variableFrameRate = averageFps > 0 && realFps > 0 && Math.abs(averageFps - realFps) / Math.max(averageFps, realFps) > 0.005;
@@ -2829,10 +2844,11 @@ async function getVideoInfo(filePath: string, trackedProcesses?: Set<ChildProces
                     hasAudio: Boolean(audioStream),
                     videoCodec,
                     audioCodec,
-                    previewCompatible: isVideoEditorPreviewCompatible(filePath, videoCodec, audioCodec),
+                    previewCompatible: !sourceFormat.hdr && sourceFormat.bitDepth === 8 && sourceFormat.pixelFormat === 'yuv420p' && isVideoEditorPreviewCompatible(filePath, videoCodec, audioCodec),
                     variableFrameRate,
                     rotation: normalizeCutterRotation(rotationData ?? videoStream.tags?.rotate),
                     audioStreams,
+                    sourceFormat,
                 });
             } catch {
                 finish(null);
@@ -2992,11 +3008,15 @@ function removeCutterPreviewDirectory(directory: string | null): void {
 function createVideoEditorPreview(filePath: string, info: VideoInfo, requestGeneration: number): Promise<{ sourceUrl: string; directory: string } | null> {
     const directory = fs.mkdtempSync(path.join(app.getPath('temp'), `tvm-editor-preview-${process.pid}-`));
     const previewFile = path.join(directory, 'preview.mp4');
-    const copyVideo = ['h264', 'av1', 'vp9'].includes(info.videoCodec);
+    const copyVideo = !info.sourceFormat.hdr && info.sourceFormat.bitDepth === 8 && ['h264', 'av1', 'vp9'].includes(info.videoCodec);
     const copyAudio = !info.audioCodec || ['aac', 'mp3'].includes(info.audioCodec);
     const args = ['-fflags', '+genpts', '-i', filePath, '-map', '0:v:0', '-map', '0:a:0?'];
     if (copyVideo) args.push('-c:v', 'copy');
-    else args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p');
+    else {
+        const format = cutterVideoFormat(info.sourceFormat, false, 'sdr');
+        if (format.filters.length) args.push('-vf', format.filters.join(','));
+        args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', ...format.args);
+    }
     if (info.hasAudio) {
         if (copyAudio) args.push('-c:a', 'copy');
         else args.push('-c:a', 'aac', '-b:a', '160k');
@@ -3103,7 +3123,7 @@ async function prepareVideoEditorAssets(filePath: string, jobId: number, profile
             '-threads', '2',
             '-i', filePath,
             '-filter_threads', '1',
-            '-vf', `fps=${thumbnailCount / info.duration},scale=${thumbnailTileWidth}:${thumbnailTileHeight}:force_original_aspect_ratio=increase:flags=lanczos,crop=${thumbnailTileWidth}:${thumbnailTileHeight}`,
+            '-vf', `fps=${thumbnailCount / info.duration},${info.sourceFormat.hdr ? cutterVideoFormat(info.sourceFormat, false, 'sdr').filters.join(',') + ',' : ''}scale=${thumbnailTileWidth}:${thumbnailTileHeight}:force_original_aspect_ratio=increase:flags=lanczos,crop=${thumbnailTileWidth}:${thumbnailTileHeight}`,
             '-frames:v', String(thumbnailCount),
             '-q:v', '2',
             '-start_number', '1',
@@ -3159,6 +3179,7 @@ function createCutterProject(filePath: string, info: VideoInfo, value: unknown):
     const profile = project.profile;
     const encoder = project.encoder;
     const audioStreamIndex = project.audioStreamIndex;
+    if ((project.allAudioStreams !== undefined && typeof project.allAudioStreams !== 'boolean') || (project.colorMode !== undefined && project.colorMode !== 'source' && project.colorMode !== 'sdr')) return null;
     const trimStart = project.trimStart;
     const trimEnd = project.trimEnd;
     const cuts = project.cuts;
@@ -3197,6 +3218,8 @@ function createCutterProject(filePath: string, info: VideoInfo, value: unknown):
         profile,
         encoder,
         audioStreamIndex,
+        allAudioStreams: project.allAudioStreams === true,
+        colorMode: project.colorMode === 'sdr' ? 'sdr' : 'source',
     };
 }
 
@@ -3272,6 +3295,7 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
     if (!info || cutterExportCancelled) return false;
     if (!Number.isInteger(request.audioStreamIndex) || request.audioStreamIndex < 0) return false;
     if ((info.hasAudio && !info.audioStreams.some((stream) => stream.index === request.audioStreamIndex)) || (!info.hasAudio && request.audioStreamIndex !== 0)) return false;
+    const audioStreamIndices = info.hasAudio ? request.allAudioStreams ? info.audioStreams.map(stream => stream.index) : [request.audioStreamIndex] : [];
     let state = setTrimRange(createVideoEditorState(info.duration, info.fps), request.trimStart, request.trimEnd);
     if (Math.abs(state.trimStart - request.trimStart) > 1 / info.fps || Math.abs(state.trimEnd - request.trimEnd) > 1 / info.fps) return false;
     try {
@@ -3299,6 +3323,10 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
         encoder: request.encoder,
         availableHardwareEncoders,
         audioStreamIndex: request.audioStreamIndex,
+        audioStreamIndices,
+        audioStreams: info.audioStreams,
+        sourceFormat: info.sourceFormat,
+        colorMode: request.colorMode,
         rotation: info.rotation,
     });
     if (plan.filterComplex.length > 24000 || cutterExportCancelled) return false;
@@ -3333,7 +3361,7 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
         });
     });
     let success = await runPlan(plan);
-    if (!success && !cutterExportCancelled && plan.selectedEncoder !== 'libx264' && plan.selectedEncoder !== 'ffv1') {
+    if (!success && !cutterExportCancelled && !plan.selectedEncoder.startsWith('lib') && plan.selectedEncoder !== 'ffv1') {
         try { fs.rmSync(partialFile, { force: true }); } catch { }
         plan = createCutterExportPlan({
             inputFile: request.inputFile,
@@ -3343,6 +3371,10 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
             profile: request.profile,
             encoder: 'software',
             audioStreamIndex: request.audioStreamIndex,
+        audioStreamIndices,
+        audioStreams: info.audioStreams,
+        sourceFormat: info.sourceFormat,
+        colorMode: request.colorMode,
             rotation: info.rotation,
         });
         success = await runPlan(plan);
@@ -3358,7 +3390,10 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
         return false;
     }
     const outputInfo = await getVideoInfo(partialFile, currentCutterExportProcesses);
-    if (cutterExportCancelled || !outputInfo || Math.abs(outputInfo.duration - plan.remainingDuration) > Math.max(0.12, 3 / info.fps)) {
+    if (cutterExportCancelled || !outputInfo || Math.abs(outputInfo.duration - plan.remainingDuration) > Math.max(0.12, 3 / info.fps)
+        || outputInfo.audioStreams.length !== plan.audioStreamIndices.length
+        || outputInfo.sourceFormat.bitDepth < plan.bitDepth
+        || outputInfo.sourceFormat.hdr !== plan.hdr) {
         fs.rmSync(partialFile, { force: true });
         currentCutterPartialFile = null;
         return false;
@@ -3375,7 +3410,7 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
 }
 
 async function exportVideoEdit(request: VideoEditExportRequest, onProgress: (percent: number) => void): Promise<{ success: boolean; cancelled: boolean }> {
-    if (cutterExportActive || appShutdownStarted) return { success: false, cancelled: false };
+    if (cutterExportActive || appShutdownStarted || applicationBackupBusy || applicationWorkflowBusy()) return { success: false, cancelled: false };
     cutterExportActive = true;
     cutterExportCancelled = false;
     try {
@@ -3719,29 +3754,12 @@ async function mergeVideos(
         }
     }
 
-    const runMergeAttempt = async (copyMode: boolean): Promise<boolean> => {
+    const runMergeAttempt = async (): Promise<boolean> => {
         if (appShutdownStarted) return false;
-        const args = [
-            '-f', 'concat',
-            '-safe', '0',
-            '-i', concatFile
-        ];
-
-        if (copyMode) {
-            args.push('-c', 'copy');
-        } else {
-            args.push(
-                '-c:v', 'libx264',
-                '-preset', 'veryfast',
-                '-crf', '20',
-                '-c:a', 'aac',
-                '-b:a', '160k',
-                '-movflags', '+faststart'
-            );
-        }
+        const args = ['-f', 'concat', '-safe', '0', '-i', concatFile, '-map', '0', '-c', 'copy'];
 
         args.push('-progress', 'pipe:1', '-y', outputFile);
-        appendDebugLog('merge-video-attempt', { copyMode, argsCount: args.length });
+        appendDebugLog('merge-video-attempt', { argsCount: args.length });
 
         return await new Promise((resolve) => {
             recordManagedToolExecution('ffmpeg', ffmpeg);
@@ -3795,7 +3813,7 @@ async function mergeVideos(
     };
 
     try {
-        const copySuccess = await runMergeAttempt(true);
+        const copySuccess = await runMergeAttempt();
         if (appShutdownStarted) return false;
         if (copySuccess) {
             return true;
@@ -3812,17 +3830,9 @@ async function mergeVideos(
             return false;
         }
 
-        appendDebugLog('merge-video-copy-failed-fallback-reencode', { outputFile, files: inputFiles.length });
-        try {
-            if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
-        } catch { }
-
-        const reencodeSuccess = await runMergeAttempt(false);
-        if (appShutdownStarted) return false;
-        if (!reencodeSuccess) {
-            try { fs.rmSync(outputFile, { force: true }); } catch { }
-        }
-        return reencodeSuccess;
+        appendDebugLog('merge-video-copy-failed', { outputFile, files: inputFiles.length });
+        try { fs.rmSync(outputFile, { force: true }); } catch { }
+        return false;
     } finally {
         try {
             fs.unlinkSync(concatFile);
@@ -4300,6 +4310,7 @@ function stopAutoRecordPoller(): void {
 
 function restartAutoRecordPoller(): void {
     stopAutoRecordPoller();
+    if (applicationAutomationPaused) return;
     const list = Array.isArray(config.auto_record_streamers) ? config.auto_record_streamers : [];
     if (list.length === 0) {
         appendDebugLog('auto-record-poller-idle', { reason: 'no streamers' });
@@ -4320,7 +4331,7 @@ function restartAutoRecordPoller(): void {
 
 async function runAutoRecordPoll(): Promise<AutomationScanResult> {
     const result: AutomationScanResult = { addedCount: 0, checkedCount: 0, failedCount: 0, skipped: null };
-    if (appShutdownStarted || autoRecordPollInFlight) return { ...result, skipped: appShutdownStarted ? 'shutdown' : 'busy' };
+    if (appShutdownStarted || applicationBackupBusy || autoRecordPollInFlight) return { ...result, skipped: appShutdownStarted ? 'shutdown' : 'busy' };
     autoRecordPollInFlight = true;
     try {
         const list = Array.isArray(config.auto_record_streamers) ? [...config.auto_record_streamers] : [];
@@ -4425,6 +4436,7 @@ function stopAutoVodPoller(): void {
 
 function restartAutoVodPoller(): void {
     stopAutoVodPoller();
+    if (applicationAutomationPaused) return;
     const list = Array.isArray(config.auto_vod_download_streamers) ? config.auto_vod_download_streamers : [];
     if (list.length === 0) {
         appendDebugLog('auto-vod-poller-idle', { reason: 'no streamers' });
@@ -4447,7 +4459,7 @@ function restartAutoVodPoller(): void {
 
 async function runAutoVodPoll(): Promise<AutomationScanResult> {
     const result: AutomationScanResult = { addedCount: 0, checkedCount: 0, failedCount: 0, skipped: null };
-    if (appShutdownStarted || autoVodPollInFlight) return { ...result, skipped: appShutdownStarted ? 'shutdown' : 'busy' };
+    if (appShutdownStarted || applicationBackupBusy || autoVodPollInFlight) return { ...result, skipped: appShutdownStarted ? 'shutdown' : 'busy' };
     autoVodPollInFlight = true;
     try {
         const list = Array.isArray(config.auto_vod_download_streamers) ? [...config.auto_vod_download_streamers] : [];
@@ -4760,196 +4772,65 @@ function chatReplayPathFor(vodFilePath: string): string {
 // ==========================================
 // AUTO-CLEANUP
 // ==========================================
-// Targets old recording artifacts (.mp4/.ts/.mkv plus their sibling
-// .chat.json/.chat.jsonl) older than auto_cleanup_days. Two scopes —
-// live_only (only files inside a streamer/live/ subfolder, set-and-
-// forget for auto-record users) or all (everything under the streamer
-// folders). Two actions — delete or archive (move to a parallel
-// archived/{streamer}/{YYYY-MM}/ tree). Archive is the safer default.
-// Sibling chat files travel with the video so we don't end up with
-// an orphan transcript.
-interface CleanupCandidate {
-    videoPath: string;
-    sidecarPaths: string[];
-    streamer: string;
-    bytes: number;
-    ageDays: number;
+
+const cleanupAbortController = new AbortController();
+const reviewedCleanupPlans = new Map<string, string>();
+let cleanupRecoveryPaths: string[] = [];
+let cleanupRecoveryRoot = '';
+let cleanupPending: Promise<StorageCleanupPreview | StorageCleanupResult> | null = null;
+function cleanupConfiguration() {
+    return { root: config.download_path, streamers: config.streamers, cutoffDays: Number(config.auto_cleanup_days) || 30,
+        target: config.auto_cleanup_target === 'all' ? 'all' as const : 'live_only' as const,
+        action: config.auto_cleanup_action === 'delete' ? 'delete' as const : 'archive' as const,
+        enabled: config.auto_cleanup_enabled === true };
 }
-interface CleanupReport {
-    enabled: boolean;
-    dryRun: boolean;
-    cutoffDays: number;
-    target: 'live_only' | 'all';
-    action: 'delete' | 'archive';
-    scannedAt: string;
-    candidates: number;
-    processed: number;
-    failed: number;
-    bytesFreed: number;
-    failures: Array<{ path: string; error: string }>;
-}
+function cleanupConfigurationKey(): string { return JSON.stringify(cleanupConfiguration()); }
+const storageCleanup = createStorageCleanupService({
+    isActive: filename => {
+        if (appShutdownStarted || applicationBackupBusy || isDownloading || activeDownloads.size > 0 || activeClipProcesses.size > 0 ||
+            cutterExportActive || workspaceMergeActive || editingWorkflows?.busy) return true;
+        const normalized = normalizeComparablePath(filename);
+        if (editingWorkflows?.queue.list().some(job => job.status !== 'completed' && (job.request.kind === 'cut' ? [job.request.project.source] : job.request.sources).some(source => normalizeComparablePath(source.path) === normalized))) return true;
+        return normalized === (cutterMediaJob ? normalizeComparablePath(cutterMediaJob.path) : '') ||
+            [...mergeWorkspaceFiles.values()].some(file => normalizeComparablePath(file.path) === normalized);
+    },
+    trashDirectory: directory => shell.trashItem(directory)
+});
 
-const VIDEO_FILE_REGEX = /\.(mp4|ts|mkv|mov|avi)$/i;
-
-function findCleanupCandidates(cutoffDays: number, target: 'live_only' | 'all'): CleanupCandidate[] {
-    const out: CleanupCandidate[] = [];
-    const root = config.download_path;
-    if (!root || !fs.existsSync(root)) return out;
-    const cutoffMs = Date.now() - cutoffDays * 24 * 60 * 60 * 1000;
-    const knownStreamers = new Set<string>(((config.streamers as string[]) || []).map((s) => s.toLowerCase()));
-
-    let topEntries: fs.Dirent[];
-    try {
-        topEntries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-        return out;
+async function executeStorageCleanup(options: { dryRun: boolean; token?: string; automatic?: boolean }): Promise<StorageCleanupPreview | StorageCleanupResult> {
+    if (options.dryRun) {
+        const preview = await storageCleanup.preview(cleanupConfiguration(), cleanupAbortController.signal);
+        cleanupRecoveryPaths = [...preview.recoveryPaths];
+        cleanupRecoveryRoot = config.download_path;
+        reviewedCleanupPlans.clear();
+        reviewedCleanupPlans.set(preview.token, cleanupConfigurationKey());
+        return preview;
     }
-
-    const visit = (dir: string, streamer: string, mustBeUnderLive: boolean): void => {
-        let entries: fs.Dirent[];
-        try {
-            entries = fs.readdirSync(dir, { withFileTypes: true });
-        } catch {
-            return;
-        }
-        for (const entry of entries) {
-            const full = path.join(dir, entry.name);
-            if (entry.isDirectory()) {
-                // Never walk back into the archived/ tree we own.
-                if (entry.name === 'archived') continue;
-                const enteringLive = entry.name === 'live';
-                visit(full, streamer, mustBeUnderLive && !enteringLive);
-                continue;
-            }
-            if (!entry.isFile()) continue;
-            if (!VIDEO_FILE_REGEX.test(entry.name)) continue;
-            if (mustBeUnderLive) continue; // live_only mode + we're not under live/
-
-            let stat: fs.Stats;
-            try {
-                stat = fs.statSync(full);
-            } catch {
-                continue;
-            }
-            if (stat.mtimeMs > cutoffMs) continue;
-
-            // Find sibling chat files (same basename, .chat.json / .chat.jsonl)
-            const ext = path.extname(full);
-            const base = ext ? full.slice(0, -ext.length) : full;
-            const sidecars: string[] = [];
-            for (const sidecarExt of ['.chat.json', '.chat.jsonl']) {
-                const candidate = base + sidecarExt;
-                if (fs.existsSync(candidate)) sidecars.push(candidate);
-            }
-
-            out.push({
-                videoPath: full,
-                sidecarPaths: sidecars,
-                streamer,
-                bytes: stat.size,
-                ageDays: Math.floor((Date.now() - stat.mtimeMs) / (24 * 60 * 60 * 1000))
-            });
-        }
-    };
-
-    for (const top of topEntries) {
-        if (!top.isDirectory()) continue;
-        if (top.name === 'archived') continue; // never recurse into the archive tree
-        const lowered = top.name.toLowerCase();
-        const isKnown = knownStreamers.has(lowered) || top.name === 'Clips';
-        if (!isKnown) continue;
-        const folderPath = path.join(root, top.name);
-        // For live_only mode, we descend with mustBeUnderLive=true; the
-        // visit() call flips it to false the moment we enter a "live"
-        // subfolder. For "all" mode, mustBeUnderLive is false from the
-        // top so every video matches.
-        visit(folderPath, top.name, target === 'live_only');
+    let token = options.token;
+    if (options.automatic) {
+        const preview = await storageCleanup.preview(cleanupConfiguration(), cleanupAbortController.signal);
+        if (preview.recoveryPaths.length) return { ...preview, dryRun: false, skipped: preview.candidates, cancelled: false };
+        token = preview.token;
+    } else if (!token || reviewedCleanupPlans.get(token) !== cleanupConfigurationKey()) {
+        throw new Error('preview-required');
     }
-
-    return out;
-}
-
-function archivePathForCleanup(streamer: string, originalPath: string, mtimeMs: number): string {
-    const root = config.download_path;
-    const date = new Date(mtimeMs);
-    const monthKey = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
-    const dir = path.join(root, 'archived', streamer, monthKey);
-    fs.mkdirSync(dir, { recursive: true });
-    return ensureUniqueFilename(path.join(dir, path.basename(originalPath)), null);
-}
-
-function runStorageCleanup(opts: { dryRun: boolean }): CleanupReport {
-    const report: CleanupReport = {
-        enabled: config.auto_cleanup_enabled === true,
-        dryRun: opts.dryRun,
-        cutoffDays: Number(config.auto_cleanup_days) || 30,
-        target: config.auto_cleanup_target === 'all' ? 'all' : 'live_only',
-        action: config.auto_cleanup_action === 'delete' ? 'delete' : 'archive',
-        scannedAt: new Date().toISOString(),
-        candidates: 0,
-        processed: 0,
-        failed: 0,
-        bytesFreed: 0,
-        failures: []
-    };
-
-    const candidates = findCleanupCandidates(report.cutoffDays, report.target);
-    report.candidates = candidates.length;
-    if (opts.dryRun) {
-        for (const c of candidates) {
-            report.bytesFreed += c.bytes;
-            for (const sc of c.sidecarPaths) {
-                try { report.bytesFreed += fs.statSync(sc).size; } catch { /* ignore */ }
-            }
-        }
-        appendDebugLog('storage-cleanup-dry-run', { candidates: report.candidates, bytes: report.bytesFreed });
-        return report;
-    }
-
-    for (const c of candidates) {
-        const allPaths = [c.videoPath, ...c.sidecarPaths];
-        try {
-            if (report.action === 'delete') {
-                for (const p of allPaths) {
-                    let bytes = 0;
-                    try { bytes = fs.statSync(p).size; } catch { /* ignore */ }
-                    fs.unlinkSync(p);
-                    report.bytesFreed += bytes;
-                }
-            } else {
-                // Archive: keep the same basename, group by streamer + month.
-                const stat = fs.statSync(c.videoPath);
-                const archived = archivePathForCleanup(c.streamer, c.videoPath, stat.mtimeMs);
-                fs.renameSync(c.videoPath, archived);
-                report.bytesFreed += stat.size;
-                // Move sidecars to the same archive folder.
-                const archDir = path.dirname(archived);
-                for (const sc of c.sidecarPaths) {
-                    try {
-                        const dest = ensureUniqueFilename(path.join(archDir, path.basename(sc)), null);
-                        fs.renameSync(sc, dest);
-                    } catch (err) {
-                        report.failures.push({ path: sc, error: String(err) });
-                    }
-                }
-            }
-            report.processed += 1;
-        } catch (err) {
-            report.failed += 1;
-            report.failures.push({ path: c.videoPath, error: String(err) });
-        }
-    }
-
+    if (!token) throw new Error('preview-required');
+    reviewedCleanupPlans.delete(token);
+    const result = await storageCleanup.execute(token, cleanupAbortController.signal);
+    cleanupRecoveryPaths = [...result.recoveryPaths];
+    cleanupRecoveryRoot = config.download_path;
     readArchiveInventory.invalidate();
-    appendDebugLog('storage-cleanup-run', {
-        candidates: report.candidates,
-        processed: report.processed,
-        failed: report.failed,
-        bytes: report.bytesFreed,
-        action: report.action,
-        target: report.target
-    });
-    return report;
+    readStorageInventory.invalidate();
+    appendDebugLog('storage-cleanup-run', { candidates: result.candidates, processed: result.processed, failed: result.failed, skipped: result.skipped, bytes: result.bytesAffected, action: result.action });
+    return result;
+}
+
+
+async function runStorageCleanup(options: { dryRun: boolean; token?: string; automatic?: boolean }): Promise<StorageCleanupPreview | StorageCleanupResult> {
+    if (cleanupPending || applicationBackupBusy) throw new Error('cleanup-busy');
+    const pending = executeStorageCleanup(options);
+    cleanupPending = pending;
+    try { return await pending; } finally { if (cleanupPending === pending) cleanupPending = null; }
 }
 
 let autoCleanupTimer: NodeJS.Timeout | null = null;
@@ -4977,6 +4858,7 @@ function stopAutoCleanupTimer(): void {
 
 function restartAutoCleanupTimer(): void {
     stopAutoCleanupTimer();
+    if (applicationAutomationPaused) return;
     if (appShutdownStarted) return;
     if (!config.auto_cleanup_enabled) return;
     // Run every 6 hours while the app is running. Skip the first cycle if
@@ -4987,7 +4869,7 @@ function restartAutoCleanupTimer(): void {
         if (appShutdownStarted) return;
         if (Date.now() - lastAutoCleanupAt < SIX_HOURS_MS) return;
         lastAutoCleanupAt = Date.now();
-        try { runStorageCleanup({ dryRun: false }); } catch (e) { appendDebugLog('auto-cleanup-failed', String(e)); }
+        void runStorageCleanup({ dryRun: false, automatic: true }).catch(e => appendDebugLog('auto-cleanup-failed', String(e)));
     }, SIX_HOURS_MS);
     autoCleanupTimer.unref?.();
 
@@ -4997,7 +4879,7 @@ function restartAutoCleanupTimer(): void {
         if (appShutdownStarted || !config.auto_cleanup_enabled) return;
         if (Date.now() - lastAutoCleanupAt < 60 * 1000) return;
         lastAutoCleanupAt = Date.now();
-        try { runStorageCleanup({ dryRun: false }); } catch (e) { appendDebugLog('auto-cleanup-failed', String(e)); }
+        void runStorageCleanup({ dryRun: false, automatic: true }).catch(e => appendDebugLog('auto-cleanup-failed', String(e)));
     }, 60 * 1000);
 }
 
@@ -6681,7 +6563,7 @@ async function processOneQueueItem(item: QueueItem): Promise<void> {
 }
 
 function scheduleQueueProcessing(manualOverride = false): boolean {
-    if (appShutdownStarted) return false;
+    if (appShutdownStarted || applicationBackupBusy || (!manualOverride && applicationAutomationPaused)) return false;
     if (!isDownloading && !canStartDownloadQueue(manualOverride)) return false;
     return queueRunLifecycle.schedule(() => processQueue(manualOverride), (error) => {
         appendDebugLog('queue-run-failed', String(error));
@@ -6904,7 +6786,7 @@ function createWindow(): void {
         // Auto-resume: if the user opted in AND the persisted queue has
         // pending entries, kick off processing after a short delay so the
         // UI has time to render and the user can still pause if they want.
-        if (config.auto_resume_queue_on_startup && !isDownloading) {
+        if (!applicationAutomationPaused && config.auto_resume_queue_on_startup && !isDownloading) {
             const hasPending = downloadQueue.some((it) => it.status === 'pending');
             if (hasPending) {
                 appendDebugLog('auto-resume-queue-scheduled', { pending: downloadQueue.filter((it) => it.status === 'pending').length });
@@ -7977,8 +7859,8 @@ interface ClipRequest {
 interface ClipResult { success: boolean; cancelled?: boolean; error?: string; filename?: string }
 const activeClipProcesses = new Set<ActiveClipDownloadTracking>();
 const clipRequests = new Map<string, ClipRequest>();
-const workspaceSession = new WorkspaceSessionStore(path.join(APPDATA_DIR, 'workspace-session.json'), error => appendDebugLog('workspace-save-error', { error: String(error) }));
-const mergeWorkspaceFiles = new Map(workspaceSession.mergeFiles.map(file => [file.id, file]));
+let workspaceSession: WorkspaceSessionStore;
+const mergeWorkspaceFiles = new Map<string, WorkspaceMergeFile>();
 
 function publishClipProgress(request: ClipRequest): void {
     if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.id === request.ownerId) mainWindow.webContents.send('clip-progress', request.progress);
@@ -8077,7 +7959,7 @@ async function performClipDownload(clipId: string, request: ClipRequest): Promis
         const finalized = await finalizeDownloadedMp4(partialFilename, filename, null, null, tracking);
         if (request.controller.signal.aborted || appShutdownStarted) return { success: false, cancelled: true };
         if (!finalized.success) return finalized;
-        try { downloadHistoryStore?.recordClip({ attemptId: request.progress.requestId, clipId, filename }); }
+        try { downloadHistoryStore?.recordClip({ attemptId: request.progress.requestId, clipId, filename, title: clipInfo.title, channel: clipInfo.broadcaster_name }); }
         catch (error) { appendDebugLog('clip-history-save-failed', { clipId, error: String(error) }); }
         readArchiveInventory.invalidate();
         rememberRendererPath('open-file', filename);
@@ -8094,6 +7976,7 @@ async function performClipDownload(clipId: string, request: ClipRequest): Promis
 
 registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () => Promise.resolve({ success: false, error: 'File access denied' }), async (event, clipUrl: string, requestId: string): Promise<ClipResult> => {
     if (appShutdownStarted) return { success: false, cancelled: true };
+    if (applicationBackupBusy) return { success: false, error: config.language === 'de' ? 'Sicherung wird verarbeitet.' : 'Backup in progress.' };
     const clipId = parseTwitchClipId(clipUrl);
     if (!clipId) return { success: false, error: tBackend('invalidClipUrl') };
     if (typeof requestId !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(requestId) || clipRequests.has(requestId) || [...clipRequests.values()].some(request => request.ownerId === event.sender.id)) return { success: false, error: tBackend('unknownDownloadError') };
@@ -8185,9 +8068,34 @@ ipcMain.handle('open-debug-log-file', (event): boolean => {
     return true;
 });
 
-ipcMain.handle('get-archive-stats', async (event): Promise<ArchiveStats> => {
+ipcMain.handle('get-archive-stats', async (event, range?: import('./main/domain/download-history-store').DownloadHistoryRange): Promise<ArchiveStats> => {
     if (!isTrustedRendererEvent(event)) throw new Error('File access denied');
-    return summarizeArchiveInventory(await readArchiveInventory(config.download_path, true), downloadHistoryStore?.summarize() ?? emptyLifetimeDownloadStats());
+    return summarizeArchiveInventory(await readArchiveInventory(config.download_path, true), downloadHistoryStore?.summarize(new Date(), range) ?? emptyLifetimeDownloadStats());
+});
+ipcMain.handle('search-download-history', async (event, filter?: import('./main/domain/download-history-store').DownloadHistoryFilter) => {
+    if (!isTrustedRendererEvent(event)) throw new Error('File access denied');
+    if (!downloadHistoryStore) throw new Error('Download history unavailable');
+    const result = await downloadHistoryStore.search(filter);
+    for (const entry of result.entries) for (const filename of entry.availablePaths) rememberRendererPath('show-in-folder', filename);
+    return result;
+});
+ipcMain.handle('has-downloaded-clip', (event, clipId: string): boolean => {
+    return isTrustedRendererEvent(event) && typeof clipId === 'string' && (downloadHistoryStore?.hasClip(clipId) ?? false);
+});
+ipcMain.handle('export-statistics', async (event, range?: import('./main/domain/download-history-store').DownloadHistoryRange): Promise<boolean> => {
+    if (!isTrustedRendererEvent(event) || !downloadHistoryStore) throw new Error('File access denied');
+    const stats = downloadHistoryStore.summarize(new Date(), range);
+    const selected = await dialog.showSaveDialog(mainWindow!, { defaultPath: 'download-statistics.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] });
+    if (selected.canceled || !selected.filePath) return false;
+    const isGerman = config.language !== 'en';
+    const header = isGerman ? 'Datum;Downloads;Bytes' : 'Date;Downloads;Bytes';
+    const rows = stats.dailyActivity.map(day => [day.date, day.count, day.bytes].join(';'));
+    const summary = isGerman ? 'Kennzahl;Wert' : 'Metric;Value';
+    const totals = [['VOD', stats.vodDownloads], ['Clip', stats.clipDownloads], ['Live', stats.liveRecordings], ['Bytes', stats.totalBytes]].map(row => row.join(';'));
+    return publishCapabilityOutput(selected.filePath, async temporary => {
+        await fs.promises.writeFile(temporary, '\uFEFF' + [summary, ...totals, '', header, ...rows].join('\r\n') + '\r\n', 'utf8');
+        return true;
+    });
 });
 
 ipcMain.handle('get-streamer-profile', async (_, login: string, forceRefresh?: boolean): Promise<StreamerProfile | null> => {
@@ -8206,6 +8114,26 @@ ipcMain.handle('get-live-status-snapshot', (): Record<string, boolean> => {
     const snap: Record<string, boolean> = {};
     for (const [k, v] of liveStatusByLogin.entries()) snap[k] = v;
     return snap;
+});
+
+
+ipcMain.handle('prepare-archive-videos', async (event, requested: string[], target: 'cutter' | 'merge'): Promise<MergeFileReference[]> => {
+    if (!isTrustedRendererEvent(event) || !['cutter', 'merge'].includes(target) || !Array.isArray(requested)
+        || !requested.length || requested.length > 500 || (target === 'cutter' && requested.length !== 1)
+        || (target === 'cutter' && cutterExportActive) || (target === 'merge' && workspaceMergeActive)) throw new Error('File access denied');
+    const inventory = await readArchiveInventory(config.download_path, true);
+    const available = new Map(inventory.files.filter(file => ['vod', 'live', 'clip'].includes(file.type)).map(file => [normalizeComparablePath(file.fullPath), file]));
+    const candidates = requested.map(filename => typeof filename === 'string' ? available.get(normalizeComparablePath(filename)) : undefined);
+    if (candidates.some(file => !file) || new Set(requested.map(normalizeComparablePath)).size !== requested.length) throw new Error('File access denied');
+    const references: MergeFileReference[] = [];
+    for (const candidate of candidates) {
+        const stat = await fs.promises.stat(candidate!.fullPath);
+        if (!stat.isFile() || stat.size !== candidate!.size || stat.mtimeMs !== candidate!.mtimeMs) throw new Error('File changed');
+        const file: WorkspaceMergeFile = { id: randomUUID(), path: candidate!.fullPath, size: stat.size, mtimeMs: stat.mtimeMs };
+        if (target === 'merge') mergeWorkspaceFiles.set(file.id, file);
+        references.push({ ...issueFileCapability(event, target === 'cutter' ? 'cutter-input' : 'merge-input', file.path, 'input-file', VIDEO_FILE_EXTENSIONS, CUTTER_SESSION_CAPABILITY_TTL_MS), id: file.id });
+    }
+    return references;
 });
 
 ipcMain.handle('search-archive', async (event, filter: Partial<ArchiveSearchFilter>): Promise<ArchiveSearchResult> => {
@@ -8245,9 +8173,21 @@ ipcMain.handle('get-storage-stats', async (event): Promise<StorageStatsResult> =
     return result;
 });
 
-ipcMain.handle('run-storage-cleanup', (event, options?: { dryRun?: boolean }): CleanupReport => {
+ipcMain.handle('run-storage-cleanup', async (event, options?: { dryRun?: boolean; token?: string }) => {
     if (!isTrustedRendererEvent(event)) throw new Error('File access denied');
-    return runStorageCleanup({ dryRun: options?.dryRun === true });
+    return runStorageCleanup({ dryRun: options?.dryRun === true, token: typeof options?.token === 'string' ? options.token : undefined });
+});
+ipcMain.handle('recover-storage-cleanup', async event => {
+    if (!isTrustedRendererEvent(event) || applicationRestoreBusy() || cleanupPending || cleanupRecoveryRoot !== config.download_path) throw new Error('cleanup-busy');
+    applicationBackupBusy = true;
+    try {
+        await storageCleanup.recover(cleanupRecoveryRoot, cleanupRecoveryPaths);
+        cleanupRecoveryPaths = [];
+        reviewedCleanupPlans.clear();
+        readArchiveInventory.invalidate();
+        readStorageInventory.invalidate();
+        return true;
+    } finally { applicationBackupBusy = false; }
 });
 
 // Read a chat-replay (.chat.json) or live-chat (.chat.jsonl) file and
@@ -8527,6 +8467,7 @@ ipcMain.handle('export-video-edit', async (event, request: RendererVideoEditExpo
     const profile = request.profile ?? 'balanced';
     const encoder = request.encoder ?? 'software';
     const audioStreamIndex = request.audioStreamIndex ?? 0;
+    if ((request.allAudioStreams !== undefined && typeof request.allAudioStreams !== 'boolean') || (request.colorMode !== undefined && request.colorMode !== 'source' && request.colorMode !== 'sdr')) return { success: false, outputName: null };
     if (!isCutterExportProfile(profile) || !isCutterExportEncoder(encoder) || !Number.isInteger(audioStreamIndex) || audioStreamIndex < 0) return { success: false, outputName: null };
     const profileDefinition = getCutterExportProfile(profile);
     const extension = profileDefinition.container;
@@ -8549,7 +8490,7 @@ ipcMain.handle('export-video-edit', async (event, request: RendererVideoEditExpo
         outputFile = resolveFileCapability(event, outputCapability.token, 'cutter-output', true, [inputFile]);
     }
     if (!outputFile) return { success: false, outputName: null };
-    const outcome = await exportVideoEdit({ inputFile, outputFile, trimStart: request.trimStart, trimEnd: request.trimEnd, cuts: request.cuts, profile, encoder, audioStreamIndex }, (percent) => {
+    const outcome = await exportVideoEdit({ inputFile, outputFile, trimStart: request.trimStart, trimEnd: request.trimEnd, cuts: request.cuts, profile, encoder, audioStreamIndex, allAudioStreams: request.allAudioStreams, colorMode: request.colorMode }, (percent) => {
         mainWindow?.webContents.send('cut-progress', percent);
     });
     const outputCapability = outcome.success ? issueFileCapability(event, 'show-in-folder', outputFile, 'input-file', [extension]) : null;
@@ -8606,7 +8547,7 @@ ipcMain.handle('get-workspace-session', (event) => {
         const item = workspaceSession.clips.find(clip => clip.url === active.progress.url);
         if (item) item.state = 'active';
     }
-    return { clips: workspaceSession.clips, mergeFiles: workspaceSession.mergeFiles.map(file => restoreMergeReference(event, file)), activeClip: active?.progress,
+    return { automationPaused: applicationAutomationPaused, clips: workspaceSession.clips, mergeFiles: workspaceSession.mergeFiles.map(file => restoreMergeReference(event, file)), activeClip: active?.progress,
         mergeActive: workspaceMergeActive, mergeProgress: workspaceMergeProgress };
 });
 
@@ -8646,7 +8587,7 @@ let workspaceMergeActive = false;
 let workspaceMergeProgress = 0;
 
 ipcMain.handle('merge-videos', async (event, inputCapabilities: string[], outputCapability: string) => {
-    if (!isTrustedRendererEvent(event) || workspaceMergeActive || !Array.isArray(inputCapabilities) || inputCapabilities.length < 2 || inputCapabilities.length > 500) return { success: false, outputName: null };
+    if (!isTrustedRendererEvent(event) || applicationBackupBusy || applicationWorkflowBusy() || cutterExportActive || workspaceMergeActive || !Array.isArray(inputCapabilities) || inputCapabilities.length < 2 || inputCapabilities.length > 500) return { success: false, outputName: null };
     const inputFiles = inputCapabilities.map(capability => resolveFileCapability(event, capability, 'merge-input'));
     const outputFile = resolveFileCapability(event, outputCapability, 'merge-output');
     if (inputFiles.some(file => !file) || !outputFile) return { success: false, outputName: null };
@@ -8730,7 +8671,18 @@ async function cleanupStaleCutterMediaDirectories(): Promise<number> {
     return removed;
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+    try {
+        const restore = await applyPendingApplicationRestore(APPDATA_DIR);
+        applicationAutomationPaused = restore.restored || restore.recovered;
+    } catch (error) {
+        appendDebugLog('application-restore-startup-failed', String(error));
+        dialog.showErrorBox('Wiederherstellung fehlgeschlagen', 'Die Programmdaten wurden nicht geöffnet. Die Sicherung bleibt erhalten.\n' + String(error));
+        app.exit(1);
+        return;
+    }
+    workspaceSession = new WorkspaceSessionStore(path.join(APPDATA_DIR, 'workspace-session.json'), error => appendDebugLog('workspace-save-error', { error: String(error) }));
+    for (const file of workspaceSession.mergeFiles) mergeWorkspaceFiles.set(file.id, file);
     const removedPartialDownloads = partialDownloadRegistry.cleanup();
     if (removedPartialDownloads.length > 0) {
         appendDebugLog('partial-downloads-cleaned-on-startup', { count: removedPartialDownloads.length });
@@ -8795,6 +8747,11 @@ app.whenReady().then(() => {
         });
         try { appDb?.close(); } catch { }
         appDb = null;
+        if (applicationAutomationPaused) {
+            dialog.showErrorBox('Wiederherstellung fehlgeschlagen', 'Die wiederhergestellten Programmdaten konnten nicht geöffnet werden.');
+            app.exit(1);
+            return;
+        }
         appStateStore = null;
         downloadHistoryStore = null;
         appSecretStore = null;
@@ -8810,6 +8767,16 @@ app.whenReady().then(() => {
     restartAutoVodPoller();
     restartLiveStatusPoller();
     restartAutoCleanupTimer();
+    try { await initializeEditingWorkflowIntegration(); }
+    catch (error) {
+        appendDebugLog('editing-workflow-startup-failed', String(error));
+        for (const channel of ['editing-projects-list', 'editing-project-save', 'editing-project-open', 'editing-jobs-list', 'editing-job-cut', 'editing-job-merge', 'editing-merge-inspect', 'editing-job-action']) {
+            ipcMain.removeHandler(channel);
+            ipcMain.handle(channel, event => ({ success: false, error: isTrustedRendererEvent(event) ? 'Export queue could not be opened. Restore a backup or inspect the debug log.' : 'File access denied' }));
+        }
+    }
+    applicationWorkflowBusy = () => editingWorkflows?.busy ?? false;
+    applicationWorkflowFlush = async () => { await editingWorkflows?.flush(); };
     createWindow();
     void cleanupStaleCutterMediaDirectories().then(count => {
         if (count > 0) appendDebugLog('cutter-media-cleaned-on-startup', { count });
@@ -8882,6 +8849,8 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
     let frameProcessesExited = frameProcesses.length === 0;
 
     await runResilientSteps([
+        ['storage-cleanup', async () => { cleanupAbortController.abort(); await cleanupPending; }],
+        ['editing-workflows', async () => { await editingWorkflows?.dispose(); }],
         ['vod-playback', () => vodPlaybackService.close()],
         ['vod-timeline', () => vodTimelineService.close()],
         ['metadata-cache-timer', () => stopMetadataCacheCleanup()],
@@ -8923,7 +8892,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
                 if (result.status === 'rejected') cleanupError('clip-process-exit', result.reason);
             }
         }],
-        ['workspace-session', () => { workspaceSession.flush(); }],
+        ['workspace-session', () => { workspaceSession?.flush(); }],
         ['editor-processes', async () => {
             for (const process of editorProcesses) {
                 try { process.kill(); } catch { }
@@ -9008,5 +8977,105 @@ app.on('before-quit', (event) => {
     shutdownPromise = shutdownCleanup('before-quit').finally(() => {
         quitAfterCleanup = true;
         app.quit();
+    });
+});
+
+function applicationRestoreBusy(): boolean {
+    if (cleanupPending || storageCleanup.isBusy()) return true;
+    return isDownloading || activeDownloads.size > 0 || clipRequests.size > 0 || activeClipProcesses.size > 0 || cutterExportActive || workspaceMergeActive || applicationWorkflowBusy() || autoRecordPollInFlight || autoVodPollInFlight || appShutdownStarted;
+}
+
+ipcMain.handle('export-application-backup', async event => {
+    if (!isTrustedRendererEvent(event) || !appDb || applicationBackupBusy) return { success: false, error: 'busy' };
+    applicationBackupBusy = true;
+    try {
+        const selected = await dialog.showSaveDialog(mainWindow!, {
+            defaultPath: path.join(app.getPath('documents'), 'Twitch-VOD-Manager-' + new Date().toISOString().slice(0, 10) + '.tvmbackup'),
+            filters: [{ name: 'Twitch VOD Manager', extensions: ['tvmbackup'] }]
+        });
+        if (selected.canceled || !selected.filePath) return { success: false, cancelled: true };
+        if (applicationRestoreBusy() || !workspaceSession.flush()) return { success: false, error: 'busy' };
+        await applicationWorkflowFlush();
+        const result = await createApplicationBackup({ db: appDb, dataDirectory: APPDATA_DIR, appVersion: APP_VERSION, outputFile: selected.filePath });
+        return { success: true, preview: result };
+    } catch (error) {
+        appendDebugLog('application-backup-failed', { error: String(error) });
+        return { success: false, error: error instanceof Error && 'code' in error ? String(error.code) : 'failed' };
+    } finally { applicationBackupBusy = false; }
+});
+
+ipcMain.handle('restore-application-backup', async event => {
+    if (!isTrustedRendererEvent(event) || !appDb || applicationBackupBusy || applicationRestoreBusy()) return { success: false, error: 'busy' };
+    applicationBackupBusy = true;
+    try {
+        const selected = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile'], filters: [{ name: 'Twitch VOD Manager', extensions: ['tvmbackup'] }] });
+        if (selected.canceled || !selected.filePaths[0]) return { success: false, cancelled: true };
+        const details = await inspectApplicationBackup(selected.filePaths[0], APPDATA_DIR);
+        const english = config.language === 'en';
+        const number = new Intl.NumberFormat(english ? 'en-US' : 'de-DE');
+        const date = new Intl.DateTimeFormat(english ? 'en-US' : 'de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(details.createdAt));
+        const confirmation = await dialog.showMessageBox(mainWindow!, {
+            type: 'question', title: english ? 'Restore backup' : 'Sicherung wiederherstellen',
+            message: english ? 'Replace application data and restart?' : 'Programmdaten ersetzen und neu starten?',
+            detail: [date + ' · ' + details.appVersion,
+                (english ? 'Downloads: ' : 'Downloads: ') + number.format(details.downloads),
+                (english ? 'Queue: ' : 'Warteschlange: ') + number.format(details.queue),
+                (english ? 'Projects: ' : 'Projekte: ') + number.format(details.projects),
+                (english ? 'Clips: ' : 'Clips: ') + number.format(details.clips),
+                (english ? 'Export jobs: ' : 'Exportaufträge: ') + number.format(details.exportJobs),
+                '', english ? 'Current data is backed up first. Sign-ins remain unchanged. Video files are not included. Automatic tasks stay paused for this start.' : 'Der aktuelle Stand wird vorher gesichert. Anmeldungen bleiben erhalten. Videodateien sind nicht enthalten. Automatische Aufgaben bleiben für diesen Start pausiert.'
+            ].join('\n'),
+            buttons: english ? ['Restore and restart', 'Cancel'] : ['Wiederherstellen und neu starten', 'Abbrechen'],
+            defaultId: 1, cancelId: 1, noLink: true
+        });
+        if (confirmation.response !== 0) return { success: false, cancelled: true };
+        if (applicationRestoreBusy() || !workspaceSession.flush()) return { success: false, error: 'busy' };
+        await applicationWorkflowFlush();
+        await queueApplicationRestore({ filename: selected.filePaths[0], expectedDigest: details.digest, dataDirectory: APPDATA_DIR });
+        app.relaunch();
+        app.quit();
+        return { success: true };
+    } catch (error) {
+        appendDebugLog('application-restore-failed', { error: String(error) });
+        return { success: false, error: error instanceof Error && 'code' in error ? String(error.code) : 'failed' };
+    } finally { applicationBackupBusy = false; }
+});
+
+
+let editingWorkflows: Awaited<ReturnType<typeof registerEditingWorkflows>> | null = null;
+
+async function initializeEditingWorkflowIntegration(): Promise<void> {
+    editingWorkflows = await registerEditingWorkflows({
+        directory: APPDATA_DIR,
+        blocked: () => appShutdownStarted || applicationBackupBusy || storageCleanup.isBusy(),
+        window: () => mainWindow,
+        trusted: event => isTrustedRendererEvent(event) && !appShutdownStarted,
+        project(event, capability, value) {
+            const filePath = resolveFileCapability(event, capability, 'cutter-input');
+            if (!filePath || !cutterInputIdentityMatches(filePath) || !cutterMediaJob
+                || !cutterInputIdentitiesMatch(getCutterInputIdentity(filePath), cutterMediaJob.identity)) return null;
+            return createCutterProject(filePath, cutterMediaJob.info, value);
+        },
+        async mergeSources(_event, ids) {
+            return ids.map(id => {
+                const source = mergeWorkspaceFiles.get(id);
+                if (!source) throw new Error('Merge source unavailable');
+                return { path: source.path, size: source.size, mtimeMs: source.mtimeMs };
+            });
+        },
+        sourceCapability: (event, filePath) => issueFileCapability(event, 'cutter-input', filePath, 'input-file', VIDEO_FILE_EXTENSIONS),
+        mediaBusy: () => cutterExportActive || workspaceMergeActive,
+        resolveTools: async () => ({ ffmpeg: await getFFmpegPath(), ffprobe: await getFFprobePath() }),
+        availableHardwareEncoders: getCutterHardwareEncoders,
+        log: error => appendDebugLog('editing-workflows', String(error)),
+    });
+}
+
+ipcMain.handle('discover-clips', async (event, request: ClipDiscoveryRequest) => {
+    if (!isTrustedRendererEvent(event) || appShutdownStarted) throw new Error('Clip discovery unavailable');
+    return discoverClips(request, {
+        credentials: async () => { const accessToken = await ensureTwitchAuth(); return accessToken ? { clientId: config.client_id, accessToken } : null; },
+        userId: getUserId,
+        downloaded: clipId => downloadHistoryStore?.hasClip(clipId) ?? false,
     });
 });

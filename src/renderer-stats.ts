@@ -1,8 +1,12 @@
 let archiveStatsRefreshInFlight = false;
+let archiveStatsRefreshPending = false;
 let lastArchiveStats: ArchiveStats | null = null;
+let downloadHistoryOffset = 0;
+let downloadHistorySequence = 0;
+let downloadHistoryTimer: number | null = null;
 
 async function refreshArchiveStats(): Promise<void> {
-    if (archiveStatsRefreshInFlight) return;
+    if (archiveStatsRefreshInFlight) { archiveStatsRefreshPending = true; return; }
     archiveStatsRefreshInFlight = true;
     for (const id of ['btnStatsRefresh', 'toolbarStatsRefreshBtn']) {
         const button = document.getElementById(id) as HTMLButtonElement | null;
@@ -16,9 +20,13 @@ async function refreshArchiveStats(): Promise<void> {
     document.getElementById('statsTab')?.setAttribute('aria-busy', 'true');
     if (!lastArchiveStats) renderStatsSummary(null);
     try {
-        lastArchiveStats = await window.api.getArchiveStats();
+        const range = getStatsRange();
+        const result = await window.api.getArchiveStats(range);
+        if (archiveStatsRefreshPending || JSON.stringify(range) !== JSON.stringify(getStatsRange())) return;
+        lastArchiveStats = result;
         renderArchiveStats(lastArchiveStats);
         if (status) status.textContent = '';
+        await refreshDownloadHistory();
     } catch (error) {
         if (status) {
             status.textContent = UI_TEXT.static.errorPrefix + ': ' + (error instanceof Error ? error.message : String(error));
@@ -31,15 +39,19 @@ async function refreshArchiveStats(): Promise<void> {
             const button = document.getElementById(id) as HTMLButtonElement | null;
             if (button) button.disabled = false;
         }
+        if (archiveStatsRefreshPending) { archiveStatsRefreshPending = false; void refreshArchiveStats(); }
     }
 }
 
 function refreshArchiveStatsTexts(): void {
+    refreshStatsFilterTexts();
     if (lastArchiveStats) renderArchiveStats(lastArchiveStats);
+    void refreshDownloadHistory();
     if (archiveStatsRefreshInFlight) setText('statsStatus', UI_TEXT.static.statsScanning);
 }
 
 function renderArchiveStats(stats: ArchiveStats): void {
+    refreshStatsFilterTexts();
     setText('statsLastScannedLabel', UI_TEXT.static.statsScannedAt + ': ' + formatUiDateTime(new Date(stats.scannedAt)));
     const lifetime = stats.lifetime;
     setText('statsTrackingSince', lifetime?.available && lifetime.trackedSince
@@ -109,6 +121,16 @@ function renderStatsTopStreamers(top: ArchiveStatsTopStreamer[], totalBytes: num
 }
 
 function renderStatsActivity(days: ArchiveStatsDay[], unknownDates = 0): void {
+    const originalDays = days;
+    if (days.length > 90) {
+        const width = Math.ceil(days.length / 90);
+        days = [];
+        for (let i = 0; i < originalDays.length; i += width) {
+            const group = originalDays.slice(i, i + width);
+            days.push({ date: group[0].date, count: group.reduce((sum, day) => sum + day.count, 0), bytes: group.reduce((sum, day) => sum + day.bytes, 0) });
+        }
+    }
+    setText('statsActivityTitle', (currentLanguage === 'de' ? 'Download-Aktivität · ' : 'Download activity · ') + formatUiNumber(originalDays.length) + (currentLanguage === 'de' ? ' Tage' : ' days'));
     const container = document.getElementById('statsActivity');
     if (!container) return;
     const totalCount = days.reduce((sum, day) => sum + day.count, 0);
@@ -118,7 +140,7 @@ function renderStatsActivity(days: ArchiveStatsDay[], unknownDates = 0): void {
         const date = new Date(day.date + 'T12:00:00');
         const dateLabel = new Intl.DateTimeFormat(getIntlLocale(), { day: 'numeric', month: 'short' }).format(date);
         const tooltip = dateLabel + ': ' + formatUiNumber(day.count) + ' ' + UI_TEXT.static.statsDownloads + ' · ' + formatBytes(day.bytes);
-        const showLabel = index === 0 || index === days.length - 1 || (index % 7 === 0 && days.length - 1 - index >= 4);
+        const showLabel = index === 0 || index === days.length - 1 || (index % Math.max(7, Math.ceil(days.length / 5)) === 0 && days.length - 1 - index >= 4);
         const height = day.count > 0 ? Math.max(3, day.count / maxCount * 100) : 0;
         return '<div class="stats-day-col" title="' + escapeHtml(tooltip) + '"><div class="stats-day-bar-track"><div class="stats-day-bar-fill" style="height:' + height + '%"></div></div><span class="stats-day-label">' + (showLabel ? escapeHtml(dateLabel) : '') + '</span></div>';
     }).join('');
@@ -142,3 +164,99 @@ function renderStatsSizeBuckets(buckets: ArchiveStatsBucket[]): void {
 }
 
 (window as unknown as { refreshArchiveStats: typeof refreshArchiveStats }).refreshArchiveStats = refreshArchiveStats;
+
+
+function getStatsRange(): { days?: 7 | 30 | 90; since?: string; until?: string } | undefined {
+    const range = (document.getElementById('statsRange') as HTMLSelectElement | null)?.value || 'all';
+    if (range === 'all') return undefined;
+    if (range !== 'custom') return { days: Number(range) as 7 | 30 | 90 };
+    const since = (document.getElementById('statsSince') as HTMLInputElement | null)?.value || '';
+    const until = (document.getElementById('statsUntil') as HTMLInputElement | null)?.value || '';
+    if (!since || !until || since > until) throw new Error(currentLanguage === 'de' ? 'Zeitraum prüfen.' : 'Check the date range.');
+    return { since, until };
+}
+
+function changeStatsRange(): void {
+    const custom = (document.getElementById('statsRange') as HTMLSelectElement | null)?.value === 'custom';
+    const fields = document.getElementById('statsCustomRange');
+    if (fields) fields.hidden = !custom;
+    if (custom) {
+        const format = (date: Date) => String(date.getFullYear()).padStart(4, '0') + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+        const until = document.getElementById('statsUntil') as HTMLInputElement;
+        const since = document.getElementById('statsSince') as HTMLInputElement;
+        if (!until.value) until.value = format(new Date());
+        if (!since.value) { const start = new Date(); start.setDate(start.getDate() - 29); since.value = format(start); }
+    }
+    downloadHistoryOffset = 0;
+    void refreshArchiveStats();
+}
+
+function refreshStatsFilterTexts(): void {
+    const de = currentLanguage === 'de';
+    for (const [id, text] of Object.entries({ statsRangeLabel: de ? 'Zeitraum' : 'Date range', statsSinceLabel: de ? 'Von' : 'From', statsUntilLabel: de ? 'Bis' : 'Until', statsHistoryTitle: de ? 'Downloadverlauf' : 'Download history', statsExportCsv: de ? 'Statistik als CSV' : 'Export statistics', historyQueryLabel: de ? 'Titel oder Streamer' : 'Title or channel', historyKindLabel: de ? 'Typ' : 'Type', historyPrevious: de ? 'Zurück' : 'Previous', historyNext: de ? 'Weiter' : 'Next' })) setText(id, text);
+    const kind = document.getElementById('historyKind') as HTMLSelectElement | null;
+    if (kind?.options[0]) kind.options[0].textContent = de ? 'Alle' : 'All';
+    const range = document.getElementById('statsRange') as HTMLSelectElement | null;
+    if (range) for (const option of Array.from(range.options)) option.textContent = option.value === 'all' ? de ? 'Gesamt' : 'All time' : option.value === 'custom' ? de ? 'Benutzerdefiniert' : 'Custom' : option.value + (de ? ' Tage' : ' days');
+}
+
+function getDownloadHistoryFilter() {
+    return { ...getStatsRange(), query: (document.getElementById('historyQuery') as HTMLInputElement | null)?.value.trim() || '', kind: ((document.getElementById('historyKind') as HTMLSelectElement | null)?.value || 'all') as 'all' | 'vod' | 'clip' | 'live', offset: downloadHistoryOffset, limit: 50 };
+}
+
+function onDownloadHistoryInput(): void {
+    downloadHistoryOffset = 0;
+    if (downloadHistoryTimer !== null) window.clearTimeout(downloadHistoryTimer);
+    downloadHistoryTimer = window.setTimeout(() => { downloadHistoryTimer = null; void refreshDownloadHistory(); }, 250);
+}
+
+async function refreshDownloadHistory(): Promise<void> {
+    const host = document.getElementById('downloadHistory');
+    if (!host) return;
+    const sequence = ++downloadHistorySequence;
+    host.setAttribute('aria-busy', 'true');
+    try {
+        const result = await window.api.searchDownloadHistory(getDownloadHistoryFilter());
+        if (sequence !== downloadHistorySequence) return;
+        downloadHistoryOffset = result.offset;
+        const fragment = document.createDocumentFragment();
+        for (const entry of result.entries) {
+            const row = document.createElement('article'); row.className = 'download-history-row';
+            const content = document.createElement('div'); content.className = 'download-history-body';
+            const title = document.createElement('strong'); title.textContent = entry.title || (entry.kind.toUpperCase() + ' · ' + entry.sourceIds.join(', '));
+            const meta = document.createElement('div'); meta.className = 'download-history-meta';
+            const presence = { present: currentLanguage === 'de' ? 'Datei vorhanden' : 'File available', partial: currentLanguage === 'de' ? 'Teilweise vorhanden' : 'Some files missing', missing: currentLanguage === 'de' ? 'Datei fehlt' : 'File missing', unknown: currentLanguage === 'de' ? 'Dateipfad unbekannt' : 'File path unknown' };
+            meta.textContent = [entry.channel, entry.completedAt ? formatUiDateTime(new Date(entry.completedAt)) : (currentLanguage === 'de' ? 'Datum unbekannt' : 'Date unknown'), formatBytes(entry.totalBytes), presence[entry.filePresence]].filter(Boolean).join(' · ');
+            content.append(title, meta);
+            if (entry.sourceUrl) { const source = document.createElement('div'); source.className = 'download-history-source'; source.textContent = entry.sourceUrl; content.append(source); }
+            row.append(content);
+            if (entry.availablePaths[0]) {
+                const open = document.createElement('button'); open.type = 'button'; open.className = 'btn-secondary'; open.textContent = currentLanguage === 'de' ? 'Ordner' : 'Folder';
+                open.addEventListener('click', () => showFileInFolder(entry.availablePaths[0])); row.append(open);
+            }
+            fragment.append(row);
+        }
+        if (!result.entries.length) { const empty = document.createElement('div'); empty.className = 'insights-empty'; empty.textContent = currentLanguage === 'de' ? 'Keine Downloads gefunden.' : 'No downloads found.'; fragment.append(empty); }
+        host.replaceChildren(fragment);
+        setText('downloadHistoryStatus', formatUiNumber(result.total) + (currentLanguage === 'de' ? ' Downloads' : ' downloads'));
+        const previous = document.getElementById('historyPrevious') as HTMLButtonElement | null;
+        const next = document.getElementById('historyNext') as HTMLButtonElement | null;
+        if (previous) previous.disabled = result.offset === 0;
+        if (next) next.disabled = result.offset + result.entries.length >= result.total;
+    } catch (error) {
+        if (sequence === downloadHistorySequence) setText('downloadHistoryStatus', error instanceof Error ? error.message : String(error));
+    } finally { if (sequence === downloadHistorySequence) host.setAttribute('aria-busy', 'false'); }
+}
+
+function changeDownloadHistoryPage(direction: number): void {
+    if (Math.abs(direction) !== 1) return;
+    downloadHistoryOffset = Math.max(0, downloadHistoryOffset + direction * 50);
+    void refreshDownloadHistory();
+}
+
+async function exportStatsCsv(): Promise<void> {
+    try { await window.api.exportStatistics(getStatsRange()); }
+    catch (error) { setText('statsStatus', error instanceof Error ? error.message : String(error)); }
+}
+
+Object.assign(window, { changeStatsRange, onDownloadHistoryInput, changeDownloadHistoryPage, exportStatsCsv });

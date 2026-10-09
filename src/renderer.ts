@@ -43,6 +43,7 @@ async function init(): Promise<void> {
     byId<HTMLInputElement>('partsFilenameTemplate').value = (config.filename_template_parts as string) || DEFAULT_PARTS_TEMPLATE;
     byId<HTMLInputElement>('defaultClipFilenameTemplate').value = (config.filename_template_clip as string) || DEFAULT_CLIP_TEMPLATE;
     initSettingsAutoSave();
+    initializeCleanupPreview();
 
     applyRendererTheme(config.theme ?? 'twitch');
     renderStreamers();
@@ -79,6 +80,7 @@ async function init(): Promise<void> {
     initVodScrollTracking();
     initCutterDragDrop();
     initCutterEditor();
+    initializeEditingWorkflows();
     void restoreWorkspace();
 
     // Restore last active tab from previous session (default 'vods')
@@ -1996,6 +1998,7 @@ async function confirmClipDialog(): Promise<void> {
 type ClipBatchState = 'ready' | 'active' | 'done' | 'failed' | 'invalid' | 'stopped';
 type ClipMetadataState = 'pending' | 'loading' | 'ready' | 'missing' | 'unavailable';
 interface ClipBatchItem {
+    previouslyDownloaded?: boolean;
     url: string;
     label: string;
     streamer: string;
@@ -2063,6 +2066,7 @@ function receiveClipProgress(progress: ClipTransferProgress): void {
     if (!item || (activeClipRequestId && activeClipRequestId !== progress.requestId)) return;
     item.transfer = progress;
     item.state = progress.state;
+    if (progress.state === 'done') RendererClipDiscovery.remember(item.url);
     item.error = progress.error;
     if (progress.filename) item.filename = progress.filename;
     if (progress.state === 'active') activeClipRequestId = progress.requestId;
@@ -2090,6 +2094,7 @@ async function restoreWorkspace(): Promise<void> {
     try {
         const session = await window.api.getWorkspaceSession();
         if (session) {
+            if (session.automationPaused) showAppToast(currentLanguage === 'de' ? 'Sicherung wiederhergestellt. Automatik für diesen Start pausiert.' : 'Backup restored. Automation is paused for this session.');
             clipBatchItems = session.clips.map(item => ({ ...item, metadataState: item.metadataState === 'loading' ? 'pending' : item.metadataState }));
             byId<HTMLTextAreaElement>('clipUrl').value = clipBatchItems.map(item => item.url).join('\n');
             mergeFiles = session.mergeFiles;
@@ -2109,6 +2114,7 @@ async function restoreWorkspace(): Promise<void> {
         requestClipMetadata();
         requestMergeDurations();
         renderClipBatch();
+        void RendererClipDiscovery.annotate(clipBatchItems, item => { if (clipBatchItems.includes(item)) scheduleClipBatchRender(item); });
         renderMergeFiles();
     }
 }
@@ -2237,6 +2243,7 @@ function updateClipLinks(): void {
     requestClipMetadata();
     renderClipBatch();
     persistClipWorkspace();
+    void RendererClipDiscovery.annotate(clipBatchItems, item => { if (clipBatchItems.includes(item)) scheduleClipBatchRender(item); });
 }
 
 function clearClipLinks(): void {
@@ -2395,7 +2402,7 @@ function renderClipBatchRow(item: ClipBatchItem, index: number): void {
     const status = transfer ? transfer.phase === 'preparing' ? (currentLanguage === 'de' ? 'Vorbereiten …' : 'Preparing …')
         : transfer.phase === 'saving' ? (currentLanguage === 'de' ? 'Speichern …' : 'Saving …')
         : formatBytesForMetrics(transfer.bytes) + ' · ' + formatBytesForMetrics(transfer.bytesPerSecond) + '/s'
-        : item.state === 'invalid' ? UI_TEXT.clips.invalidUrl : item.error || UI_TEXT.clips[item.state];
+        : item.state === 'invalid' ? UI_TEXT.clips.invalidUrl : item.error || RendererClipDiscovery.status(item) || UI_TEXT.clips[item.state];
     setClipText(elements.status, status);
     elements.status.title = status;
     const kind = item.state === 'done' ? 'done' : item.state === 'failed' || item.state === 'invalid' ? 'error' : item.state === 'active' || item.metadataState === 'loading' ? 'loading' : 'ready';
@@ -2622,6 +2629,17 @@ function dropMergeFile(targetId: string, after: boolean): void {
 
 
 
+
+async function addArchiveToMerge(files: MergeFileReference[]): Promise<void> {
+    if (workspaceLoading || isMerging || mergeFilePickerInFlight) throw new Error('Merge unavailable');
+    if (mergeFiles.length + files.length > 500) throw new Error('Maximum 500 videos');
+    mergeFiles = [...mergeFiles, ...files];
+    persistMergeWorkspace();
+    requestMergeDurations();
+    renderMergeFiles();
+    showTab('merge');
+}
+
 async function addMergeFiles(): Promise<void> {
     if (workspaceLoading || isMerging || mergeFilePickerInFlight) return;
     mergeFilePickerInFlight = true;
@@ -2769,31 +2787,19 @@ function removeMergeFile(index: number): void {
 }
 
 async function startMerging(): Promise<void> {
-    if (workspaceLoading || mergeFiles.length < 2 || isMerging || mergeFilePickerInFlight || mergeFiles.some(file => file.missing)) return;
-    isMerging = true;
-    renderMergeFiles();
-    try {
-        const output = await window.api.saveVideoDialog('merged_video.mp4');
-        if (!output) return;
-        byId('mergeProgressBar').style.width = '0%';
-        byId('mergeProgressText').textContent = '0%';
-        byId('mergeProgressGauge').setAttribute('aria-valuenow', '0');
-        byId('mergeProgress').classList.add('show');
-        const result = await window.api.mergeVideos(mergeFiles.map(file => file.token), output.token);
-        if (!result?.success) {
-            showAppToast(UI_TEXT.merge.failed, 'warn');
-            return;
-        }
-        showAppToast(UI_TEXT.merge.success);
-        mergeFiles = [];
-        persistMergeWorkspace();
-    } catch {
-        showAppToast(UI_TEXT.merge.failed, 'warn');
-    } finally {
-        isMerging = false;
-        byId('mergeProgress').classList.remove('show');
-        renderMergeFiles();
-    }
+    await showMergeExportOptions(true);
 }
 
 void init();
+
+function importDiscoveredClips(clips: import('./main/domain/clip-discovery').DiscoveredClip[]): void {
+    if (workspaceLoading || clipDownloadInFlight) throw new Error('Clip import unavailable');
+    const existing = new Set(clipBatchItems.map(item => item.url));
+    const added = clips.filter(clip => !existing.has(clip.url));
+    if (clipBatchItems.length + added.length > 200) throw new Error('Clip limit exceeded');
+    for (const clip of added) clipBatchItems.push({ url: clip.url, label: clip.title, streamer: clip.channel, metadataState: 'ready', state: 'ready', previouslyDownloaded: clip.downloaded });
+    byId<HTMLTextAreaElement>('clipUrl').value = clipBatchItems.map(item => item.url).join('\n');
+    renderClipBatch();
+    persistClipWorkspace();
+}
+Object.assign(window, { importDiscoveredClips });

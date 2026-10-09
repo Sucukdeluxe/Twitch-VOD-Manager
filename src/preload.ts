@@ -91,6 +91,7 @@ interface RuntimeMetricsSnapshot {
 }
 
 interface VideoInfo {
+    sourceFormat?: import('./main/domain/media-format').VideoSourceFormat;
     duration: number;
     width: number;
     height: number;
@@ -134,6 +135,8 @@ interface VideoEditorAssetProfile {
 }
 
 interface VideoEditExportRequest {
+    allAudioStreams?: boolean;
+    colorMode?: 'source' | 'sdr';
     inputCapability: string;
     outputName?: string;
     trimStart: number;
@@ -212,7 +215,11 @@ contextBridge.exposeInMainWorld('api', {
     openDebugLogFile: () => ipcRenderer.invoke('open-debug-log-file'),
     checkFolderWritable: (capability: string) => ipcRenderer.invoke('check-folder-writable', capability),
     getStorageStats: () => ipcRenderer.invoke('get-storage-stats'),
-    getArchiveStats: () => ipcRenderer.invoke('get-archive-stats'),
+    getArchiveStats: (range?: import('./main/domain/download-history-store').DownloadHistoryRange) => ipcRenderer.invoke('get-archive-stats', range),
+    prepareArchiveVideos: (paths: string[], target: 'cutter' | 'merge') => ipcRenderer.invoke('prepare-archive-videos', paths, target),
+    searchDownloadHistory: (filter?: import('./main/domain/download-history-store').DownloadHistoryFilter) => ipcRenderer.invoke('search-download-history', filter),
+    hasDownloadedClip: (clipId: string) => ipcRenderer.invoke('has-downloaded-clip', clipId),
+    exportStatistics: (range?: import('./main/domain/download-history-store').DownloadHistoryRange) => ipcRenderer.invoke('export-statistics', range),
     getStreamerProfile: (login: string, forceRefresh?: boolean) => ipcRenderer.invoke('get-streamer-profile', login, forceRefresh),
     getStreamerDisplayNames: (logins: string[]) => ipcRenderer.invoke('get-streamer-display-names', logins),
     getVodStoryboard: (vodId: string) => ipcRenderer.invoke('get-vod-storyboard', vodId),
@@ -221,7 +228,8 @@ contextBridge.exposeInMainWorld('api', {
         ipcRenderer.on('live-status-batch-update', (_, info) => callback(info));
     },
     searchArchive: (filter: Record<string, unknown>) => ipcRenderer.invoke('search-archive', filter),
-    runStorageCleanup: (options?: { dryRun?: boolean }) => ipcRenderer.invoke('run-storage-cleanup', options),
+    recoverStorageCleanup: () => ipcRenderer.invoke('recover-storage-cleanup'),
+    runStorageCleanup: (options?: { dryRun?: boolean; token?: string }) => ipcRenderer.invoke('run-storage-cleanup', options),
     readChatFile: async (filePath: string, signal?: AbortSignal) => {
         const capability = await ipcRenderer.invoke('authorize-managed-path', 'chat-input', filePath);
         if (!capability) return { success: false, error: 'File access denied' };
@@ -283,6 +291,23 @@ contextBridge.exposeInMainWorld('api', {
         ipcRenderer.invoke('reset-downloaded-vod-ids'),
     markVodDownloaded: (vodId: string, mark: boolean): Promise<{ success: boolean }> =>
         ipcRenderer.invoke('mark-vod-downloaded', vodId, mark),
+    listNamedCutterProjects: () => ipcRenderer.invoke('editing-projects-list'),
+    saveNamedCutterProject: (token: string, project: unknown, name: string, saveAs = false) => ipcRenderer.invoke('editing-project-save', token, project, name, saveAs),
+    openNamedCutterProject: (id?: string) => ipcRenderer.invoke('editing-project-open', id),
+    listExportJobs: () => ipcRenderer.invoke('editing-jobs-list'),
+    enqueueCutterExport: (token: string, project: unknown) => ipcRenderer.invoke('editing-job-cut', token, project),
+    inspectMergeExport: (ids: string[]) => ipcRenderer.invoke('editing-merge-inspect', ids),
+    enqueueMergeExport: (ids: string[], mode: 'copy' | 'encode') => ipcRenderer.invoke('editing-job-merge', ids, mode),
+    exportJobAction: (action: string, id?: string) => ipcRenderer.invoke('editing-job-action', action, id),
+    onExportJobsChanged: (callback: (state: unknown) => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state);
+        ipcRenderer.on('editing-jobs-changed', listener);
+        return () => ipcRenderer.removeListener('editing-jobs-changed', listener);
+    },
+
+    discoverClips: (request: import('./main/domain/clip-discovery').ClipDiscoveryRequest) => ipcRenderer.invoke('discover-clips', request),
+    exportApplicationBackup: () => ipcRenderer.invoke('export-application-backup'),
+    restoreApplicationBackup: () => ipcRenderer.invoke('restore-application-backup'),
     exportConfig: (): Promise<{ success: boolean; cancelled?: boolean; error?: string; filePath?: string }> =>
         ipcRenderer.invoke('export-config'),
     importConfig: (): Promise<{ success: boolean; cancelled?: boolean; error?: string; filePath?: string }> =>

@@ -16,6 +16,11 @@ const checks = [
     ['installer-contract', ['--test', 'scripts/smoke-test-installer.test.js']],
     ['update-version', ['scripts/smoke-test-update-version-logic.js']],
     ...['clips-row-position', 'clips-rework', 'clips-stable-layout', 'clips-metadata', 'full-cutter-audit', 'full-queue-audit', 'layout-consistency', 'insights-integrated', 'full-workspace-audit'].flatMap(name => ['chromium', 'webkit'].map(browser => [name + '-' + browser, ['scripts/smoke-test-' + name + '.js', ...(browser === 'webkit' ? ['--webkit'] : []), ...(name === 'full-workspace-audit' ? ['--expect-refined'] : [])]])),
+    ['roadmap-projects', ['scripts/smoke-test-roadmap-projects.js']],
+    ['roadmap-cleanup', ['scripts/smoke-test-roadmap-cleanup.js']],
+    ['roadmap-cleanup-ui', ['scripts/smoke-test-roadmap-cleanup-ui.js']],
+    ['roadmap-native', ['scripts/smoke-test-roadmap-native.js']],
+    ...['archive', 'clips'].flatMap(name => ['chromium', 'webkit'].map(browser => ['roadmap-' + name + '-' + browser, ['scripts/smoke-test-roadmap-' + name + '.js', ...(browser === 'webkit' ? ['--webkit'] : [])]])),
     ['vod-playback', ['scripts/smoke-test-full-vod-audit.js']],
 ];
 await mkdir(output, { recursive: true });
