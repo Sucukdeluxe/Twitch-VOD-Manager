@@ -28,11 +28,12 @@ The application works in public mode without a Twitch login. Connecting a Twitch
 - Refresh content quietly in the background every five minutes
 - Search, sort and filter VODs with stable cards and localized metadata
 - Preview high-resolution frames without leaving the application
-- Track completed downloads in the archive and review aggregate statistics
+- Search recordings in the archive and keep lifetime download statistics even after local files are removed
 
 ### Download and process
 
-- Download complete VODs or selected time ranges
+- Download complete VODs or selected time ranges in Source quality
+- Paste up to 200 clip links with title previews, duplicate detection and retry controls
 - Edit local videos with frame-accurate trimming, removable ranges, timeline zoom, waveform guidance and undo or redo
 - Split and merge recordings with dedicated tools
 - Queue multiple jobs and follow real progress, speed and remaining time
@@ -43,7 +44,7 @@ The application works in public mode without a Twitch login. Connecting a Twitch
 ### Desktop experience
 
 - Compact navigation with animated selection states
-- Separate settings pages for appearance, Twitch, downloads, automation, storage, maintenance, updates and diagnostics
+- Six settings groups for general preferences, Twitch, downloads, automation, storage and diagnostics
 - Light, Dark and System themes
 - English and German interface languages
 - Optional split Streamer and Queue sidebar
@@ -61,7 +62,7 @@ The application works in public mode without a Twitch login. Connecting a Twitch
 ## Installation
 
 1. Open the [latest GitHub release](https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/latest).
-2. Download `Twitch-VOD-Manager-Setup-1.0.24.exe`.
+2. Download `Twitch-VOD-Manager-Setup-1.0.25.exe`.
 3. Run the installer and choose the installation directory.
 4. Start Twitch VOD Manager and add a streamer.
 

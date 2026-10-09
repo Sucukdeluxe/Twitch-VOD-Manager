@@ -160,6 +160,12 @@
     "src/workspace-refinements.css",
     "src/workspace.css",
     "tsconfig.json",
-    "vitest.config.mjs"
+    "vitest.config.mjs",
+    "src/main/domain/archive-inventory.ts",
+    "src/main/domain/download-history-store.ts",
+    "src/main/infra/download-history-schema.ts",
+    "src/main/twitch/clip-info.ts",
+    "src/main/twitch/clip-url.ts",
+    "src/workspace-insights.css"
   ]
 }

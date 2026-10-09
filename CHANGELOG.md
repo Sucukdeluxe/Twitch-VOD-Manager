@@ -2,10 +2,66 @@
 
 ## Unreleased
 
-- Reorganize settings into six groups with larger text, clearer system status, compact forms and stable language/theme selection.
-- Refine VOD filters, streamer actions and sidebar counters; add visible dropdown chevrons and remove click focus rings.
-- Replace sliding top navigation with a short crossfade and identify development builds in the window title and header.
-- Reuse verified development builds, serialize startup preparation, prevent duplicate app instances and show the window after its first render.
+## 1.0.25 - 2026-10-09
+
+This update rebuilds Twitch Clips for batch downloads, preserves download statistics when files are removed, and simplifies navigation and settings. Twitch downloads and previews now consistently use Source quality.
+
+### Twitch Clips for single links and large batches
+
+- Paste up to 200 Twitch clip links, one per line, into a centered workspace. The separate Clips sidebar and duplicate toolbar have been removed.
+- Clip titles and streamer names load as links are added. The list shows the actual clip information instead of the URL identifier, before a download starts.
+- Both Twitch clip URL formats are supported, including links with additional query parameters. Duplicate links to the same clip are recognized even when their URL format differs.
+- Public clip lookup works without a connected Twitch account. Missing clips and connection failures are handled separately instead of reporting every lookup problem as “Clip not found.”
+- Each entry shows its download state. Failed clips can be retried without downloading successful entries again; stopping a batch finishes the current clip and leaves the remaining entries available to continue.
+- A new loading indicator and green completion icon make states easier to distinguish. Updating progress or clip information preserves existing rows and their animations.
+- The input area, results list and surrounding controls stay in place as clips are added. Long lists scroll internally, and existing text and icons no longer shift when a separator or scrollbar appears.
+- Messages appear without moving the workspace and disappear after five seconds. Completion messages use the correct singular or plural and omit unnecessary zero counts.
+
+### Download statistics that remain available
+
+- VOD, clip and live-recording totals are stored independently of the files currently in the download folder. Removing a video or clearing completed queue entries no longer resets those totals.
+- The redesigned Statistics page separates completed downloads and downloaded data from the current folder contents.
+- Review activity over the last 30 days, storage by streamer and the size distribution of archived videos. Counts follow the selected interface language.
+- Previously saved completed queue entries are included where available. Downloads deleted before a completion record was stored cannot be reconstructed.
+- Refresh errors preserve the last available figures and show the relevant status in place.
+
+### A clearer archive
+
+- Archive search uses the full workspace without a redundant sidebar. Search, recording type, streamer and sorting controls are grouped above the results.
+- Clip files are assigned to their streamer correctly, and available streamer filters come from the current file inventory.
+- Folder scanning runs in the background. Rapid changes to a search keep the latest results, while longer result lists scroll inside a stable area.
+- File actions and matching chat or event files remain accessible from each recording.
+
+### Source quality throughout Twitch downloads
+
+- Full VODs, selected VOD ranges, parts, live recordings, clips and the VOD player request Source quality.
+- Older saved or imported quality preferences are updated to Source automatically. The setting now displays the fixed quality directly.
+
+### Navigation and VOD controls
+
+- The active navigation tab fills the height of the bar. Labels scale for wider windows, and tab changes use a short fade instead of a sliding selection bar.
+- The Streamer and Queue headings, counters and empty states have matching spacing. Streamer entry and title-filter fields use more compact widths.
+- Streamer actions are grouped consistently, with a green add button and a single refresh action. The Twitch profile link has a purple button with recognizable icons.
+- Sorting controls have visible dropdown arrows, the downloaded filter has clearer contrast, and unwanted click outlines and the bulk-selection tooltip have been removed.
+- The merge workspace is centered in the available area. Clips, Statistics and Archive no longer show unnecessary context sidebars.
+
+### Settings with fewer sections
+
+- Settings are grouped into General, Twitch API, Downloads, Automation, Storage & Backup, and System & Diagnostics. Appearance and updates are part of General.
+- Shorter labels, more readable text and compact number fields reduce wasted space. Auto-VOD interval and age fields line up with their action buttons.
+- Language selection opens in its saved position without an initial slide. Theme controls keep their smooth selection transition.
+- System status is easier to read in both themes. Redundant explanatory blocks and permanent success messages have been removed across the application.
+
+### Faster, more reliable development startup
+
+- Verified development builds are reused instead of rebuilding every time the app opens. Changed or incomplete builds are still rebuilt before launch.
+- Startup preparation is serialized, duplicate development instances are prevented, and the window is shown after its first render.
+- Development builds identify themselves in the window title and application header.
+
+### Verification and distribution
+
+- Validation covers both interface languages, light and dark themes, different window sizes, 200-clip batches, rapid add/remove sequences and preservation of download history after file removal.
+- The Windows release includes the installer, blockmap and update metadata for the integrated updater.
 
 ## 1.0.24 - 2026-10-09
 
