@@ -537,6 +537,7 @@ const UI_TEXT_DE = {
         ctxUnmarkDownloaded: 'Markierung entfernen'
     },
     clips: {
+        listEmpty: "Noch keine Clips in der Liste.",
         batchHint: "Ein Link pro Zeile. Doppelte Links werden nur einmal geladen.",
         linksLabel: "Twitch-Links",
         clearList: "Liste leeren",

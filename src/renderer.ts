@@ -2057,7 +2057,7 @@ function renderClipBatch(): void {
     const ready = clipBatchItems.some(item => item.state === 'ready' || item.state === 'stopped');
     const format = (message: string) => message.replace('{done}', formatUiNumber(done)).replace('{total}', formatUiNumber(clipBatchItems.length)).replace('{failed}', formatUiNumber(failed));
     byId('clipsLinkCount').textContent = UI_TEXT.clips.linksCount.replace('{count}', formatUiNumber(clipBatchItems.length));
-    byId('clipsResults').hidden = clipBatchItems.length === 0;
+    byId('clipsResults').dataset.empty = String(clipBatchItems.length === 0);
     byId('clipsBatchSummary').textContent = format(UI_TEXT.clips.summary);
     const progress = clipBatchItems.length ? Math.round((done + failed) * 100 / clipBatchItems.length) : 0;
     const gauge = byId<HTMLElement>('clipsBatchProgress');
@@ -2079,7 +2079,14 @@ function renderClipBatch(): void {
     retry.hidden = !clipBatchItems.some(item => item.state === 'failed');
     retry.disabled = clipDownloadInFlight || clipBatchLimitExceeded;
     const list = byId('clipsDownloadList');
+    const scrollTop = list.scrollTop;
     const fragment = document.createDocumentFragment();
+    if (!clipBatchItems.length) {
+        const empty = document.createElement('li');
+        empty.className = 'clips-list-empty';
+        empty.textContent = UI_TEXT.clips.listEmpty;
+        fragment.append(empty);
+    }
     clipBatchItems.forEach((item, index) => {
         const row = document.createElement('li');
         row.className = 'clip-result-row ' + item.state;
@@ -2103,6 +2110,7 @@ function renderClipBatch(): void {
         fragment.append(row);
     });
     list.replaceChildren(fragment);
+    list.scrollTop = scrollTop;
 }
 
 async function downloadClip(retryFailed = false): Promise<void> {

@@ -537,6 +537,7 @@ const UI_TEXT_EN = {
         ctxUnmarkDownloaded: 'Unmark downloaded'
     },
     clips: {
+        listEmpty: "No clips in the list yet.",
         batchHint: "One link per line. Duplicate links are downloaded only once.",
         linksLabel: "Twitch links",
         clearList: "Clear list",
