@@ -1,3 +1,7 @@
+import { createIndexedArchiveReader } from './main/domain/archive-index';
+import { normalizeAutoVodRules, normalizeAutoVodRule, evaluateAutoVodRule, type AutoVodRules } from './main/domain/auto-vod-rules';
+import { validAudioProcessing, type AudioProcessingOptions } from './main/domain/audio-processing';
+import { VodLibraryStore, type VodLibraryChange } from './main/domain/vod-library';
 import { createStorageCleanupService, type StorageCleanupPreview, type StorageCleanupResult } from './main/domain/storage-cleanup';
 import { discoverClips, type ClipDiscoveryRequest } from './main/domain/clip-discovery';
 import { registerEditingWorkflows } from './main/editing-workflows';
@@ -262,6 +266,7 @@ if (!fs.existsSync(APPDATA_DIR)) {
     fs.mkdirSync(APPDATA_DIR, { recursive: true });
 }
 const partialDownloadRegistry = new PartialDownloadRegistry(PARTIAL_DOWNLOADS_FILE);
+const vodLibrary = new VodLibraryStore(path.join(APPDATA_DIR, 'vod-library.json'));
 const cutterProjectAutosaves = createCutterProjectAutosaveStore(CUTTER_PROJECT_AUTOSAVE_FILE);
 
 // ==========================================
@@ -306,6 +311,7 @@ interface Config {
     auto_cleanup_action: 'delete' | 'archive';
     log_stream_events: boolean;
     auto_vod_download_streamers: string[];
+    auto_vod_rules: AutoVodRules;
     auto_vod_download_poll_minutes: number;
     auto_vod_max_age_hours: number;
     auto_resume_live_recording: boolean;
@@ -433,6 +439,7 @@ interface VideoEditorAssetProfile {
 interface VideoEditExportRequest {
     allAudioStreams?: boolean;
     colorMode?: CutterColorMode;
+    audioProcessing?: AudioProcessingOptions;
     inputFile: string;
     outputFile: string;
     trimStart: number;
@@ -446,6 +453,7 @@ interface VideoEditExportRequest {
 interface RendererVideoEditExportRequest {
     allAudioStreams?: boolean;
     colorMode?: CutterColorMode;
+    audioProcessing?: AudioProcessingOptions;
     inputCapability: string;
     outputName?: string;
     trimStart: number;
@@ -506,6 +514,7 @@ const defaultConfig: Config = {
     auto_cleanup_action: 'archive',
     log_stream_events: true,
     auto_vod_download_streamers: [],
+    auto_vod_rules: {},
     auto_vod_download_poll_minutes: 15,
     auto_vod_max_age_hours: 24,
     auto_resume_live_recording: true,
@@ -583,6 +592,7 @@ function normalizeConfigTemplates(input: Config): Config {
         auto_cleanup_action: input.auto_cleanup_action === 'delete' ? 'delete' : 'archive',
         log_stream_events: input.log_stream_events !== false,
         auto_vod_download_streamers: normalizeAutoRecordList(input.auto_vod_download_streamers),
+        auto_vod_rules: normalizeAutoVodRules(input.auto_vod_rules),
         auto_vod_download_poll_minutes: (() => {
             const n = Number(input.auto_vod_download_poll_minutes);
             if (!Number.isFinite(n)) return 15;
@@ -782,8 +792,8 @@ interface QueueLoadResult {
     interruptedMergeItemIds: Set<string>;
 }
 
-function loadQueue(): QueueLoadResult {
-    if (config.persist_queue_on_restart === false) {
+function loadQueue(restored = false): QueueLoadResult {
+    if (config.persist_queue_on_restart === false && !restored) {
         return { queue: [], interruptedMergeItemIds: new Set() };
     }
 
@@ -3208,8 +3218,10 @@ function createCutterProject(filePath: string, info: VideoInfo, value: unknown):
     } catch {
         return null;
     }
+    if (!validAudioProcessing(project.audioProcessing, getPlayableSegments(state).reduce((sum, segment) => sum + segment.end - segment.start, 0))) return null;
     return {
         source,
+        ...(project.audioProcessing ? { audioProcessing: { ...project.audioProcessing as AudioProcessingOptions } } : {}),
         duration: info.duration,
         fps: info.fps,
         trimStart: state.trimStart,
@@ -3327,6 +3339,7 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
         audioStreams: info.audioStreams,
         sourceFormat: info.sourceFormat,
         colorMode: request.colorMode,
+        audioProcessing: request.audioProcessing,
         rotation: info.rotation,
     });
     if (plan.filterComplex.length > 24000 || cutterExportCancelled) return false;
@@ -3375,6 +3388,7 @@ async function performVideoEditExport(request: VideoEditExportRequest, onProgres
         audioStreams: info.audioStreams,
         sourceFormat: info.sourceFormat,
         colorMode: request.colorMode,
+        audioProcessing: request.audioProcessing,
             rotation: info.rotation,
         });
         success = await runPlan(plan);
@@ -4470,7 +4484,7 @@ async function runAutoVodPoll(): Promise<AutomationScanResult> {
             if (!Number.isFinite(n)) return 24;
             return Math.max(1, Math.min(720, Math.floor(n)));
         })();
-        const cutoffMs = Date.now() - maxAgeHours * 3600 * 1000;
+        const scanTime = Date.now();
 
         const downloadedSet = new Set(Array.isArray(config.downloaded_vod_ids) ? config.downloaded_vod_ids : []);
         for (const streamer of list) {
@@ -4498,8 +4512,7 @@ async function runAutoVodPoll(): Promise<AutomationScanResult> {
                 if (!vod || !vod.id || !vod.url) continue;
                 if (downloadedSet.has(vod.id)) continue;
 
-                const createdMs = Date.parse(vod.created_at || '');
-                if (!Number.isFinite(createdMs) || createdMs < cutoffMs) continue;
+                if (evaluateAutoVodRule(config.auto_vod_rules[streamer.toLowerCase()], vod, scanTime, maxAgeHours) !== 'match') continue;
 
                 const queueItem: QueueItem = {
                     id: generateQueueItemId(),
@@ -4901,7 +4914,7 @@ async function computeStorageStats(): Promise<StorageStatsResult> {
 // ==========================================
 // ARCHIVE STATS — DASHBOARD AGGREGATION
 // ==========================================
-const readArchiveInventory = createArchiveInventoryReader();
+const readArchiveInventory = createIndexedArchiveReader(path.join(APPDATA_DIR, 'archive-index.json'));
 
 // ==========================================
 // DISCORD WEBHOOK NOTIFICATIONS
@@ -8490,7 +8503,7 @@ ipcMain.handle('export-video-edit', async (event, request: RendererVideoEditExpo
         outputFile = resolveFileCapability(event, outputCapability.token, 'cutter-output', true, [inputFile]);
     }
     if (!outputFile) return { success: false, outputName: null };
-    const outcome = await exportVideoEdit({ inputFile, outputFile, trimStart: request.trimStart, trimEnd: request.trimEnd, cuts: request.cuts, profile, encoder, audioStreamIndex, allAudioStreams: request.allAudioStreams, colorMode: request.colorMode }, (percent) => {
+    const outcome = await exportVideoEdit({ inputFile, outputFile, trimStart: request.trimStart, trimEnd: request.trimEnd, cuts: request.cuts, profile, encoder, audioStreamIndex, allAudioStreams: request.allAudioStreams, colorMode: request.colorMode, audioProcessing: request.audioProcessing }, (percent) => {
         mainWindow?.webContents.send('cut-progress', percent);
     });
     const outputCapability = outcome.success ? issueFileCapability(event, 'show-in-folder', outputFile, 'input-file', [extension]) : null;
@@ -8714,9 +8727,9 @@ app.whenReady().then(async () => {
         appStateStore = createAppStateStore(database);
         config = loadConfig();
         lastPersistedConfig = cloneConfig(config);
-        const queueLoad = config.persist_queue_on_restart === false
+        const queueLoad = config.persist_queue_on_restart === false && !applicationAutomationPaused
             ? { queue: [] as QueueItem[], interruptedMergeItemIds: new Set<string>() }
-            : loadQueue();
+            : loadQueue(applicationAutomationPaused);
         downloadQueue = queueLoad.queue;
         for (const item of downloadQueue) {
             if (item.mergeRecoveryBlocked) queueLoad.interruptedMergeItemIds.add(item.id);
@@ -8733,7 +8746,7 @@ app.whenReady().then(async () => {
                 failedFiles: mergeRecovery.failedFiles.length,
             });
         }
-        if (config.persist_queue_on_restart === false) appStateStore.saveQueue([]);
+        if (config.persist_queue_on_restart === false && !applicationAutomationPaused) appStateStore.saveQueue([]);
         lastPersistedQueueSnapshot = cloneQueue(downloadQueue);
         twitchClientSecret = readSecretSafely(appSecretStore, 'twitch_client_secret', (error) => {
             appendDebugLog('secret-load-failed', { key: 'twitch_client_secret', error: String(error) });
@@ -8893,6 +8906,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
             }
         }],
         ['workspace-session', () => { workspaceSession?.flush(); }],
+        ['vod-library', () => vodLibrary.flush()],
         ['editor-processes', async () => {
             for (const process of editorProcesses) {
                 try { process.kill(); } catch { }
@@ -8914,6 +8928,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
             if (!exportProcessesExited) return;
             if (currentCutterProcess && exportProcesses.includes(currentCutterProcess)) currentCutterProcess = null;
         }],
+        ['archive-index-close', () => readArchiveInventory.dispose()],
         ['cutter-media-cancel', () => cancelCutterMediaPreparation()],
         ['cutter-waveform-cancel', () => cancelCutterWaveformPreparation()],
         ['cutter-metadata-cancel', () => cancelCutterMetadataPreparation()],
@@ -8996,7 +9011,8 @@ ipcMain.handle('export-application-backup', async event => {
         if (selected.canceled || !selected.filePath) return { success: false, cancelled: true };
         if (applicationRestoreBusy() || !workspaceSession.flush()) return { success: false, error: 'busy' };
         await applicationWorkflowFlush();
-        const result = await createApplicationBackup({ db: appDb, dataDirectory: APPDATA_DIR, appVersion: APP_VERSION, outputFile: selected.filePath });
+        await vodLibrary.flush();
+        const result = await createApplicationBackup({ db: appDb, dataDirectory: APPDATA_DIR, appVersion: APP_VERSION, outputFile: selected.filePath, queue: cloneQueue(downloadQueue) });
         return { success: true, preview: result };
     } catch (error) {
         appendDebugLog('application-backup-failed', { error: String(error) });
@@ -9031,6 +9047,8 @@ ipcMain.handle('restore-application-backup', async event => {
         if (confirmation.response !== 0) return { success: false, cancelled: true };
         if (applicationRestoreBusy() || !workspaceSession.flush()) return { success: false, error: 'busy' };
         await applicationWorkflowFlush();
+        await vodLibrary.flush();
+        await createApplicationBackup({ db: appDb, dataDirectory: APPDATA_DIR, appVersion: APP_VERSION, outputFile: path.join(APPDATA_DIR, 'before-restore-' + randomUUID() + '.tvmbackup'), queue: cloneQueue(downloadQueue) });
         await queueApplicationRestore({ filename: selected.filePaths[0], expectedDigest: details.digest, dataDirectory: APPDATA_DIR });
         app.relaunch();
         app.quit();
@@ -9078,4 +9096,24 @@ ipcMain.handle('discover-clips', async (event, request: ClipDiscoveryRequest) =>
         userId: getUserId,
         downloaded: clipId => downloadHistoryStore?.hasClip(clipId) ?? false,
     });
+});
+
+ipcMain.handle('get-vod-library', async event => {
+    if (!isTrustedRendererEvent(event)) throw new Error('Unauthorized');
+    await vodLibrary.flush();
+    return vodLibrary.read();
+});
+ipcMain.handle('change-vod-library', async (event, change: VodLibraryChange) => {
+    if (!isTrustedRendererEvent(event) || applicationBackupBusy || appShutdownStarted) throw new Error('Unavailable');
+    return vodLibrary.change(change);
+});
+
+ipcMain.handle('preview-auto-vod-rule', async (event, channel: string, value: unknown) => {
+    if (!isTrustedRendererEvent(event) || typeof channel !== 'string' || !/^[a-zA-Z0-9_]{1,25}$/.test(channel)) throw new Error('Invalid channel');
+    const rule = normalizeAutoVodRule(value);
+    const userId = await getUserId(channel);
+    if (!userId) throw new Error('Channel unavailable');
+    const vods = await getVODs(userId, true, true);
+    const now = Date.now();
+    return vods.slice(0, 100).map(vod => ({ id: vod.id, title: vod.title, duration: vod.duration, result: evaluateAutoVodRule(rule, vod, now, config.auto_vod_max_age_hours), downloaded: config.downloaded_vod_ids.includes(vod.id) }));
 });

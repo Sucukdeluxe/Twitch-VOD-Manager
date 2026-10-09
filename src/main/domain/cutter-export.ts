@@ -1,3 +1,4 @@
+import { createAudioProcessingFilters, type AudioProcessingOptions } from './audio-processing';
 import * as path from 'node:path';
 import type { EditorSegment } from './video-editor';
 import { cutterVideoFormat, readVideoSourceFormat, type VideoSourceFormat, type CutterColorMode, type CutterSoftwareCodec } from './media-format';
@@ -20,6 +21,7 @@ export const CUTTER_EXPORT_PROFILES: CutterExportProfileDefinition[] = [
 ];
 
 export interface CutterExportPlanOptions {
+    audioProcessing?: AudioProcessingOptions;
     inputFile: string;
     outputFile: string;
     segments: readonly EditorSegment[];
@@ -114,7 +116,7 @@ function videoRotationFilter(rotation: 0 | 90 | 180 | 270): string | null {
     return null;
 }
 
-function createFilterComplex(segments: readonly EditorSegment[], indices: readonly number[], rotation: 0 | 90 | 180 | 270, videoFormatFilters: readonly string[]): string {
+function createFilterComplex(segments: readonly EditorSegment[], indices: readonly number[], rotation: 0 | 90 | 180 | 270, videoFormatFilters: readonly string[], audioFilters: readonly string[]): string {
     const filters: string[] = [];
     const concatInputs: string[] = [];
     const rotationFilter = videoRotationFilter(rotation);
@@ -132,7 +134,8 @@ function createFilterComplex(segments: readonly EditorSegment[], indices: readon
             concatInputs.push(label);
         });
     });
-    filters.push(concatInputs.join('') + 'concat=n=' + segments.length + ':v=1:a=' + indices.length + '[outv]' + indices.map((_, index) => '[outa' + (index || '') + ']').join(''));
+    filters.push(concatInputs.join('') + 'concat=n=' + segments.length + ':v=1:a=' + indices.length + '[outv]' + indices.map((_, index) => '[' + (audioFilters.length ? 'rawa' : 'outa') + (index || '') + ']').join(''));
+    if (audioFilters.length) indices.forEach((_, index) => filters.push('[rawa' + (index || '') + ']' + audioFilters.join(',') + '[outa' + (index || '') + ']'));
     return filters.join(';');
 }
 
@@ -238,7 +241,7 @@ export function createCutterExportPlan(options: CutterExportPlanOptions): Cutter
     const canUseHardware = format.codec === 'libx264' && format.pixelFormat === 'yuv420p';
     const encoder = canUseHardware ? resolveEncoder(profile, requestedEncoder, options.availableHardwareEncoders ?? []) : { selectedEncoder: format.codec, hardwareFallback: requestedEncoder !== 'software' };
     const remainingDuration = round(segments.reduce((total, segment) => total + segment.end - segment.start, 0));
-    const filterComplex = createFilterComplex(segments, indices, rotation, format.filters);
+    const filterComplex = createFilterComplex(segments, indices, rotation, format.filters, createAudioProcessingFilters(options.audioProcessing, remainingDuration));
     return {
         segments,
         remainingDuration,

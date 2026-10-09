@@ -648,11 +648,12 @@ function renderStreamers(): void {
     // stays accurate after add/remove/live-status changes.
     const counter = document.getElementById('streamerSectionCounter');
     if (counter) {
-        counter.textContent = all.length === 0 ? '' : String(all.length);
+        counter.textContent = all.length === 0 ? '' : formatUiNumber(all.length);
     }
 
     const q = (streamerListFilterQuery || '').trim().toLowerCase();
-    const visible = q ? all.filter((s) => s.toLowerCase().includes(q)) : all;
+    const grouped = RendererVodLibrary.channels(all);
+    const visible = q ? grouped.filter((s) => s.toLowerCase().includes(q)) : grouped;
 
     visible.forEach((streamer: string) => {
         const item = document.createElement('div');

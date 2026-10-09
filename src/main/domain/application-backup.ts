@@ -1,3 +1,4 @@
+import { normalizeVodLibrary } from './vod-library';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
@@ -7,10 +8,10 @@ import { openDatabase, type DbHandle } from '../infra/db';
 import { isSecretBearingKey } from './config-export';
 import { sanitizeConfigInput } from './config-input';
 import { parseExportJobs } from './export-job-queue';
-import { parseRecentCutterProjects, validatePortableCutterEdit } from './portable-cutter-project';
+import { parsePortableCutterProject, parseRecentCutterProjects, portableSourceReference, validatePortableCutterEdit, type PortableCutterProject } from './portable-cutter-project';
 
 const TABLES = ['config_kv', 'queue_items', 'downloaded_vods', 'streamers', 'archive_files', 'chunk_index', 'download_history', 'download_history_details'] as const;
-const FILES = ['workspace-session.json', 'cutter-projects.json', 'recent-cutter-projects.json', 'export-jobs.json'] as const;
+const FILES = ['workspace-session.json', 'cutter-projects.json', 'recent-cutter-projects.json', 'export-jobs.json', 'vod-library.json', 'portable-project-backups.json'] as const;
 const MAX_BYTES = 128 * 1024 * 1024;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const PENDING = 'pending-restore.json';
@@ -103,6 +104,46 @@ async function writeAtomic(filename: string, bytes: string | Buffer): Promise<vo
     } finally { await fs.rm(temp, { force: true }); }
 }
 
+interface ProjectBackup { filePath: string; document: PortableCutterProject }
+
+function parseProjectBackups(value: unknown): ProjectBackup[] {
+    if (!object(value) || value.version !== 1 || !Array.isArray(value.projects) || value.projects.length > 50) throw new ApplicationBackupError('invalid');
+    return value.projects.map(entry => {
+        if (!object(entry) || typeof entry.filePath !== 'string' || entry.filePath.length > 4096 || !path.isAbsolute(entry.filePath)) throw new ApplicationBackupError('invalid');
+        return { filePath: entry.filePath, document: parsePortableCutterProject(entry.document) };
+    });
+}
+
+async function collectProjectBackups(files: BackupDocument['files']): Promise<void> {
+    const recent = parseRecentCutterProjects(files['recent-cutter-projects.json'] ? JSON.parse(files['recent-cutter-projects.json']) : undefined);
+    const projects: ProjectBackup[] = [];
+    for (const entry of recent) {
+        try {
+            const document = parsePortableCutterProject(JSON.parse((await readBounded(entry.filePath, 1024 * 1024)).toString('utf8')));
+            document.source.originalPath ??= path.resolve(path.dirname(entry.filePath), document.source.relativePath);
+            projects.push({ filePath: entry.filePath, document });
+        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+    files['portable-project-backups.json'] = JSON.stringify({ version: 1, projects });
+}
+
+async function restoreProjectBackups(document: BackupDocument, destination: string): Promise<void> {
+    const raw = document.files['portable-project-backups.json'];
+    if (!raw) return;
+    const projects = parseProjectBackups(JSON.parse(raw));
+    if (!projects.length) return;
+    await fs.mkdir(destination, { mode: 0o700 });
+    const recent = parseRecentCutterProjects(document.files['recent-cutter-projects.json'] ? JSON.parse(document.files['recent-cutter-projects.json']) : undefined);
+    for (const [index, entry] of projects.entries()) {
+        const target = path.join(destination, String(index + 1) + '.tvmcut');
+        const sourcePath = entry.document.source.originalPath ?? path.resolve(path.dirname(entry.filePath), entry.document.source.relativePath);
+        entry.document.source = { ...entry.document.source, ...portableSourceReference(target, sourcePath) };
+        await writeAtomic(target, JSON.stringify(entry.document));
+        for (const item of recent) if (path.resolve(item.filePath) === path.resolve(entry.filePath)) item.filePath = target;
+    }
+    document.files['recent-cutter-projects.json'] = JSON.stringify({ version: 1, projects: recent });
+}
+
 function parseWorkspace(filename: FileName, text: string): Record<string, unknown> {
     if (Buffer.byteLength(text) > MAX_FILE_BYTES) throw new ApplicationBackupError('too-large');
     const value: unknown = JSON.parse(text);
@@ -118,6 +159,8 @@ function parseWorkspace(filename: FileName, text: string): Record<string, unknow
     }
     if (filename === 'recent-cutter-projects.json') parseRecentCutterProjects(value);
     if (filename === 'export-jobs.json') parseExportJobs(value);
+    if (filename === 'vod-library.json') normalizeVodLibrary(value);
+    if (filename === 'portable-project-backups.json') parseProjectBackups(value);
     const clean = redact(value) as Record<string, unknown>;
     if (filename === 'export-jobs.json') for (const job of clean.jobs as Array<Record<string, unknown>>) job.error = null;
     return clean;
@@ -139,7 +182,8 @@ function parseDocument(bytes: Buffer): BackupDocument {
             isSecretBearingKey(key) || !(/^[a-z_]+$/).test(key) || !(cell === null || typeof cell === 'string' || typeof cell === 'number' && Number.isFinite(cell))))) throw new ApplicationBackupError('invalid');
     }
     for (const name of FILES) {
-        const text = value.files[name];
+        const text = value.files[name] ?? null;
+        value.files[name] = text;
         if (text !== null && typeof text !== 'string') throw new ApplicationBackupError('invalid');
         if (typeof text === 'string') value.files[name] = JSON.stringify(parseWorkspace(name, text));
     }
@@ -153,7 +197,7 @@ function preview(document: BackupDocument, bytes: Buffer): ApplicationBackupPrev
     return { digest: createHash('sha256').update(bytes).digest('hex'), appVersion: document.appVersion, createdAt: document.createdAt,
         settings: document.tables.config_kv.length, queue: document.tables.queue_items.length,
         downloads: document.tables.download_history.length, downloadedVods: document.tables.downloaded_vods.length,
-        projects, clips: workspace.clips?.length ?? 0, mergeFiles: workspace.mergeFiles?.length ?? 0,
+        projects: projects + (document.files['portable-project-backups.json'] ? parseProjectBackups(JSON.parse(document.files['portable-project-backups.json'])).length : 0), clips: workspace.clips?.length ?? 0, mergeFiles: workspace.mergeFiles?.length ?? 0,
         exportJobs: document.files['export-jobs.json'] ? JSON.parse(document.files['export-jobs.json']).jobs.length : 0,
         recentProjects: document.files['recent-cutter-projects.json'] ? JSON.parse(document.files['recent-cutter-projects.json']).projects.length : 0,
         credentialsIncluded: false, mediaIncluded: false };
@@ -205,7 +249,7 @@ async function validateStaging(document: BackupDocument, directory: string): Pro
     }
 }
 
-export async function createApplicationBackup(options: { db: DbHandle; dataDirectory: string; appVersion: string; outputFile: string }): Promise<ApplicationBackupPreview> {
+export async function createApplicationBackup(options: { db: DbHandle; dataDirectory: string; appVersion: string; outputFile: string; queue?: readonly object[] }): Promise<ApplicationBackupPreview> {
     await verifyDataDirectory(options.dataDirectory);
     if (path.extname(options.outputFile).toLowerCase() !== '.tvmbackup') throw new ApplicationBackupError('invalid');
     const files = {} as BackupDocument['files'];
@@ -213,12 +257,21 @@ export async function createApplicationBackup(options: { db: DbHandle; dataDirec
         try { files[name] = JSON.stringify(parseWorkspace(name, (await readBounded(path.join(options.dataDirectory, name), MAX_FILE_BYTES)).toString('utf8'))); }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; files[name] = null; }
     }
+    await collectProjectBackups(files);
     const document = options.db.transaction((): BackupDocument => {
         const tables = {} as BackupDocument['tables'];
         for (const name of TABLES) tables[name] = (options.db.get('SELECT name FROM sqlite_master WHERE type = ? AND name = ?', ['table', name]) ? options.db.all<Row>(`SELECT * FROM "${name}"`) : []).map(row => {
             const copy = { ...row };
             if (name === 'queue_items') { copy.payload_json = JSON.stringify(redact(JSON.parse(String(copy.payload_json)))); copy.error_message = null; }
             return copy;
+        });
+        if (options.queue) tables.queue_items = options.queue.map((entry, index) => {
+            const item = entry as Record<string, unknown>, now = Math.floor(Date.now() / 1000);
+            if (typeof item.id !== 'string' || !item.id) throw new ApplicationBackupError('invalid');
+            return { id: item.id, queue_position: index, streamer_login: typeof item.streamer === 'string' ? item.streamer : null,
+                vod_id: null, clip_id: null, title: typeof item.title === 'string' ? item.title : null, output_path: null,
+                status: typeof item.status === 'string' ? item.status : 'pending', progress_pct: typeof item.progress === 'number' ? item.progress : 0,
+                error_message: null, created_at: now, updated_at: now, completed_at: null, payload_json: JSON.stringify(redact(item)) };
         });
         tables.config_kv = tables.config_kv.filter(row => typeof row.key === 'string' && !isSecretBearingKey(row.key)).map(row => ({ ...row, value: JSON.stringify(redact(JSON.parse(String(row.value)))) }));
         return { format: 'twitch-vod-manager-backup', version: 1, appVersion: options.appVersion, createdAt: new Date().toISOString(), tables, files,
@@ -304,10 +357,12 @@ export async function applyPendingApplicationRestore(directory: string): Promise
     const id = randomUUID();
     const safetyDirectory = path.join(directory, `before-restore-${id}`);
     const stage = path.join(directory, `.restore-${id}.db`);
+    const restoredProjects = path.join(directory, `restored-projects-${id}`);
     await fs.mkdir(safetyDirectory, { mode: 0o700 });
     let staging: DbHandle | undefined;
     const present: string[] = [];
     try {
+        await restoreProjectBackups(document, restoredProjects);
         staging = openDatabase(stage);
         importDocument(staging, document);
         try {
@@ -347,6 +402,7 @@ export async function applyPendingApplicationRestore(directory: string): Promise
         return { restored: true, recovered, safetyDirectory };
     } catch (error) {
         await recoverInterruptedRestore(directory);
+        if (path.dirname(path.resolve(restoredProjects)) === path.resolve(directory)) await fs.rm(restoredProjects, { recursive: true, force: true });
         throw error;
     } finally {
         staging?.close();

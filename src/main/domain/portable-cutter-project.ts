@@ -1,3 +1,4 @@
+import { normalizeAudioProcessing } from './audio-processing';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import * as fs from 'node:fs/promises';
@@ -13,7 +14,7 @@ export interface PortableCutterProject {
     name: string;
     createdAt: number;
     updatedAt: number;
-    source: { name: string; relativePath: string; size: number; sha256: string };
+    source: { name: string; relativePath: string; originalPath?: string; size: number; sha256: string };
     edit: Omit<PortableCutterEdit, 'source'>;
 }
 export interface RecentCutterProject {
@@ -71,13 +72,15 @@ export function validatePortableCutterEdit(value: unknown): PortableCutterEdit {
         profile: edit.profile as PortableCutterEdit['profile'], encoder: edit.encoder as PortableCutterEdit['encoder'],
         audioStreamIndex: edit.audioStreamIndex as number, allAudioStreams: edit.allAudioStreams as boolean | undefined,
         colorMode: edit.colorMode as PortableCutterEdit['colorMode'],
+        ...(edit.audioProcessing === undefined ? {} : { audioProcessing: normalizeAudioProcessing(edit.audioProcessing, edit.trimEnd - edit.trimStart - cuts.reduce((sum, cut) => sum + cut.end - cut.start, 0)) }),
     };
 }
 
 function portableSettings(project: PortableCutterEdit): Omit<PortableCutterEdit, 'source'> {
     return { duration: project.duration, fps: project.fps, trimStart: project.trimStart, trimEnd: project.trimEnd,
         cuts: project.cuts, profile: project.profile, encoder: project.encoder, audioStreamIndex: project.audioStreamIndex,
-        allAudioStreams: project.allAudioStreams, colorMode: project.colorMode };
+        allAudioStreams: project.allAudioStreams, colorMode: project.colorMode,
+        ...(project.audioProcessing ? { audioProcessing: { ...project.audioProcessing } } : {}) };
 }
 
 export function parsePortableCutterProject(value: unknown): PortableCutterProject {
@@ -88,13 +91,14 @@ export function parsePortableCutterProject(value: unknown): PortableCutterProjec
         || !finite(document.createdAt) || document.createdAt < 0 || !finite(document.updatedAt) || document.updatedAt < document.createdAt
         || !text(source.name, 255) || path.basename(source.name) !== source.name || !text(source.relativePath)
         || path.isAbsolute(source.relativePath) || /^[a-z]:/i.test(source.relativePath)
+        || (source.originalPath !== undefined && (!text(source.originalPath) || !path.isAbsolute(source.originalPath)))
         || !finite(source.size) || source.size < 0 || !Number.isSafeInteger(source.size)
         || typeof source.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(source.sha256)) throw new Error('Invalid portable cutter project');
     const edit = portableSettings(validatePortableCutterEdit({ ...record(document.edit), source: { path: path.resolve(source.name), size: source.size, mtimeMs: 0 } }));
     return {
         format: 'twitch-vod-manager/cutter-project', version: 1, id: document.id, name: document.name.trim(),
         createdAt: document.createdAt, updatedAt: document.updatedAt,
-        source: { name: source.name, relativePath: source.relativePath, size: source.size, sha256: source.sha256 }, edit,
+        source: { name: source.name, relativePath: source.relativePath, ...(source.originalPath ? { originalPath: String(source.originalPath) } : {}), size: source.size, sha256: source.sha256 }, edit,
     };
 }
 
@@ -108,6 +112,11 @@ export async function fingerprintCutterSource(filePath: string): Promise<CutterP
     return { path: path.resolve(filePath), size: after.size, mtimeMs: after.mtimeMs, sha256: hash.digest('hex') };
 }
 
+export function portableSourceReference(projectPath: string, sourcePath: string): { relativePath: string; originalPath: string } {
+    const relative = path.relative(path.dirname(path.resolve(projectPath)), path.resolve(sourcePath));
+    return { relativePath: (path.isAbsolute(relative) ? path.basename(sourcePath) : relative).split(path.sep).join('/'), originalPath: path.resolve(sourcePath) };
+}
+
 export async function savePortableCutterProject(filePath: string, name: string, edit: PortableCutterEdit, previous?: PortableCutterProject): Promise<PortableCutterProject> {
     const validated = validatePortableCutterEdit(edit);
     if (path.resolve(filePath).toLowerCase() === path.resolve(validated.source.path).toLowerCase()) throw new Error('Project cannot overwrite its source');
@@ -119,7 +128,7 @@ export async function savePortableCutterProject(filePath: string, name: string, 
     const document = parsePortableCutterProject({
         format: 'twitch-vod-manager/cutter-project', version: 1, id: old?.id ?? randomUUID(), name,
         createdAt: old?.createdAt ?? now, updatedAt: Math.max(now, old?.createdAt ?? now),
-        source: { name: path.basename(source.path), relativePath: path.relative(path.dirname(path.resolve(filePath)), source.path).split(path.sep).join('/'), size: source.size, sha256: source.sha256 }, edit: settings,
+        source: { name: path.basename(source.path), ...portableSourceReference(filePath, source.path), size: source.size, sha256: source.sha256 }, edit: settings,
     });
     await writeJsonDocument(filePath, document);
     return document;
@@ -128,7 +137,7 @@ export async function savePortableCutterProject(filePath: string, name: string, 
 export async function openPortableCutterProject(filePath: string, replacementSource?: string): Promise<OpenedCutterProject> {
     const document = parsePortableCutterProject(await readJsonDocument(filePath, 1024 * 1024));
     const candidates = replacementSource ? [path.resolve(replacementSource)] : [...new Set([
-        path.resolve(path.dirname(filePath), document.source.relativePath), path.resolve(path.dirname(filePath), document.source.name),
+        path.resolve(path.dirname(filePath), document.source.relativePath), path.resolve(path.dirname(filePath), document.source.name), ...(document.source.originalPath ? [document.source.originalPath] : []),
     ])];
     let sourceStatus: OpenedCutterProject['sourceStatus'] = 'missing';
     for (const candidate of candidates) {

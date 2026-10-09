@@ -26,7 +26,7 @@ export interface ArchiveSearchResult {
     totalScanned: number; matchCount: number; truncated: boolean; hits: ArchiveSearchHit[];
     scannedAt: string; rootExists: boolean; streamers: string[]; offset: number;
 }
-interface ArchiveInventoryFile { fullPath: string; relativePath: string; fileName: string; streamer: string; type: ArchiveFileType; size: number; mtimeMs: number; date: string }
+export interface ArchiveInventoryFile { fullPath: string; relativePath: string; fileName: string; streamer: string; type: ArchiveFileType; size: number; mtimeMs: number; date: string }
 export interface ArchiveInventory { root: string; rootExists: boolean; scannedAt: string; files: ArchiveInventoryFile[]; folders?: string[] }
 
 const MEDIA_EXTENSION = /\.(mp4|mkv|ts|m4v|webm|mov)$/i;
@@ -43,7 +43,7 @@ function localDate(value: Date): string {
     return String(value.getFullYear()).padStart(4, '0') + '-' + String(value.getMonth() + 1).padStart(2, '0') + '-' + String(value.getDate()).padStart(2, '0');
 }
 
-function fileDate(name: string, mtimeMs: number): string {
+export function fileDate(name: string, mtimeMs: number): string {
     const match = /(\d{4})-(\d{2})-(\d{2})/.exec(name);
     if (match) {
         const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
@@ -52,7 +52,7 @@ function fileDate(name: string, mtimeMs: number): string {
     return localDate(new Date(mtimeMs));
 }
 
-function classify(relativePath: string): { type: ArchiveFileType; streamer: string } {
+export function classify(relativePath: string): { type: ArchiveFileType; streamer: string } {
     const pieces = relativePath.replace(/\\/g, '/').split('/');
     const isClip = pieces[0]?.toLowerCase() === 'clips';
     const streamer = pieces.length < 2 ? '' : isClip ? pieces.length > 2 ? pieces[1] : '' : pieces[0];

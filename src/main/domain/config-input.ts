@@ -1,3 +1,4 @@
+import { normalizeAutoVodRules } from './auto-vod-rules';
 import {
     normalizeDownloadPolicy,
 } from './download-policy';
@@ -148,6 +149,7 @@ export function sanitizeConfigInput(value: unknown): Record<string, unknown> {
             continue;
         }
 
+        if (key === 'auto_vod_rules') { sanitized[key] = normalizeAutoVodRules(entry); continue; }
         if (key === 'streamers' || key === 'auto_record_streamers' || key === 'auto_vod_download_streamers') {
             const streamers = normalizeStreamerLogins(entry);
             if (streamers) sanitized[key] = streamers;

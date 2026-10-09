@@ -1,3 +1,4 @@
+import { AudioMeter } from './AudioMeter.jsx';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
@@ -97,6 +98,7 @@ function LocalCutterPlayer({ options, bind }) {
       <PlayerPanel root={root} label={t('exactTime')} className="player-time-button" trigger={<span ref={timeLabel}>{options.format(position.current)}</span>}>
         {close => <ExactTimeForm position={position.current} total={state.duration} format={options.format} parse={options.parse} placeholder="00:00:00:00" hint="HH:MM:SS:FF" onCommit={options.seek} onClose={close} t={t}/>}
       </PlayerPanel>
+      <AudioMeter video={video} active={state.active} playing={media.playing} language={state.language}/>
       <span className="archive-control-spacer"/>
       <div className="local-frame-controls">
         <button type="button" className="player-button" aria-label={de ? 'Ein Bild zurück' : 'Previous frame'} title={de ? 'Ein Bild zurück' : 'Previous frame'} disabled={!state.enabled} onClick={() => options.frame(-1)}><SkipBack size={20}/></button>

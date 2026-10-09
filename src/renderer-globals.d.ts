@@ -37,6 +37,7 @@ interface AppConfig {
     auto_cleanup_action?: 'delete' | 'archive';
     log_stream_events?: boolean;
     auto_vod_download_streamers?: string[];
+    auto_vod_rules?: import('./main/domain/auto-vod-rules').AutoVodRules;
     auto_vod_download_poll_minutes?: number;
     auto_vod_max_age_hours?: number;
     auto_resume_live_recording?: boolean;
@@ -232,6 +233,7 @@ interface VideoEditorAssetProfile {
 interface VideoEditExportRequest {
     allAudioStreams?: boolean;
     colorMode?: 'source' | 'sdr';
+    audioProcessing?: import('./main/domain/audio-processing').AudioProcessingOptions;
     inputCapability: string;
     outputName?: string;
     trimStart: number;
@@ -245,6 +247,7 @@ interface VideoEditExportRequest {
 interface CutterProject {
     allAudioStreams?: boolean;
     colorMode?: 'source' | 'sdr';
+    audioProcessing?: import('./main/domain/audio-processing').AudioProcessingOptions;
     source: { path: string; size: number; mtimeMs: number };
     duration: number;
     fps: number;
@@ -446,6 +449,9 @@ interface ArchiveStats {
 }
 
 interface ApiBridge {
+    previewAutoVodRule(channel: string, rule: import('./main/domain/auto-vod-rules').AutoVodRule): Promise<Array<{id:string;title:string;duration:string;result:'match'|'age'|'include'|'exclude'|'duration';downloaded:boolean}>>;
+    getVodLibrary(): Promise<import('./main/domain/vod-library').VodLibrary>;
+    changeVodLibrary(change: import('./main/domain/vod-library').VodLibraryChange): Promise<import('./main/domain/vod-library').VodLibrary>;
     discoverClips(request: import('./main/domain/clip-discovery').ClipDiscoveryRequest): Promise<import('./main/domain/clip-discovery').ClipDiscoveryResult>;
     exportApplicationBackup(): Promise<{ success: boolean; cancelled?: boolean; error?: string }>;
     restoreApplicationBackup(): Promise<{ success: boolean; cancelled?: boolean; error?: string }>;
@@ -602,7 +608,7 @@ interface Window {
             partMinutes?: number; outputSettings?(): { startPart: number }; filename?(part: import('./main/domain/vod-edit-plan').EditedVodPart): string;
             onOmissions?(state: { editing?: boolean; config: import('./main/domain/vod-edit-plan').OmissionConfig | null; plan: import('./main/domain/vod-edit-plan').EditedVodPlan | null } | null): void; onMode?(active: boolean): void;
             start: number; end: number; onRange(start: number, end: number): void; onDuration(duration: number): void;
-        }): { destroy(): void; updateRange(start: number, end: number): void; seek(seconds: number): void; refreshOutput(): void; setInputValid(valid: boolean): void };
+        }): { destroy(): void; snapshot(): { seconds: number; duration: number; range: { start: number; end: number }; omissions: Array<{ start: number; end: number }> } | null; applyExcerpt(value: { range: { start: number; end: number }; omissions: Array<{ start: number; end: number }> }): void; updateRange(start: number, end: number): void; seek(seconds: number): void; refreshOutput(): void; setInputValid(valid: boolean): void };
     };
     api: ApiBridge;
 }

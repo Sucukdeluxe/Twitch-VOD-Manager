@@ -311,6 +311,9 @@ function filterSettings(query: string): void {
     const pane = match?.dataset.settingsPane;
     if (pane) {
         setSettingsPane(pane);
+        match?.querySelectorAll<HTMLDetailsElement>('details.settings-advanced').forEach(details => {
+            if ((details.textContent || '').toLocaleLowerCase(getIntlLocale()).includes(normalizedQuery)) details.open = true;
+        });
         match?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 }

@@ -305,6 +305,9 @@ contextBridge.exposeInMainWorld('api', {
         return () => ipcRenderer.removeListener('editing-jobs-changed', listener);
     },
 
+    previewAutoVodRule: (channel: string, rule: unknown) => ipcRenderer.invoke('preview-auto-vod-rule', channel, rule),
+    getVodLibrary: () => ipcRenderer.invoke('get-vod-library'),
+    changeVodLibrary: (change: unknown) => ipcRenderer.invoke('change-vod-library', change),
     discoverClips: (request: import('./main/domain/clip-discovery').ClipDiscoveryRequest) => ipcRenderer.invoke('discover-clips', request),
     exportApplicationBackup: () => ipcRenderer.invoke('export-application-backup'),
     restoreApplicationBackup: () => ipcRenderer.invoke('restore-application-backup'),

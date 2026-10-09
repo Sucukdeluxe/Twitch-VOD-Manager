@@ -33,19 +33,33 @@ const editingWorkflowRows = new Map<string, HTMLElement>();
 
 function editingText(de: string, en: string): string { return currentLanguage === 'de' ? de : en; }
 function editingButton(text: string, action: () => void): HTMLButtonElement {
-    const button = document.createElement('button'); button.type = 'button'; button.className = 'btn-secondary'; button.textContent = text; button.addEventListener('click', action); return button;
+    return RendererElements.button(text, action);
+}
+function editingErrorMessage(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/source changed/i.test(message)) return editingText('Quelldatei wurde geändert. Neu öffnen.', 'Source changed. Open it again.');
+    if (/source.*unavailable|project not found|ENOENT/i.test(message)) return editingText('Datei nicht gefunden. Pfad prüfen.', 'File not found. Check its location.');
+    if (/export is running/i.test(message)) return editingText('Ein Export läuft bereits.', 'An export is already running.');
+    if (/backup|restore|locked/i.test(message)) return editingText('Sicherung oder Wiederherstellung läuft.', 'Backup or restore is running.');
+    if (/already exists|destination changed/i.test(message)) return editingText('Zieldatei geändert. Anderen Namen wählen.', 'Output changed. Choose another name.');
+    if (/interrupted/i.test(message)) return editingText('Export unterbrochen. Erneut versuchen.', 'Export interrupted. Retry.');
+    if (/incomplete|duration differs|format differs/i.test(message)) return editingText('Exportprüfung fehlgeschlagen.', 'Export verification failed.');
+    if (/ENOSPC/i.test(message)) return editingText('Nicht genug Speicherplatz.', 'Not enough disk space.');
+    if (/EPERM|EACCES/i.test(message)) return editingText('Kein Zugriff auf die Datei.', 'Cannot access the file.');
+    return editingText('Aktion fehlgeschlagen.', 'Action failed.');
 }
 function editingApi(): EditingWorkflowApi { return window.api as typeof window.api & EditingWorkflowApi; }
 async function editingOperation(operation: () => Promise<EditingWorkflowResponse>, after?: (result: EditingWorkflowResponse) => Promise<void> | void): Promise<void> {
     if (editingWorkflowBusy) return;
     editingWorkflowBusy = true;
+    const previousError = document.getElementById('editingWorkflowError'); if (previousError) previousError.hidden = true;
     document.querySelectorAll<HTMLButtonElement>('[data-editing-operation]').forEach(button => { button.disabled = true; });
     try {
         const result = await operation();
         if (!result.success && !result.cancelled) throw new Error(result.error || 'Operation failed');
         if (result.success) await after?.(result);
     } catch (error) {
-        showAppToast(editingText('Aktion fehlgeschlagen.', 'Action failed.'), 'warn');
+        showAppToast(editingErrorMessage(error), 'warn');
         const details = document.getElementById('editingWorkflowError');
         if (details) { details.hidden = false; const content = details.querySelector('pre'); if (content) content.textContent = error instanceof Error ? error.message : String(error); }
     } finally {
@@ -111,6 +125,7 @@ function renderEditingJobs(): void {
         row.querySelector('.editing-job-state')!.textContent = ({ queued: editingText('Bereit', 'Ready'), running: editingText('Exportiert', 'Exporting'), completed: editingText('Gespeichert', 'Saved'), failed: editingText('Fehlgeschlagen', 'Failed'), cancelled: editingText('Abgebrochen', 'Cancelled') })[job.status];
         const progress = row.querySelector('progress')!; progress.value = job.progress; progress.hidden = job.status !== 'running'; progress.setAttribute('aria-label', job.name);
         const details = row.querySelector('details')!; details.hidden = !job.error; details.querySelector('pre')!.textContent = job.error || '';
+        details.querySelector('summary')!.textContent = job.error ? editingErrorMessage(job.error) : editingText('Details', 'Details');
         const actions = row.querySelector('.editing-job-actions')!;
         const desired = job.status === 'running' || job.status === 'queued' ? ['cancel'] : job.status === 'failed' || job.status === 'cancelled' ? ['retry', 'remove'] : ['reveal', 'remove'];
         const actionKey = desired.join('|') + '|' + currentLanguage;
@@ -143,7 +158,11 @@ function initializeEditingWorkflows(): void {
         [editingText('Variante speichern', 'Save variant'), () => { void saveNamedEditingProject(true); }],
         [editingText('Export vormerken', 'Queue export'), () => { const project = getCutterProjectPayload(); if (cutterFile && project && !cutterCutDraft) void editingOperation(() => editingApi().enqueueCutterExport(cutterFile!.token, project)); }],
     ];
-    for (const [index, command] of commands.entries()) { const button = editingButton(command[0], command[1]); button.dataset.editingOperation = String(index); toolbar.append(button); }
+    for (const [index, command] of commands.entries()) {
+        const existing = index === 0 ? document.getElementById('cutterOpenProjectBtn') : index === 2 ? document.getElementById('cutterSaveProjectBtn') : null;
+        if (existing) { existing.dataset.editingOperation = String(index); continue; }
+        const button = editingButton(command[0], command[1]); button.dataset.editingOperation = String(index); toolbar.append(button);
+    }
     host.prepend(toolbar);
     const error = document.createElement('details'); error.id = 'editingWorkflowError'; error.hidden = true; const errorTitle = document.createElement('summary'); errorTitle.textContent = editingText('Fehlerdetails', 'Error details'); error.append(errorTitle, document.createElement('pre')); toolbar.after(error);
     const recent = document.createElement('dialog'); recent.id = 'editingRecentProjects'; recent.className = 'editing-recent-dialog';
@@ -182,7 +201,7 @@ function refreshEditingWorkflowLanguage(): void {
     const label = toolbar.querySelector('label'); if (label?.firstChild) label.firstChild.nodeValue = editingText('Projekt', 'Project');
     const input = toolbar.querySelector('input'); if (input) input.placeholder = editingText('Projektname', 'Project name');
     const captions = [editingText('Öffnen', 'Open'), editingText('Zuletzt verwendet', 'Recent projects'), editingText('Speichern', 'Save'), editingText('Variante speichern', 'Save variant'), editingText('Export vormerken', 'Queue export')];
-    toolbar.querySelectorAll('button').forEach((button, index) => { button.textContent = captions[index]; });
+    toolbar.querySelectorAll('button').forEach(button => { button.textContent = captions[Number(button.dataset.editingOperation)]; });
     const update = (selector: string, text: string) => { const node = document.querySelector(selector); if (node) node.textContent = text; };
     update('#editingWorkflowError summary', editingText('Fehlerdetails', 'Error details'));
     update('#editingRecentProjects h2', editingText('Zuletzt verwendete Projekte', 'Recent projects'));
@@ -204,7 +223,8 @@ function refreshEditingWorkflowControls(): void {
     const usable = Boolean(cutterFile && getCutterProjectPayload() && !cutterCutDraft && !isCutting);
     document.querySelectorAll<HTMLButtonElement>('[data-editing-operation]').forEach(button => {
         const index = Number(button.dataset.editingOperation);
-        button.disabled = editingWorkflowBusy || (index >= 2 && !usable) || (index === 2 || index === 3) && !input?.value.trim() || index === 0 && isCutting;
+        const disabled = editingWorkflowBusy || (index >= 2 && !usable) || (index === 2 || index === 3) && !input?.value.trim() || index === 0 && isCutting;
+        if (button.disabled !== disabled) button.disabled = disabled;
     });
 }
 

@@ -122,7 +122,7 @@ export function createExportJobRunner(options: ExportJobRunnerOptions) {
                 const planOptions = { inputFile: sources[0].path, outputFile: temporary, segments, hasAudio: audioStreams.length > 0, profile: project.profile, encoder: project.encoder,
                     availableHardwareEncoders: await options.availableHardwareEncoders?.() || [], audioStreamIndex: project.audioStreamIndex,
                     audioStreamIndices: project.allAudioStreams ? audioStreams.map(stream => stream.index) : undefined, audioStreams,
-                    sourceFormat: readVideoSourceFormat(firstVideo), colorMode: project.colorMode || 'source', rotation: rawRotation };
+                    audioProcessing: project.audioProcessing, sourceFormat: readVideoSourceFormat(firstVideo), colorMode: project.colorMode || 'source', rotation: rawRotation };
                 const plan = createCutterExportPlan(planOptions);
                 args = plan.ffmpegArgs; duration = plan.remainingDuration;
                 expectedAudioTracks = plan.audioStreamIndices.length;

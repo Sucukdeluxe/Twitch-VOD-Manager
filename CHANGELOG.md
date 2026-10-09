@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+## 1.0.28 - 2026-10-10
+
+This update adds reusable editing projects, a persistent export queue, full application backups, and more precise control over source formats, audio and automated downloads. It also expands the archive, download history and clip browser.
+
+### Video editing and export
+
+- Save named editing projects, create independent variants and reopen recent projects. Projects retain the selected excerpt, omitted ranges, export settings and audio options.
+- Move a project together with its source video, or locate a moved source again. File contents are checked before the project is linked to a replacement. Projects and source videos can be stored on different drives.
+- Queue video cuts and merges. Export jobs survive restarts and support pause, cancellation and retry. An interrupted export is identified instead of being silently run again.
+- Export retains the selected source bit depth and color format where supported. HDR sources no longer silently become 8-bit SDR; explicit SDR conversion is available. The archive profile preserves decoded video and audio without lossy encoding.
+- Export all audio tracks or select an individual track. Optional fades and loudness normalization apply to the exported audio.
+- A live audio meter shows the preview signal in the local video editor.
+- Merging checks codec, resolution, frame rate, color format and audio tracks first. Matching files can keep their original streams; incompatible files require an explicit supported conversion.
+- More specific file and export errors explain the next action, with technical details available separately.
+
+### Backups and storage
+
+- Back up settings, the current download queue, download history, editing workspaces, saved projects, export jobs and VOD library entries in one file. Source videos and credentials are not included.
+- Preview a backup before restoring it. Restoration validates the data, keeps a safety copy and pauses automation. Saved project documents are restored as separate copies without overwriting their original locations.
+- A manual backup includes the current queue even when automatic queue persistence is disabled.
+- Storage cleanup runs asynchronously and shows the files to be affected before applying the operation. Files changed after the preview are skipped. Matching chat and event files are handled with their video.
+- Archive changes update an incremental index; explicit refreshes and periodic reconciliation still check the full folder.
+
+### Archive, history and statistics
+
+- Filter archive results by date and send selected videos directly to the editor or merge workspace.
+- Browse persistent download history by date, type, channel or title, and export it as CSV. Deleting a downloaded file does not erase its history.
+- Select time ranges for statistics and export the corresponding download data.
+
+### VODs, clips and automation
+
+- Save VOD filter views and streamer groups for reuse.
+- Save timeline markers and complete excerpts, including their omitted ranges, and apply them again.
+- Browse a channel’s clips by date and add selected clips to the batch downloader. Previously downloaded clips are identified.
+- Set title, duration and age rules per channel for automatic VOD downloads. Preview matching VODs before saving a rule.
+
+### Interface and release checks
+
+- Centered, scroll-bounded project, library and clip dialogs use consistent controls and readable spacing in both themes. Less frequently used download settings are grouped in expandable sections.
+- Release packages include only the current renderer assets. Obsolete hashed build files are excluded.
+- Publishing now requires a complete local verification record, a matching source fingerprint and a native check of the packaged application. A CI build alone does not count as a verified release.
+
+This Windows release is unsigned, as with previous releases.
+
 ## 1.0.27 - 2026-10-09
 
 This update fixes six issues in storage analysis and streamer management.

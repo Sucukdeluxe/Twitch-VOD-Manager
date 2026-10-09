@@ -17,7 +17,7 @@ if (ciCandidate && process.env.CI !== 'true') throw new Error('CI candidate pack
 const verificationDirectory = resolve(root, 'release/verification');
 await mkdir(verificationDirectory, { recursive: true });
 await rm(resolve(verificationDirectory, 'package.json'), { force: true });
-if (!ciCandidate) await access(resolve(root, 'scripts/smoke-test-release-package.js'));
+if (!ciCandidate) for (const file of ['scripts/smoke-test-release-package.js', 'scripts/smoke-test-roadmap-native.js']) await access(resolve(root, file));
 const receipt = ciCandidate ? null : await verifyReceipt(root);
 const fingerprint = await releaseFingerprint(root);
 const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
@@ -43,6 +43,8 @@ if (JSON.parse(extractFile(archive, 'package.json')).version !== pkg.version) th
 if (!ciCandidate) {
     const result = await execute(process.execPath, ['scripts/smoke-test-release-package.js'], { cwd: root, windowsHide: true, timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
     await writeFile(resolve(verificationDirectory, 'native-package.log'), result.stdout + result.stderr);
+    const roadmap = await execute(process.execPath, ['scripts/smoke-test-roadmap-native.js', '--packaged'], { cwd: root, windowsHide: true, timeout: 240000, maxBuffer: 16 * 1024 * 1024 });
+    await writeFile(resolve(verificationDirectory, 'native-roadmap-package.log'), roadmap.stdout + roadmap.stderr);
     await verifyReceipt(root);
 }
 const files = [];

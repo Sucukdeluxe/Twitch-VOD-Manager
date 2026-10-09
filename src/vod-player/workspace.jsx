@@ -146,7 +146,19 @@ function Workspace({ options, bind }) {
     if (interaction?.source === 'pointer' && interaction.boundary === 'start') setSeekRequest({ seconds:next.start });
   }
   const seek = useCallback(seconds => { setSeekRequest({ seconds }); }, []);
-  bind.current = { updateRange(start, end) { stopPreview(); setRange({ start, end }); selectedPlayback.current = false; setSelectionPlaying(false); }, seek, refreshOutput() { setOutputRevision(value => value + 1); }, setInputValid };
+  bind.current = {
+    snapshot() { return editing !== null ? null : { seconds:position, duration, range:{ ...selection }, omissions:visibleOmissions.map(value => ({ ...value })) }; },
+    applyExcerpt(value) {
+      const selected = normalizeOmissions([value.range], duration)[0];
+      const ranges = normalizeOmissions(value.omissions, duration);
+      if (ranges.some(item => item.start < selected.start || item.end > selected.end) || !planEditedVod(duration, partMinutes * 60, ranges, 1, selected).duration) throw new Error('Invalid excerpt');
+      stopPreview(); setOmitting(false); options.onMode?.(false);
+      modeRanges.current = { excerpt:selected, omission:selected };
+      setRange(selected); setOmissions(ranges); setEditing(null); setUndo([]); setRedo([]);
+      selectedPlayback.current = false; setSelectionPlaying(false);
+      options.onRange(selected.start, selected.end); seek(selected.start);
+    },
+    updateRange(start, end) { stopPreview(); setRange({ start, end }); selectedPlayback.current = false; setSelectionPlaying(false); }, seek, refreshOutput() { setOutputRevision(value => value + 1); }, setInputValid };
   useEffect(() => {
     const id = requestId;
     let closed = false;
@@ -264,6 +276,8 @@ window.VodPlayer = {
     root.render(<Workspace options={options} bind={bind}/>);
     return {
       destroy() { root.unmount(); },
+      snapshot() { return bind.current?.snapshot() ?? null; },
+      applyExcerpt(value) { if (!bind.current) throw new Error('Player not ready'); bind.current.applyExcerpt(value); },
       updateRange(start, end) { bind.current?.updateRange(start, end); },
       seek(seconds) { bind.current?.seek(seconds); },
       refreshOutput() { bind.current?.refreshOutput(); },

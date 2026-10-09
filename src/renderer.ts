@@ -81,6 +81,7 @@ async function init(): Promise<void> {
     initCutterDragDrop();
     initCutterEditor();
     initializeEditingWorkflows();
+    initializeVodLibrary();
     void restoreWorkspace();
 
     // Restore last active tab from previous session (default 'vods')

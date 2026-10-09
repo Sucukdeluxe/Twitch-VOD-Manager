@@ -185,3 +185,12 @@ body:has(#cutterTab.active) :is(#cutterTab, .top-nav, .context-sidebar, .workspa
 #cutterTab .cutter-mode-icon { display:inline-grid; place-items:center; width:18px; height:18px; color:#d7c8ff; font-size:16px; line-height:1; }
 #cutterTab #cutterWaveform { image-rendering:crisp-edges; }
 #cutterPreviewPlaceholder { font-size: 14px; }
+
+.audio-preview-meter { width:126px; flex-shrink:0; font-size:11px; font-variant-numeric:tabular-nums; }
+.audio-preview-meter[hidden] { display:none; }
+.audio-preview-meter > div { display:flex; align-items:center; gap:5px; line-height:16px; }
+.audio-preview-meter b { width:70px; height:4px; background:#363c43; overflow:hidden; border-radius:2px; }
+.audio-preview-meter i { display:block; height:100%; background:#73d69c; }
+.audio-preview-meter i.is-peak { background:#f4ba57; }
+.audio-preview-meter output { width:33px; text-align:right; color:#e7edf3; }
+@media (max-width:760px) { .audio-preview-meter { display:none; } }

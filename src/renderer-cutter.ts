@@ -81,6 +81,7 @@ let cutterExportProfile: 'quality' | 'balanced' | 'fast' | 'archive' = 'balanced
 let cutterExportEncoder: 'software' | 'h264_nvenc' | 'h264_qsv' | 'h264_amf' = 'software';
 let cutterAudioStreamIndex = 0;
 let cutterAllAudioStreams = true;
+let cutterAudioProcessing = { fadeInSeconds: 0, fadeOutSeconds: 0, normalize: false };
 let cutterColorMode: 'source' | 'sdr' = 'source';
 let cutterPendingProject: CutterProject | null = null;
 let cutterAutosaveTimer: number | null = null;
@@ -162,7 +163,7 @@ function getCutterPlayableDuration(): number {
 }
 
 function getCutterProjectPayload(): Omit<CutterProject, 'source' | 'duration' | 'fps'> | null {
-    if (!cutterEditorState) return null;
+    if (!cutterEditorState || !validCutterAudioDuration()) return null;
     return {
         trimStart: cutterEditorState.trimStart,
         trimEnd: cutterEditorState.trimEnd,
@@ -172,6 +173,7 @@ function getCutterProjectPayload(): Omit<CutterProject, 'source' | 'duration' | 
         audioStreamIndex: cutterAudioStreamIndex,
         allAudioStreams: cutterAllAudioStreams,
         colorMode: cutterColorMode,
+        audioProcessing: { ...cutterAudioProcessing },
     };
 }
 
@@ -316,6 +318,8 @@ function applyCutterProject(project: CutterProject): boolean {
     cutterAudioStreamIndex = project.audioStreamIndex;
     cutterAllAudioStreams = project.allAudioStreams === true;
     cutterColorMode = project.colorMode ?? 'source';
+    cutterAudioProcessing = { fadeInSeconds: 0, fadeOutSeconds: 0, normalize: false, ...project.audioProcessing };
+    syncCutterAudioProcessing();
     updateCutterAudioStreams();
     updateCutterExportControls(cutterExportOptions);
     cutterHistoryPast = [];
@@ -965,7 +969,7 @@ function renderCutterEditor(): void {
 
 function setCutterControlsEnabled(enabled: boolean): void {
     cutterControlsEnabled = enabled;
-    for (const id of ['cutterZoom', 'cutterZoomInBtn', 'cutterZoomOutBtn', 'cutterNewCutBtn', 'cutterSaveProjectBtn', 'cutterExportProfile', 'cutterColorMode', 'cutterFullRange', 'cutterMarkStart', 'cutterMarkEnd', 'startTime', 'endTime']) {
+    for (const id of ['cutterZoom', 'cutterZoomInBtn', 'cutterZoomOutBtn', 'cutterNewCutBtn', 'cutterSaveProjectBtn', 'cutterExportProfile', 'cutterColorMode', 'cutterAudioFadeIn', 'cutterAudioFadeOut', 'cutterAudioNormalize', 'cutterFullRange', 'cutterMarkStart', 'cutterMarkEnd', 'startTime', 'endTime']) {
         const element = document.getElementById(id) as HTMLButtonElement | HTMLInputElement | HTMLSelectElement | null;
         if (element) element.disabled = !enabled;
     }
@@ -1183,6 +1187,8 @@ async function loadCutterFromPath(file: FileCapabilityReference): Promise<void> 
     cutterExportEncoder = 'software';
     cutterExportOptions = undefined;
     cutterAudioStreamIndex = media.info.audioStreams[0]?.index ?? 0;
+    cutterAudioProcessing = { fadeInSeconds: 0, fadeOutSeconds: 0, normalize: false };
+    syncCutterAudioProcessing();
     cutterAllAudioStreams = true;
     cutterColorMode = 'source';
     cutterRecoveryDecisionPending = true;
@@ -1678,6 +1684,7 @@ async function startCutting(): Promise<void> {
             audioStreamIndex: cutterAudioStreamIndex,
         allAudioStreams: cutterAllAudioStreams,
         colorMode: cutterColorMode,
+        audioProcessing: { ...cutterAudioProcessing },
         });
         if (result.success) {
             showAppToast(UI_TEXT.cutter.exportSuccess, 'info');
@@ -1934,7 +1941,9 @@ function updateCutterEditActions(): void {
     byId('cutterTrimMode').setAttribute('aria-pressed', String(cutterMode === 'trim'));
     byId('cutterOmitMode').setAttribute('aria-pressed', String(cutterMode === 'omit'));
     byId<HTMLButtonElement>('cutterNewCutBtn').disabled = disabled || draft || (cutterEditorState?.cuts.length || 0) >= cutterMaximumCuts || getCutterPlayableDuration() < 2 / (cutterEditorState?.fps || 30) - cutterFrameTolerance;
-    byId<HTMLButtonElement>('btnCut').disabled = disabled || draft || isCutting;
+    byId<HTMLButtonElement>('btnCut').disabled = disabled || draft || isCutting || !validCutterAudioDuration();
+    const audioError = document.getElementById('cutterAudioError');
+    if (audioError) audioError.hidden = validCutterAudioDuration();
     byId<HTMLButtonElement>('cutterSaveProjectBtn').disabled = disabled || draft;
     byId<HTMLButtonElement>('cutterOpenProjectBtn').disabled = isCutting || draft;
     byId<HTMLButtonElement>('cutterFullRange').disabled = disabled || draft;
@@ -2040,6 +2049,12 @@ function updateCutterExportPresentation(): void {
     const stream = cutterVideoInfo?.audioStreams.find(entry => entry.index === cutterAudioStreamIndex);
     const channelText = !stream || stream.channels <= 0 ? '' : stream.channels === 1 ? t.mono : stream.channels === 2 ? t.stereo : formatUiNumber(stream.channels) + ' ' + t.channelPlural;
     const texts: Record<string, string> = {
+        cutterAudioProcessingTitle: currentLanguage === 'de' ? 'Audio' : 'Audio',
+        cutterAudioFadeInLabel: currentLanguage === 'de' ? 'Einblenden (s)' : 'Fade in (s)',
+        cutterAudioFadeOutLabel: currentLanguage === 'de' ? 'Ausblenden (s)' : 'Fade out (s)',
+        cutterAudioNormalizeLabel: currentLanguage === 'de' ? 'Lautheit anpassen · −16 LUFS' : 'Normalize loudness · −16 LUFS',
+        cutterAudioProcessingHelp: currentLanguage === 'de' ? 'Für den Export · Normalisierung mit 48 kHz' : 'Export only · Normalization at 48 kHz',
+        cutterAudioError: currentLanguage === 'de' ? 'Überblendungen kürzen: Ausschnitt ist zu kurz.' : 'Shorten fades: excerpt is too short.',
         cutterProfileQualityLabel: t.profileQuality, cutterProfileBalancedLabel: t.profileBalanced,
         cutterProfileFastLabel: t.profileFast, cutterProfileArchiveLabel: t.profileArchive,
         cutterFormatBadge: archive ? 'MKV' : 'MP4',
@@ -2087,4 +2102,27 @@ function handleCutterPageKeyUp(event: KeyboardEvent): void {
         event.stopPropagation();
         cutterPageSpaceHeld = false;
     }
+}
+
+function setCutterAudioProcessing(): void {
+    const fadeIn = byId<HTMLInputElement>('cutterAudioFadeIn'), fadeOut = byId<HTMLInputElement>('cutterAudioFadeOut');
+    const duration = getCutterPlayableDuration();
+    const start = fadeIn.valueAsNumber, end = fadeOut.valueAsNumber;
+    const valid = Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end >= 0 && start + end <= duration;
+    fadeIn.setCustomValidity(valid ? '' : (currentLanguage === 'de' ? 'Überblendung ist länger als der Ausschnitt.' : 'Fades exceed the excerpt duration.'));
+    if (!valid) { fadeIn.reportValidity(); syncCutterAudioProcessing(); return; }
+    cutterAudioProcessing = { fadeInSeconds: start, fadeOutSeconds: end, normalize: byId<HTMLInputElement>('cutterAudioNormalize').checked };
+    updateCutterEditActions();
+    scheduleCutterAutosave();
+}
+function syncCutterAudioProcessing(): void {
+    const start = document.getElementById('cutterAudioFadeIn') as HTMLInputElement | null, end = document.getElementById('cutterAudioFadeOut') as HTMLInputElement | null;
+    if (start) { start.value = String(cutterAudioProcessing.fadeInSeconds); start.setCustomValidity(''); }
+    if (end) end.value = String(cutterAudioProcessing.fadeOutSeconds);
+    const normalize = document.getElementById('cutterAudioNormalize') as HTMLInputElement | null;
+    if (normalize) normalize.checked = cutterAudioProcessing.normalize;
+}
+
+function validCutterAudioDuration(): boolean {
+    return cutterAudioProcessing.fadeInSeconds + cutterAudioProcessing.fadeOutSeconds <= getCutterPlayableDuration() + 0.000001;
 }

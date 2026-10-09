@@ -67,7 +67,7 @@
                     <section id="clipHistoryPanel" aria-labelledby="clipHistoryTitle"><div id="clipHistory"></div></section>
                 </aside>
                 <section id="clipCutPanel" aria-labelledby="clipSelectionTitle">
-                    <div class="vod-cut-heading"><h3 id="clipSelectionTitle">Schnittbereich</h3><div id="clipEditMode"></div><p id="clipTimeHint">HH:MM:SS.mmm oder Sekunden</p><div id="clipTimelineView"></div></div>
+                    <div class="vod-cut-heading"><h3 id="clipSelectionTitle">Schnittbereich</h3><div id="clipEditMode"></div><p id="clipTimeHint">HH:MM:SS.mmm oder Sekunden</p><div id="clipTimelineView"></div><button type="button" class="btn-secondary" id="vodMarkersButton" onclick="RendererVodLibrary.open('vod')">Markierungen</button></div>
                     <div class="vod-cut-fields">
             <div class="clip-modal-field">
                 <label class="clip-modal-label" hidden id="clipDialogStartLabel" for="clipStartSlider">Start:</label>
@@ -419,6 +419,7 @@
                             <input type="checkbox" id="vodHideDownloadedToggle" onchange="onVodHideDownloadedChange()">
                             <span id="vodHideDownloadedText">Hide downloaded</span>
                         </label>
+                        <button type="button" class="btn-secondary" id="vodLibraryButton" onclick="RendererVodLibrary.open('views')">Ansichten</button>
                         <label id="vodSortLabel" for="vodSortSelect" class="form-sublabel vod-sort-label">Sort:</label>
                         <select id="vodSortSelect" class="select-compact" onchange="onVodSortChange()">
                             <option value="date_desc">Newest first</option>
@@ -576,6 +577,12 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
                                             <label for="cutterColorMode" id="cutterColorLabel">Farbraum</label>
                                             <select id="cutterColorMode" onchange="setCutterColorMode(this.value)" disabled><option value="source" id="cutterColorSource">Quelle beibehalten</option><option value="sdr" id="cutterColorSdr">SDR · 8 Bit</option></select>
                                         </div>
+                                        <fieldset class="cutter-audio-processing"><legend id="cutterAudioProcessingTitle">Audio</legend>
+                                            <div class="cutter-audio-fades"><label><span id="cutterAudioFadeInLabel">Einblenden (s)</span><input type="number" id="cutterAudioFadeIn" value="0" min="0" step="0.1" onchange="setCutterAudioProcessing()" disabled></label><label><span id="cutterAudioFadeOutLabel">Ausblenden (s)</span><input type="number" id="cutterAudioFadeOut" value="0" min="0" step="0.1" onchange="setCutterAudioProcessing()" disabled></label></div>
+                                            <label class="inline-toggle"><input type="checkbox" id="cutterAudioNormalize" onchange="setCutterAudioProcessing()" disabled><span id="cutterAudioNormalizeLabel">Lautheit anpassen · −16 LUFS</span></label>
+                                            <p class="cutter-field-help" id="cutterAudioProcessingHelp">Für den Export · Normalisierung mit 48 kHz</p>
+                                            <p id="cutterAudioError" role="status" hidden>Überblendungen kürzen: Ausschnitt ist zu kurz.</p>
+                                        </fieldset>
                                         <div class="cutter-info" id="cutterInfo">
                                             <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoDurationLabel">Originaldauer</span><span class="cutter-info-value" id="infoDuration">--:--:--</span></div>
                                             <div class="cutter-info-item"><span class="cutter-info-label" id="cutterInfoResolutionLabel">Auflösung</span><span class="cutter-info-value" id="infoResolution">----×----</span></div>
@@ -893,8 +900,8 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
                                         <label class="toggle-row"><input type="checkbox" id="notifyEachCompletionToggle"><span id="notifyEachCompletionLabel">Fertige Downloads melden</span></label>
                                     </div>
                                 </section>
-                                <section class="download-settings-section download-policy-settings">
-                                    <h4 id="downloadPolicyTitle">Drosselung und Zeitfenster</h4>
+                                <details class="settings-advanced download-settings-section download-policy-settings">
+                                    <summary id="downloadPolicyTitle">Drosselung und Zeitfenster</summary>
                                     <div class="form-group">
                                         <label id="downloadThrottleLabel" for="downloadThrottleMiBps">Downloadrate (MiB/s)</label>
                                         <input type="text" id="downloadThrottleMiBps" inputmode="decimal" autocomplete="off" aria-describedby="downloadThrottleHint downloadPolicyValidation">
@@ -908,9 +915,9 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
                                     <div id="downloadPolicyValidation" class="form-note" role="alert"></div>
                                     <div id="downloadPolicyStatus" class="form-note" role="status" aria-live="polite"></div>
                                     <button type="button" class="btn-secondary" id="downloadPolicyOverrideBtn" onclick="startDownloadPolicyOverride()">Jetzt starten</button>
-                                </section>
-                                <section class="download-settings-section">
-                                    <h4 id="recordingMetadataTitle">Aufnahmen und Metadaten</h4>
+                                </details>
+                                <details class="settings-advanced download-settings-section">
+                                    <summary id="recordingMetadataTitle">Aufnahmen und Metadaten</summary>
                                     <div class="download-settings-toggles">
                                         <label class="toggle-row"><input type="checkbox" id="streamlinkDisableAdsToggle" checked><span id="streamlinkDisableAdsLabel">Werbung überspringen</span></label>
                                         <label class="toggle-row"><input type="checkbox" id="downloadChatReplayToggle"><span id="downloadChatReplayLabel">VOD-Chat speichern</span></label>
@@ -924,14 +931,14 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
                                         <label id="metadataCacheMinutesLabel" for="metadataCacheMinutes">Cache (Min.)</label>
                                         <input type="number" id="metadataCacheMinutes" value="10" min="1" max="120">
                                     </div>
-                                </section>
+                                </details>
                             </div>
                         </div>
                     </div>
 
                     <div class="settings-card" data-settings-pane="updates" data-settings-group="general" hidden>
                         <h3 id="updateTitle">Updates</h3>
-                        <p id="versionInfo" class="card-intro">Version: v1.0.27</p>
+                        <p id="versionInfo" class="card-intro">Version: v1.0.28</p>
                         <button type="button" class="btn-secondary" id="checkUpdateBtn" onclick="checkUpdate()">Nach Updates suchen</button>
                     </div>
 
@@ -1055,6 +1062,7 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
                         <div class="form-row auto-vod-actions">
                             <button type="button" class="btn-secondary" id="btnAutoVodScanNow" onclick="triggerManualAutoVodScan()">VODs prüfen</button>
                             <button type="button" class="btn-secondary" id="btnAutoRecordScanNow" onclick="triggerManualAutoRecordScan()">Live prüfen</button>
+                            <button type="button" class="btn-secondary" id="autoVodRulesBtn" onclick="RendererAutoVodRules.open()">Kanalregeln</button>
                             <span id="autoVodStatusLine" class="form-sublabel"></span>
                         </div>
                     </div>
@@ -1136,8 +1144,11 @@ Speicherort: Download-Ordner → Clips → Kanal.</p></aside>
     <script defer src="../dist/renderer-command-palette.js"></script>
     <script defer src="../dist/renderer-cutter.js"></script>
     <script defer src="../dist/renderer-vod-player.js"></script>
+    <script defer src="../dist/renderer-components.js"></script>
     <script defer src="../dist/renderer-editing-workflows.js"></script>
     <script defer src="../dist/renderer-clip-discovery.js"></script>
+    <script defer src="../dist/renderer-vod-library.js"></script>
+    <script defer src="../dist/renderer-auto-vod-rules.js"></script>
     <script defer src="../dist/renderer.js"></script>
 </body>
 </html>

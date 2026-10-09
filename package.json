@@ -1,6 +1,6 @@
 {
   "name": "twitch-vod-manager",
-  "version": "1.0.27",
+  "version": "1.0.28",
   "description": "Twitch VOD Manager - Download Twitch VODs easily",
   "main": "dist/main.js",
   "author": "Sucukdeluxe",
@@ -92,6 +92,7 @@
       "src/styles-overlays.css",
       "src/workspace.css",
       "src/workspace-refinements.css",
+      "src/editing-workflows.css",
       "src/workspace-insights.css",
       "build/icon.png",
       "package.json",
@@ -106,8 +107,7 @@
       "!node_modules/node-addon-api/{node_addon_api,node_api}.gyp",
       "!node_modules/node-addon-api/nothing.c",
       "!node_modules/node-addon-api/{napi-inl.deprecated,napi-inl,napi}.h",
-      "!node_modules/better-sqlite3/prebuilds/{darwin-arm64,darwin-x64,linux-arm64,linux-x64,linuxmusl-arm64,linuxmusl-x64,win32-arm64}.node",
-      "src/editing-workflows.css"
+      "!node_modules/better-sqlite3/prebuilds/{darwin-arm64,darwin-x64,linux-arm64,linux-x64,linuxmusl-arm64,linuxmusl-x64,win32-arm64}.node"
     ],
     "extraResources": [
       {

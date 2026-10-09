@@ -1,3 +1,4 @@
+import { validAudioProcessing, type AudioProcessingOptions } from './audio-processing';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { writeFileAtomicSync } from '../infra/fs-atomic';
@@ -10,6 +11,7 @@ export interface CutterProjectSource {
 }
 
 export interface CutterProject {
+    audioProcessing?: AudioProcessingOptions;
     allAudioStreams?: boolean;
     colorMode?: 'source' | 'sdr';
     source: CutterProjectSource;
@@ -32,6 +34,7 @@ function cloneProject(project: CutterProject): CutterProject {
     return {
         ...project,
         source: { ...project.source },
+        ...(project.audioProcessing ? { audioProcessing: { ...project.audioProcessing } } : {}),
         cuts: project.cuts.map((cut) => ({ ...cut })),
     };
 }
@@ -80,7 +83,8 @@ function isProject(value: unknown): value is CutterProject {
         && (project.encoder === 'software' || project.encoder === 'h264_nvenc' || project.encoder === 'h264_qsv' || project.encoder === 'h264_amf')
         && typeof project.audioStreamIndex === 'number'
         && Number.isInteger(project.audioStreamIndex)
-        && project.audioStreamIndex >= 0;
+        && project.audioStreamIndex >= 0
+        && validAudioProcessing(project.audioProcessing, Number(project.trimEnd) - Number(project.trimStart) - (project.cuts as Array<{start:number;end:number}>).reduce((sum, cut) => sum + cut.end - cut.start, 0));
 }
 
 function readDocument(filePath: string): CutterProjectDocument {

@@ -14,12 +14,10 @@ const RendererClipDiscovery = (() => {
     let sequence = 0;
     let busy = false;
     const text = (de: string, en: string) => currentLanguage === 'de' ? de : en;
-    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, content = '') => {
-        const node = document.createElement(tag); node.className = className; node.textContent = content; return node;
-    };
+    const element = RendererElements.element;
     const input = (id: string) => document.getElementById(id) as HTMLInputElement;
     const notice = (message: string) => { const node = document.getElementById('clipDiscoveryStatus'); if (node) node.textContent = message; };
-    const button = (label: string, click: () => void) => { const node = element('button', 'btn-secondary', label); node.type = 'button'; node.addEventListener('click', click); return node; };
+    const button = RendererElements.button;
     function ensureDialog(): HTMLDialogElement {
         if (dialog) return dialog;
         dialog = element('dialog', 'clip-discovery-dialog'); dialog.id = 'clipDiscoveryDialog';
