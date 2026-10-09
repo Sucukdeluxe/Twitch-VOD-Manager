@@ -256,6 +256,10 @@ interface CutterExportOptions {
     hardwareEncoders: Array<'h264_nvenc' | 'h264_qsv' | 'h264_amf'>;
 }
 
+type MergeFileReference = import('./main/domain/workspace-session').MergeFileReference;
+type WorkspaceSnapshot = import('./main/domain/workspace-session').WorkspaceSnapshot;
+type ClipTransferProgress = import('./main/domain/workspace-session').ClipTransferProgress;
+
 interface FileCapabilityReference {
     token: string;
     name: string;
@@ -474,11 +478,17 @@ interface ApiBridge {
     pauseDownload(): Promise<boolean>;
     cancelDownload(): Promise<boolean>;
     isDownloading(): Promise<boolean>;
-    downloadClip(url: string): Promise<{ success: boolean; error?: string; filename?: string }>;
+    downloadClip(url: string, requestId: string): Promise<{ success: boolean; cancelled?: boolean; error?: string; filename?: string }>;
+    cancelClipDownload(requestId: string): Promise<boolean>;
+    onClipProgress(callback: (progress: ClipTransferProgress) => void): void;
+    getWorkspaceSession(): Promise<WorkspaceSnapshot>;
+    saveClipWorkspace(items: ClipBatchItem[]): Promise<boolean>;
+    saveMergeWorkspace(ids: string[]): Promise<boolean>;
+    getMergeVideoInfo(id: string): Promise<{ durationSeconds?: number; missing?: boolean }>;
     getClipInfo(url: string): Promise<{ title: string; broadcaster_name: string } | null>;
     selectFolder(): Promise<(FileCapabilityReference & { displayPath: string }) | null>;
     selectVideoFile(): Promise<FileCapabilityReference | null>;
-    selectMultipleVideos(): Promise<FileCapabilityReference[] | null>;
+    selectMultipleVideos(): Promise<MergeFileReference[] | null>;
     selectDroppedVideo(file: File): Promise<FileCapabilityReference | null>;
     saveVideoDialog(defaultName: string): Promise<FileCapabilityReference | null>;
     openFolder(pathOrCapability: string): Promise<void>;
@@ -556,6 +566,7 @@ interface ApiBridge {
     onDownloadFinished(callback: () => void): void;
     onDownloadPolicyStatus(callback: (status: DownloadPolicyStatus) => void): void;
     onCutProgress(callback: (percent: number) => void): void;
+    onMergeFinished(callback: (result: { success: boolean }) => void): void;
     onMergeProgress(callback: (percent: number) => void): void;
     onUpdateChecking(callback: () => void): void;
     onUpdateAvailable(callback: (info: UpdateInfo) => void): void;

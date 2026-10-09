@@ -1,3 +1,4 @@
+import { WorkspaceSessionStore, normalizeWorkspaceClips, type WorkspaceMergeFile, type MergeFileReference, type ClipTransferProgress } from './main/domain/workspace-session';
 import { createArchiveInventoryReader, searchArchiveInventory, summarizeArchiveInventory, type ArchiveStats, type ArchiveSearchFilter, type ArchiveSearchResult } from './main/domain/archive-inventory';
 import { randomUUID } from 'node:crypto';
 import { createDownloadHistoryStore, downloadOutputBytes, emptyLifetimeDownloadStats, type DownloadHistoryStore } from './main/domain/download-history-store';
@@ -22,6 +23,7 @@ import { writeFileAtomicSync } from './main/infra/fs-atomic';
 import { parseDuration, formatDuration, formatDurationDashed } from './main/infra/duration';
 import {
     sanitizeFilenamePart,
+    sanitizeClipFilename,
     formatDateWithPattern,
     getMergeGroupPhaseText as getMergeGroupPhaseTextCore,
 } from './main/infra/format-helpers';
@@ -3698,22 +3700,10 @@ async function mergeVideos(
     if (totalDurationSec && totalDurationSec > 0) {
         mergeTotalDurationUs = totalDurationSec * 1_000_000;
     } else {
-        // Fallback: use ffprobe to get total duration of all input files
-        const ffprobe = getFFprobePath();
         for (const filePath of inputFiles) {
-            try {
-                recordManagedToolExecution('ffprobe', ffprobe);
-                const result = execSync(
-                    `"${ffprobe}" -v quiet -show_entries format=duration -of csv=p=0 "${filePath}"`,
-                    { timeout: 10000, windowsHide: true }
-                ).toString().trim();
-                const dur = parseFloat(result);
-                if (!isNaN(dur)) {
-                    mergeTotalDurationUs += dur * 1_000_000;
-                }
-            } catch {
-                // If ffprobe fails, fall back to old behavior
-            }
+            if (appShutdownStarted) break;
+            const info = await getVideoInfo(filePath, currentEditorProcesses, 10000);
+            if (info && Number.isFinite(info.duration)) mergeTotalDurationUs += info.duration * 1_000_000;
         }
     }
 
@@ -3937,7 +3927,7 @@ async function splitMergedFile(
 async function finalizeDownloadedMp4(partialFilename: string, filename: string, itemId: string | null, expectedDuration: number | null, clipTracking?: ActiveClipDownloadTracking): Promise<DownloadResult> {
     const remuxFilename = partialDownloadRegistry.begin(`${filename}.remux`);
     try {
-        if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) throw new Error('Download cancelled');
+        if (appShutdownStarted || clipTracking?.cancelled || !(await waitForQueuePhaseBoundary(itemId))) throw new Error('Download cancelled');
         const diskCheck = ensureDiskSpace(path.dirname(filename), fs.statSync(partialFilename).size + 32 * 1024 * 1024, 'MP4');
         if (!diskCheck.success) return diskCheck;
         await remuxMp4({
@@ -3950,11 +3940,11 @@ async function finalizeDownloadedMp4(partialFilename: string, filename: string, 
                 const remuxRegistration = itemId ? queueProcessRegistry.register(itemId, 'post-processing', createPhaseBoundaryProcessResource(
                     process, () => waitForChildProcessExit(process),
                 )) : null;
-                if (appShutdownStarted) process.kill();
+                if (appShutdownStarted || clipTracking?.cancelled) process.kill();
                 return () => remuxRegistration?.release();
             },
         });
-        if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) throw new Error('Download cancelled');
+        if (appShutdownStarted || clipTracking?.cancelled || !(await waitForQueuePhaseBoundary(itemId))) throw new Error('Download cancelled');
         const integrity = validateDownloadedFileIntegrity(remuxFilename, expectedDuration);
         if (!integrity.success) return integrity;
         partialDownloadRegistry.commit(remuxFilename, filename);
@@ -8001,15 +7991,46 @@ ipcMain.handle('open-external', async (event, url: string) => {
     await shell.openExternal(trimmed);
 });
 
-// Tracks active standalone clip downloads so cancel-download / window-all-closed
-// can kill them. Separate from activeDownloads (queue) because clip downloads
-// don't go through the queue scheduler.
 interface ActiveClipDownloadTracking {
     process: ChildProcess;
     output: PausableOutput;
     partialFilename: string;
+    cancelled: boolean;
 }
+interface ClipRequest {
+    ownerId: number;
+    controller: AbortController;
+    progress: ClipTransferProgress;
+    tracking?: ActiveClipDownloadTracking;
+}
+interface ClipResult { success: boolean; cancelled?: boolean; error?: string; filename?: string }
 const activeClipProcesses = new Set<ActiveClipDownloadTracking>();
+const clipRequests = new Map<string, ClipRequest>();
+const workspaceSession = new WorkspaceSessionStore(path.join(APPDATA_DIR, 'workspace-session.json'), error => appendDebugLog('workspace-save-error', { error: String(error) }));
+const mergeWorkspaceFiles = new Map(workspaceSession.mergeFiles.map(file => [file.id, file]));
+
+function publishClipProgress(request: ClipRequest): void {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.id === request.ownerId) mainWindow.webContents.send('clip-progress', request.progress);
+}
+
+function cancelClipRequest(request: ClipRequest): void {
+    request.controller.abort();
+    if (request.tracking) {
+        request.tracking.cancelled = true;
+        try { request.tracking.process.kill(); } catch {}
+        void request.tracking.output.cancel().catch(() => {});
+    }
+}
+
+async function prepareClipStep<T>(request: ClipRequest, operation: Promise<T>): Promise<T> {
+    const signal = request.controller.signal;
+    if (signal.aborted) throw new Error('cancelled');
+    return await new Promise<T>((resolve, reject) => {
+        const abort = () => reject(new Error('cancelled'));
+        signal.addEventListener('abort', abort, { once: true });
+        operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    });
+}
 
 registerTrustedIpcHandler(ipcMain, 'get-clip-info', isTrustedRendererEvent, () => Promise.resolve(null), async (_, clipUrl: unknown): Promise<{ title: string; broadcaster_name: string } | null> => {
     if (appShutdownStarted) return null;
@@ -8017,151 +8038,116 @@ registerTrustedIpcHandler(ipcMain, 'get-clip-info', isTrustedRendererEvent, () =
     return clipId ? await getClipInfo(clipId) : null;
 });
 
-registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () => Promise.resolve({ success: false, error: 'File access denied' }), async (_, clipUrl: string) => {
-    if (appShutdownStarted) return { success: false, error: 'shutting-down' };
-    const policyDecision = decideStandaloneDownloadStart(config.download_policy, new Date());
-    if (!policyDecision.allowed) {
-        const nextStart = policyDecision.nextStart
-            ? `${policyDecision.nextStart.getHours().toString().padStart(2, '0')}:${policyDecision.nextStart.getMinutes().toString().padStart(2, '0')}`
-            : '--:--';
-        return { success: false, error: tBackend('downloadOutsideWindow', { nextStart }) };
-    }
+ipcMain.handle('cancel-clip-download', (event, requestId: string) => {
+    if (!isTrustedRendererEvent(event)) return false;
+    const request = clipRequests.get(requestId);
+    if (!request || request.ownerId !== event.sender.id) return false;
+    cancelClipRequest(request);
+    return true;
+});
 
-    const clipId = parseTwitchClipId(clipUrl);
-    if (!clipId) return { success: false, error: tBackend('invalidClipUrl') };
-    let clipInfo: Awaited<ReturnType<typeof getClipInfo>>;
-    try {
-        clipInfo = await getClipInfo(clipId);
-    } catch {
-        return { success: false, error: tBackend('clipLookupUnavailable') };
-    }
-    if (appShutdownStarted) return { success: false, error: 'shutting-down' };
+async function performClipDownload(clipId: string, request: ClipRequest): Promise<ClipResult> {
+    const clipInfo = await prepareClipStep(request, getClipInfo(clipId));
     if (!clipInfo) return { success: false, error: tBackend('clipNotFound') };
-    if (!(await ensureStreamlinkInstalled())) return { success: false, error: tBackend('streamlinkAutoInstallFailed') };
-    if (!(await ensureFfmpegInstalled())) return { success: false, error: tBackend('ffmpegAutoInstallFailed') };
-    if (appShutdownStarted) return { success: false, error: 'shutting-down' };
-
-    // Sanitize broadcaster_name for path safety — Twitch returns the display
-    // name which can contain unicode, spaces, or punctuation that breaks
-    // path joining on some Windows configurations.
-    const safeBroadcaster = sanitizeFilenamePart(
-        typeof clipInfo.broadcaster_name === 'string' ? clipInfo.broadcaster_name : '',
-        'unknown'
-    );
+    if (!(await prepareClipStep(request, ensureStreamlinkInstalled()))) return { success: false, error: tBackend('streamlinkAutoInstallFailed') };
+    if (!(await prepareClipStep(request, ensureFfmpegInstalled()))) return { success: false, error: tBackend('ffmpegAutoInstallFailed') };
+    if (appShutdownStarted || request.controller.signal.aborted) return { success: false, cancelled: true };
+    const safeBroadcaster = sanitizeClipFilename(clipInfo.broadcaster_name || '', 'unknown');
     const folder = path.join(config.download_path, 'Clips', safeBroadcaster);
     fs.mkdirSync(folder, { recursive: true });
-
-    const clipDiskCheck = ensureDiskSpace(folder, 128 * 1024 * 1024, 'Clip-Download');
-    if (!clipDiskCheck.success) {
-        return { success: false, error: clipDiskCheck.error || tBackend('diskSpaceShortGeneric') };
-    }
-
-    const rawTitle = typeof clipInfo.title === 'string' ? clipInfo.title : '';
-    const safeTitle = (rawTitle.replace(/[^a-zA-Z0-9_\- ]/g, '').trim().substring(0, 50)) || 'clip';
-    // Use ensureUniqueFilename so retrying a clip with the same title doesn't
-    // overwrite the previous download. itemId is the clipId — if the user
-    // cancels via cancel-download, that's the handle.
-    const filename = ensureUniqueFilename(path.join(folder, `${safeTitle}.mp4`), clipId);
-    const downloadAttemptId = randomUUID();
-
-    return new Promise<{ success: boolean; error?: string; filename?: string }>((resolve) => {
-        const streamlinkCmd = getStreamlinkCommand();
-        const partialFilename = partialDownloadRegistry.begin(filename);
-        if (appShutdownStarted) {
-            partialDownloadRegistry.discard(partialFilename);
-            releaseClaimedFilenamesForItem(clipId);
-            resolve({ success: false, error: 'shutting-down' });
-            return;
-        }
-        recordManagedToolExecution('streamlink', streamlinkCmd.command);
-        const proc = spawn(streamlinkCmd.command, [
-            ...streamlinkCmd.prefixArgs,
-            `https://clips.twitch.tv/${clipId}`,
-            getStreamlinkStreamArg(),
-            '--stdout'
-        ], { windowsHide: true });
-        if (!proc.stdout) {
-            partialDownloadRegistry.discard(partialFilename);
-            releaseClaimedFilenamesForItem(clipId);
-            resolve({ success: false, error: tBackend('unknownDownloadError') });
-            return;
-        }
-        const output = createPausableOutput(
-            proc.stdout,
-            fs.createWriteStream(partialFilename, { flags: 'w' }),
-            createDownloadThrottleTransform(),
-        );
-        const outputFinished = output.finished.then(() => null, (error) => error);
-        const tracking = { process: proc, output, partialFilename };
-        let settled = false;
-        const finish = (result: { success: boolean; error?: string; filename?: string }): void => {
-            if (settled) return;
-            settled = true;
-            activeClipProcesses.delete(tracking);
-            releaseClaimedFilenamesForItem(clipId);
-            resolve(result);
-        };
-
+    const diskCheck = ensureDiskSpace(folder, 128 * 1024 * 1024, 'Clip-Download');
+    if (!diskCheck.success) return { success: false, error: diskCheck.error || tBackend('diskSpaceShortGeneric') };
+    const filename = ensureUniqueFilename(path.join(folder, sanitizeClipFilename(clipInfo.title || '') + '.mp4'), clipId);
+    let partialFilename: string | undefined;
+    let progressTimer: ReturnType<typeof setInterval> | undefined;
+    try {
+        partialFilename = partialDownloadRegistry.begin(filename);
+        const command = getStreamlinkCommand();
+        recordManagedToolExecution('streamlink', command.command);
+        const proc = spawn(command.command, [...command.prefixArgs, 'https://clips.twitch.tv/' + clipId, getStreamlinkStreamArg(), '--stdout'], { windowsHide: true });
+        if (!proc.stdout) { proc.kill(); return { success: false, error: tBackend('unknownDownloadError') }; }
+        proc.stderr?.resume();
+        const output = createPausableOutput(proc.stdout, fs.createWriteStream(partialFilename, { flags: 'w' }), createDownloadThrottleTransform());
+        const tracking: ActiveClipDownloadTracking = { process: proc, output, partialFilename, cancelled: false };
+        request.tracking = tracking;
         activeClipProcesses.add(tracking);
-        appendDebugLog('clip-download-start', { clipId, broadcaster: safeBroadcaster, filename });
-
-        proc.on('close', async (code) => {
-            const outputError = await outputFinished;
-            if (settled) return;
-
-            if (appShutdownStarted) {
-                partialDownloadRegistry.discard(partialFilename);
-                finish({ success: false, error: 'shutting-down' });
-                return;
-            }
-
-            if (outputError || code !== 0 || !fs.existsSync(partialFilename)) {
-                partialDownloadRegistry.discard(partialFilename);
-                appendDebugLog('clip-download-failed', { clipId, code });
-                finish({ success: false, error: outputError ? String(outputError) : tBackend('downloadFailedExitCode', { code: String(code ?? -1) }) });
-                return;
-            }
-
-            // Integrity: clips are short but should still be at least a few KB
-            // and parse as a video stream via ffprobe. Empty/zero-byte files
-            // were previously reported as "success" because exit code was 0.
-            const stats = fs.statSync(partialFilename);
-            if (stats.size < 16 * 1024) {
-                partialDownloadRegistry.discard(partialFilename);
-                appendDebugLog('clip-download-too-small', { clipId, bytes: stats.size });
-                finish({ success: false, error: tBackend('clipFileTooSmall', { bytes: String(stats.size) }) });
-                return;
-            }
-
-            const integrity = validateDownloadedFileIntegrity(partialFilename, null);
-            if (!integrity.success) {
-                partialDownloadRegistry.discard(partialFilename);
-                appendDebugLog('clip-download-integrity-failed', { clipId, error: integrity.error });
-                finish({ success: false, error: integrity.error || tBackend('integrityFailedGeneric') });
-                return;
-            }
-
-            const finalized = await finalizeDownloadedMp4(partialFilename, filename, null, null, tracking);
-            if (!finalized.success) { finish(finalized); return; }
-            try {
-                downloadHistoryStore?.recordClip({ attemptId: downloadAttemptId, clipId, filename });
-            } catch (error) {
-                appendDebugLog('clip-history-save-failed', { clipId, error: String(error) });
-            }
-            readArchiveInventory.invalidate();
-            rememberRendererPath('open-file', filename);
-            rememberRendererPath('show-in-folder', filename);
-            appendDebugLog('clip-download-success', { clipId, bytes: stats.size, filename });
-            finish({ success: true, filename });
+        const outputFinished = output.finished.then(() => null, error => { try { proc.kill(); } catch {} return error; });
+        request.progress.phase = 'downloading';
+        let previousBytes = 0;
+        let previousTime = Date.now();
+        proc.stdout.on('data', (chunk: Buffer) => { request.progress.bytes += chunk.length; });
+        progressTimer = setInterval(() => {
+            const now = Date.now();
+            request.progress.bytesPerSecond = Math.max(0, (request.progress.bytes - previousBytes) * 1000 / Math.max(1, now - previousTime));
+            previousBytes = request.progress.bytes;
+            previousTime = now;
+            publishClipProgress(request);
+        }, 300);
+        progressTimer.unref();
+        publishClipProgress(request);
+        appendDebugLog('clip-download-start', { clipId, filename });
+        const code = await new Promise<number | null>(resolve => {
+            proc.once('close', resolve);
+            proc.once('error', () => { void output.cancel().finally(() => resolve(-1)); });
         });
+        const outputError = await outputFinished;
+        clearInterval(progressTimer);
+        if (request.controller.signal.aborted || appShutdownStarted) return { success: false, cancelled: true };
+        if (outputError || code !== 0 || !fs.existsSync(partialFilename)) return { success: false, error: tBackend('downloadFailedExitCode', { code: String(code ?? -1) }) };
+        const stats = fs.statSync(partialFilename);
+        if (stats.size < 16 * 1024) return { success: false, error: tBackend('clipFileTooSmall', { bytes: String(stats.size) }) };
+        request.progress.phase = 'saving';
+        request.progress.bytesPerSecond = 0;
+        publishClipProgress(request);
+        const integrity = validateDownloadedFileIntegrity(partialFilename, null);
+        if (!integrity.success) return { success: false, error: integrity.error || tBackend('integrityFailedGeneric') };
+        const finalized = await finalizeDownloadedMp4(partialFilename, filename, null, null, tracking);
+        if (request.controller.signal.aborted || appShutdownStarted) return { success: false, cancelled: true };
+        if (!finalized.success) return finalized;
+        try { downloadHistoryStore?.recordClip({ attemptId: request.progress.requestId, clipId, filename }); }
+        catch (error) { appendDebugLog('clip-history-save-failed', { clipId, error: String(error) }); }
+        readArchiveInventory.invalidate();
+        rememberRendererPath('open-file', filename);
+        rememberRendererPath('show-in-folder', filename);
+        appendDebugLog('clip-download-success', { clipId, bytes: stats.size, filename });
+        return { success: true, filename };
+    } finally {
+        clearInterval(progressTimer);
+        if (request.tracking) activeClipProcesses.delete(request.tracking);
+        if (partialFilename) partialDownloadRegistry.discard(partialFilename);
+        releaseClaimedFilenamesForItem(clipId);
+    }
+}
 
-        proc.on('error', async () => {
-            await output.cancel();
-            if (settled) return;
-            partialDownloadRegistry.discard(partialFilename);
-            finish({ success: false, error: tBackend('streamlinkNotFound') });
-        });
-    });
+registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () => Promise.resolve({ success: false, error: 'File access denied' }), async (event, clipUrl: string, requestId: string): Promise<ClipResult> => {
+    if (appShutdownStarted) return { success: false, cancelled: true };
+    const clipId = parseTwitchClipId(clipUrl);
+    if (!clipId) return { success: false, error: tBackend('invalidClipUrl') };
+    if (typeof requestId !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(requestId) || clipRequests.has(requestId) || [...clipRequests.values()].some(request => request.ownerId === event.sender.id)) return { success: false, error: tBackend('unknownDownloadError') };
+    const policy = decideStandaloneDownloadStart(config.download_policy, new Date());
+    if (!policy.allowed) return { success: false, error: tBackend('downloadOutsideWindow', { nextStart: policy.nextStart ? policy.nextStart.getHours().toString().padStart(2, '0') + ':' + policy.nextStart.getMinutes().toString().padStart(2, '0') : '--:--' }) };
+    const request: ClipRequest = { ownerId: event.sender.id, controller: new AbortController(), progress: {
+        url: 'https://clips.twitch.tv/' + clipId, requestId, bytes: 0, bytesPerSecond: 0, phase: 'preparing', state: 'active'
+    } };
+    clipRequests.set(requestId, request);
+    const entry = workspaceSession.clips.find(item => item.url === request.progress.url);
+    if (entry) { entry.state = 'active'; entry.error = undefined; workspaceSession.save(); }
+    publishClipProgress(request);
+    let result: ClipResult;
+    try { result = await performClipDownload(clipId, request); }
+    catch (error) {
+        result = request.controller.signal.aborted ? { success: false, cancelled: true } : { success: false, error: tBackend('unknownDownloadError') };
+        if (!result.cancelled) appendDebugLog('clip-download-failed', { clipId, error: String(error) });
+    }
+    request.progress.state = result.cancelled ? 'stopped' : result.success ? 'done' : 'failed';
+    request.progress.filename = result.filename;
+    request.progress.error = result.error;
+    request.progress.bytesPerSecond = 0;
+    const current = workspaceSession.clips.find(item => item.url === request.progress.url);
+    if (current) { Object.assign(current, { state: request.progress.state, filename: result.filename, error: result.error }); workspaceSession.save(); }
+    publishClipProgress(request);
+    clipRequests.delete(requestId);
+    return result;
 });
 
 registerTrustedIpcHandler(ipcMain, 'run-preflight', isTrustedRendererEvent, () => Promise.resolve(null), async (_, autoFix: boolean = false) => {
@@ -8622,34 +8608,109 @@ ipcMain.handle('cut-video', async (event, inputCapability: string, startTime: nu
     return { success, outputName: success ? path.basename(outputFile) : null };
 });
 
-// Merge IPC
-ipcMain.handle('merge-videos', async (event, inputCapabilities: string[], outputCapability: string) => {
-    if (!isTrustedRendererEvent(event) || !Array.isArray(inputCapabilities) || inputCapabilities.length < 2) return { success: false, outputName: null };
-    const inputFiles = inputCapabilities.map((capability) => resolveFileCapability(event, capability, 'merge-input'));
-    const outputFile = resolveFileCapability(event, outputCapability, 'merge-output');
-    if (inputFiles.some((file): file is null => !file) || !outputFile) return { success: false, outputName: null };
-    for (const capability of inputCapabilities) {
-        if (!resolveFileCapability(event, capability, 'merge-input', true)) return { success: false, outputName: null };
+function restoreMergeReference(event: IpcMainInvokeEvent, file: WorkspaceMergeFile): MergeFileReference {
+    try {
+        const stat = fs.statSync(file.path);
+        if (!stat.isFile() || stat.size !== file.size || stat.mtimeMs !== file.mtimeMs) throw new Error('File changed');
+        return { ...issueFileCapability(event, 'merge-input', file.path, 'input-file', VIDEO_FILE_EXTENSIONS, CUTTER_SESSION_CAPABILITY_TTL_MS), id: file.id, durationSeconds: file.durationSeconds };
+    } catch { return { id: file.id, token: '', name: path.basename(file.path), missing: true }; }
+}
+
+ipcMain.handle('get-workspace-session', (event) => {
+    if (!isTrustedRendererEvent(event)) return null;
+    for (const item of workspaceSession.clips) {
+        if (item.filename && fs.existsSync(item.filename)) {
+            rememberRendererPath('open-file', item.filename);
+            rememberRendererPath('show-in-folder', item.filename);
+        } else if (item.state === 'done') {
+            item.state = 'stopped';
+            item.filename = undefined;
+            item.error = config.language === 'en' ? 'File missing' : 'Datei fehlt';
+        }
     }
-    if (!resolveFileCapability(event, outputCapability, 'merge-output', true, inputFiles as string[])) return { success: false, outputName: null };
-    const success = await publishCapabilityOutput(outputFile, async (partialFile) => {
-        const produced = await mergeVideos(inputFiles as string[], partialFile, (percent) => {
-            mainWindow?.webContents.send('merge-progress', percent);
-        });
-        return produced && !appShutdownStarted;
+    const active = [...clipRequests.values()].find(request => request.ownerId === event.sender.id);
+    if (active) {
+        const item = workspaceSession.clips.find(clip => clip.url === active.progress.url);
+        if (item) item.state = 'active';
+    }
+    return { clips: workspaceSession.clips, mergeFiles: workspaceSession.mergeFiles.map(file => restoreMergeReference(event, file)), activeClip: active?.progress,
+        mergeActive: workspaceMergeActive, mergeProgress: workspaceMergeProgress };
+});
+
+ipcMain.handle('save-clip-workspace', (event, items: unknown) => {
+    if (!isTrustedRendererEvent(event) || !Array.isArray(items) || items.length > 200) return false;
+    const previous = new Map(workspaceSession.clips.map(item => [item.url, item]));
+    workspaceSession.clips = normalizeWorkspaceClips(items).map(item => {
+        const saved = previous.get(item.url);
+        const active = [...clipRequests.values()].find(request => request.progress.url === item.url);
+        return { ...item, filename: saved?.filename,
+            state: active ? 'active' : item.state === 'done' && !saved?.filename ? 'ready' : item.state };
     });
-    return { success, outputName: success ? path.basename(outputFile) : null };
+    return workspaceSession.save();
+});
+
+ipcMain.handle('save-merge-workspace', (event, ids: unknown) => {
+    if (!isTrustedRendererEvent(event) || workspaceMergeActive || !Array.isArray(ids) || ids.length > 500 || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string' || !mergeWorkspaceFiles.has(id))) return false;
+    workspaceSession.mergeFiles = ids.map(id => mergeWorkspaceFiles.get(id)!);
+    return workspaceSession.save();
+});
+
+ipcMain.handle('get-merge-video-info', async (event, id: string) => {
+    if (!isTrustedRendererEvent(event)) return { missing: true };
+    const file = mergeWorkspaceFiles.get(id);
+    if (!file || restoreMergeReference(event, file).missing) return { missing: true };
+    if (file.durationSeconds !== undefined) return { durationSeconds: file.durationSeconds };
+    if (!(await ensureFfmpegInstalled()) || appShutdownStarted) return {};
+    const info = await getVideoInfo(file.path, currentEditorProcesses);
+    if (info && Number.isFinite(info.duration) && info.duration >= 0) {
+        file.durationSeconds = info.duration;
+        workspaceSession.save();
+    }
+    return { durationSeconds: file.durationSeconds };
+});
+
+let workspaceMergeActive = false;
+let workspaceMergeProgress = 0;
+
+ipcMain.handle('merge-videos', async (event, inputCapabilities: string[], outputCapability: string) => {
+    if (!isTrustedRendererEvent(event) || workspaceMergeActive || !Array.isArray(inputCapabilities) || inputCapabilities.length < 2 || inputCapabilities.length > 500) return { success: false, outputName: null };
+    const inputFiles = inputCapabilities.map(capability => resolveFileCapability(event, capability, 'merge-input'));
+    const outputFile = resolveFileCapability(event, outputCapability, 'merge-output');
+    if (inputFiles.some(file => !file) || !outputFile) return { success: false, outputName: null };
+    if (!resolveFileCapability(event, outputCapability, 'merge-output', true, inputFiles as string[])) return { success: false, outputName: null };
+    workspaceMergeActive = true;
+    workspaceMergeProgress = 0;
+    let success = false;
+    try {
+        const known = inputFiles.map(filePath => [...mergeWorkspaceFiles.values()].find(file => file.path === filePath)?.durationSeconds);
+        const total = known.every(duration => duration !== undefined) ? known.reduce<number>((sum, duration) => sum + duration!, 0) : undefined;
+        success = await publishCapabilityOutput(outputFile, async partialFile => {
+            const produced = await mergeVideos(inputFiles as string[], partialFile, percent => {
+                workspaceMergeProgress = percent;
+                mainWindow?.webContents.send('merge-progress', percent);
+            }, total);
+            return produced && !appShutdownStarted;
+        });
+        if (success) { workspaceSession.mergeFiles = []; workspaceSession.save(); }
+    } catch (error) { appendDebugLog('workspace-merge-failed', { error: String(error) }); }
+    finally { workspaceMergeActive = false; }
+    const result = { success, outputName: success ? path.basename(outputFile) : null };
+    if (!event.sender.isDestroyed()) event.sender.send('merge-finished', result);
+    return result;
 });
 
 ipcMain.handle('select-multiple-videos', async (event) => {
-    if (!isTrustedRendererEvent(event)) return null;
+    if (!isTrustedRendererEvent(event) || workspaceMergeActive) return null;
     const result = await dialog.showOpenDialog(mainWindow!, {
         properties: ['openFile', 'multiSelections'],
-        filters: [
-            { name: 'Video Files', extensions: ['mp4', 'mkv', 'ts', 'mov', 'avi'] }
-        ]
+        filters: [{ name: 'Video Files', extensions: VIDEO_FILE_EXTENSIONS }]
     });
-    return result.filePaths.map((filePath) => issueFileCapability(event, 'merge-input', filePath, 'input-file', VIDEO_FILE_EXTENSIONS));
+    return result.filePaths.slice(0, 500).map(filePath => {
+        const stat = fs.statSync(filePath);
+        const file: WorkspaceMergeFile = { id: randomUUID(), path: filePath, size: stat.size, mtimeMs: stat.mtimeMs };
+        mergeWorkspaceFiles.set(file.id, file);
+        return restoreMergeReference(event, file);
+    });
 });
 
 ipcMain.handle('save-video-dialog', async (event, defaultName: string) => {
@@ -8838,6 +8899,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
     const cleanupError = (step: string, error: unknown): void => {
         appendDebugLog('shutdown-step-failed', { step, error: String(error) });
     };
+    for (const request of clipRequests.values()) cancelClipRequest(request);
     const clipProcesses = [...activeClipProcesses];
     const editorProcesses = [...currentEditorProcesses];
     const exportProcesses = [...currentCutterExportProcesses];
@@ -8889,6 +8951,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
                 if (result.status === 'rejected') cleanupError('clip-process-exit', result.reason);
             }
         }],
+        ['workspace-session', () => { workspaceSession.flush(); }],
         ['editor-processes', async () => {
             for (const process of editorProcesses) {
                 try { process.kill(); } catch { }

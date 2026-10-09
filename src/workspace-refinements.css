@@ -1951,3 +1951,19 @@ body :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea):foc
 
 #settingsTab .system-check-grid .section-header { min-height: 34px; margin-bottom: 12px; }
 #settingsTab .system-check-grid .section-header h3 { margin: 0; }
+
+#mergeTab .file-item { position: relative; min-height: 72px; gap: 12px; }
+#mergeTab .file-content { flex: 1; min-width: 0; display: grid; gap: 5px; }
+#mergeTab .file-name { min-width: 0; }
+#mergeTab .file-duration, #mergeTab .merge-total-duration { color: var(--workspace-text-muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+#mergeTab .merge-actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+#mergeTab .file-drag { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 36px; padding: 4px; border: 0; background: transparent; color: var(--workspace-text-muted); cursor: grab; user-select: none; }
+#mergeTab .file-drag svg { width: 20px; height: 24px; fill: currentColor; pointer-events: none; }
+#mergeTab .file-drag:active { cursor: grabbing; }
+#mergeTab .file-item.dragging { opacity: .5; }
+#mergeTab .file-item.drop-before::before, #mergeTab .file-item.drop-after::after { content: ''; position: absolute; left: 12px; right: 12px; height: 2px; background: var(--workspace-primary); pointer-events: none; }
+#mergeTab .file-item.drop-before::before { top: 0; }
+#mergeTab .file-item.drop-after::after { bottom: 0; }
+#mergeTab .file-unavailable .file-duration { color: var(--workspace-danger); }
+.clip-result-status { font-variant-numeric: tabular-nums; }
+@media (max-width: 700px) { #mergeTab .file-item { gap: 8px; } #mergeTab .file-drag { flex-basis: 22px; width: 22px; } }

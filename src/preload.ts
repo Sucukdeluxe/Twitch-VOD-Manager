@@ -133,7 +133,15 @@ contextBridge.exposeInMainWorld('api', {
     pauseDownload: () => ipcRenderer.invoke('pause-download'),
     cancelDownload: () => ipcRenderer.invoke('cancel-download'),
     isDownloading: () => ipcRenderer.invoke('is-downloading'),
-    downloadClip: (url: string) => ipcRenderer.invoke('download-clip', url),
+    downloadClip: (url: string, requestId: string) => ipcRenderer.invoke('download-clip', url, requestId),
+    cancelClipDownload: (requestId: string) => ipcRenderer.invoke('cancel-clip-download', requestId),
+    onClipProgress: (callback: (progress: import('./main/domain/workspace-session').ClipTransferProgress) => void) => {
+        ipcRenderer.on('clip-progress', (_, progress) => callback(progress));
+    },
+    getWorkspaceSession: () => ipcRenderer.invoke('get-workspace-session'),
+    saveClipWorkspace: (items: import('./main/domain/workspace-session').WorkspaceClip[]) => ipcRenderer.invoke('save-clip-workspace', items),
+    saveMergeWorkspace: (ids: string[]) => ipcRenderer.invoke('save-merge-workspace', ids),
+    getMergeVideoInfo: (id: string) => ipcRenderer.invoke('get-merge-video-info', id),
     getClipInfo: (url: string): Promise<{ title: string; broadcaster_name: string } | null> => ipcRenderer.invoke('get-clip-info', url),
 
     // Files
@@ -257,6 +265,7 @@ contextBridge.exposeInMainWorld('api', {
     onCutProgress: (callback: (percent: number) => void) => {
         ipcRenderer.on('cut-progress', (_, percent) => callback(percent));
     },
+    onMergeFinished: (callback: (result: { success: boolean }) => void) => { ipcRenderer.on('merge-finished', (_, result) => callback(result)); },
     onMergeProgress: (callback: (percent: number) => void) => {
         ipcRenderer.on('merge-progress', (_, percent) => callback(percent));
     },

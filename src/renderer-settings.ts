@@ -42,12 +42,25 @@ const secretInputGenerations: Record<SecretInputId, number> = {
     discordWebhookUrl: 0
 };
 
-function canRunSettingsAutoRefresh(): boolean {
-    if (document.hidden) {
-        return false;
-    }
+function canRunSettingsAutoRefresh(targetId?: string): boolean {
+    if (document.hidden || document.querySelector('.tab-content.active')?.id !== 'settingsTab') return false;
+    if (!targetId) return true;
+    const target = document.getElementById(targetId);
+    if (!target || target.closest('[hidden]') || target.closest('details:not([open])')) return false;
+    const rect = target.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+}
 
-    return document.querySelector('.tab-content.active')?.id === 'settingsTab';
+let debugRefreshInFlight = false;
+let metricsRefreshInFlight = false;
+let automationRefreshInFlight = false;
+
+function refreshVisibleSettingsDiagnostics(): void {
+    if (byId<HTMLInputElement>('debugAutoRefresh')?.checked && canRunSettingsAutoRefresh('debugLogOutput')) void refreshDebugLog();
+    if (byId<HTMLInputElement>('runtimeMetricsAutoRefresh')?.checked) {
+        if (canRunSettingsAutoRefresh('runtimeMetricsOutput')) void refreshRuntimeMetrics(false);
+        if (canRunSettingsAutoRefresh('autoVodStatusLine')) void refreshAutomationStatusLine();
+    }
 }
 
 function markSettingsInputChanged(): void {
@@ -171,6 +184,8 @@ function applyTemplatePreset(preset: string): void {
 }
 
 async function refreshRuntimeMetrics(showLoading = true): Promise<void> {
+    if (metricsRefreshInFlight) return;
+    metricsRefreshInFlight = true;
     const output = byId('runtimeMetricsOutput');
     if (showLoading) {
         output.textContent = UI_TEXT.static.runtimeMetricsLoading;
@@ -228,7 +243,7 @@ async function refreshRuntimeMetrics(showLoading = true): Promise<void> {
     } catch {
         output.textContent = UI_TEXT.static.runtimeMetricsError;
         lastRuntimeMetricsOutput = UI_TEXT.static.runtimeMetricsError;
-    }
+    } finally { metricsRefreshInFlight = false; }
 }
 
 async function exportRuntimeMetrics(): Promise<void> {
@@ -264,12 +279,8 @@ function toggleRuntimeMetricsAutoRefresh(enabled: boolean): void {
 
     if (enabled) {
         runtimeMetricsAutoRefreshTimer = window.setInterval(() => {
-            if (!canRunSettingsAutoRefresh()) {
-                return;
-            }
-
-            void refreshRuntimeMetrics(false);
-            void refreshAutomationStatusLine();
+            if (canRunSettingsAutoRefresh('runtimeMetricsOutput')) void refreshRuntimeMetrics(false);
+            if (canRunSettingsAutoRefresh('autoVodStatusLine')) void refreshAutomationStatusLine();
         }, 2000);
     }
 }
@@ -344,6 +355,7 @@ function setSettingsPane(pane: string, source?: HTMLElement): void {
     });
     if (source) byId<HTMLInputElement>('settingsSearchInput').value = '';
     if (changed) tab.scrollTop = 0;
+    if (changed) requestAnimationFrame(refreshVisibleSettingsDiagnostics);
     refreshSettingsGroupLabels();
     scheduleSegmentedIndicatorsSync();
 }
@@ -775,18 +787,17 @@ async function openDebugLogFile(): Promise<void> {
 }
 
 async function refreshDebugLog(): Promise<void> {
-    const text = await window.api.getDebugLog(250);
+    if (debugRefreshInFlight) return;
+    debugRefreshInFlight = true;
     const panel = byId('debugLogOutput');
-    const keepAtBottom = (panel.scrollHeight - panel.scrollTop - panel.clientHeight) < 20;
-
-    if (text !== lastDebugLogOutput) {
-        panel.textContent = text;
-        lastDebugLogOutput = text;
-    }
-
-    if (keepAtBottom) {
-        panel.scrollTop = panel.scrollHeight;
-    }
+    try {
+        const text = await window.api.getDebugLog(250);
+        const keepAtBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 20;
+        if (text !== lastDebugLogOutput) { panel.textContent = text; lastDebugLogOutput = text; }
+        if (keepAtBottom) panel.scrollTop = panel.scrollHeight;
+    } catch {
+        panel.textContent = currentLanguage === 'de' ? 'Protokoll konnte nicht geladen werden.' : 'Could not load the log.';
+    } finally { debugRefreshInFlight = false; }
 }
 
 function toggleDebugAutoRefresh(enabled: boolean): void {
@@ -797,11 +808,7 @@ function toggleDebugAutoRefresh(enabled: boolean): void {
 
     if (enabled) {
         debugLogAutoRefreshTimer = window.setInterval(() => {
-            if (!canRunSettingsAutoRefresh()) {
-                return;
-            }
-
-            void refreshDebugLog();
+            if (canRunSettingsAutoRefresh('debugLogOutput')) void refreshDebugLog();
         }, 2000);
     }
 }
@@ -1198,6 +1205,7 @@ function initSettingsAutoSave(): void {
     }
 
     settingsAutoSaveBound = true;
+    document.querySelectorAll<HTMLDetailsElement>('.settings-diagnostics').forEach(details => details.addEventListener('toggle', refreshVisibleSettingsDiagnostics));
     syncSettingsFormFromConfig();
     window.api.onDownloadPolicyStatus(renderDownloadPolicyStatus);
 
@@ -1402,7 +1410,8 @@ function formatRelativeTime(ms: number, future: boolean): string {
 
 async function refreshAutomationStatusLine(): Promise<void> {
     const lineEl = document.getElementById('autoVodStatusLine');
-    if (!lineEl) return;
+    if (!lineEl || automationRefreshInFlight) return;
+    automationRefreshInFlight = true;
     try {
         const status = await window.api.getAutomationStatus();
         const now = Date.now();
@@ -1422,7 +1431,7 @@ async function refreshAutomationStatusLine(): Promise<void> {
         lineEl.textContent = parts.join(' · ');
     } catch (_) {
         lineEl.textContent = '';
-    }
+    } finally { automationRefreshInFlight = false; }
 }
 
 async function triggerManualAutoVodScan(): Promise<void> {

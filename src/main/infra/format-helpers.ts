@@ -75,3 +75,9 @@ export function getMergeGroupPhaseText(phase: string, language: MergeGroupLangua
         default: return phase;
     }
 }
+
+export function sanitizeClipFilename(input: string, fallback = 'clip'): string {
+    const cleaned = Array.from(sanitizeFilenamePart(input.normalize('NFC'), fallback)).slice(0, 80).join('').replace(/[. ]+$/g, '');
+    const name = cleaned || fallback;
+    return /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\.|$)/i.test(name) ? '_' + name : name;
+}

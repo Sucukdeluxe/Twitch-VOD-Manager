@@ -75,7 +75,7 @@ let cutterFile: FileCapabilityReference | null = null;
 let cutterVideoInfo: VideoInfo | null = null;
 let isCutting = false;
 
-let mergeFiles: FileCapabilityReference[] = [];
+let mergeFiles: MergeFileReference[] = [];
 let isMerging = false;
 
 let clipDialogData: ClipDialogData | null = null;

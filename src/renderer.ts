@@ -77,6 +77,7 @@ async function init(): Promise<void> {
     initVodScrollTracking();
     initCutterDragDrop();
     initCutterEditor();
+    void restoreWorkspace();
 
     // Restore last active tab from previous session (default 'vods')
     initSegmentedIndicators();
@@ -1993,6 +1994,7 @@ interface ClipBatchItem {
     state: ClipBatchState;
     filename?: string;
     error?: string;
+    transfer?: ClipTransferProgress;
 }
 interface ClipBatchRow {
     row: HTMLLIElement;
@@ -2015,9 +2017,91 @@ const clipMetadataRequests = new Set<string>();
 const clipBatchRows = new Map<string, ClipBatchRow>();
 let clipBatchRenderFrame: number | null = null;
 
-function scheduleClipBatchRender(): void {
+const dirtyClipRows = new Set<ClipBatchItem>();
+let clipMetadataDirty = false;
+let activeClipRequestId: string | null = null;
+let restoredClipDownload = false;
+let workspaceLoading = true;
+let restoredMergeDownload = false;
+let latestMergeFinish: { success: boolean } | null = null;
+const latestClipProgress = new Map<string, ClipTransferProgress>();
+
+function scheduleClipBatchRender(item?: ClipBatchItem): void {
+    if (item) dirtyClipRows.add(item);
     if (clipBatchRenderFrame !== null) return;
-    clipBatchRenderFrame = requestAnimationFrame(() => { clipBatchRenderFrame = null; renderClipBatch(); });
+    clipBatchRenderFrame = requestAnimationFrame(() => {
+        clipBatchRenderFrame = null;
+        renderClipBatchSummary();
+        for (const dirty of dirtyClipRows) {
+            const index = clipBatchItems.indexOf(dirty);
+            if (index >= 0) renderClipBatchRow(dirty, index);
+        }
+        dirtyClipRows.clear();
+        if (clipMetadataDirty) { clipMetadataDirty = false; persistClipWorkspace(); }
+    });
+}
+
+function persistClipWorkspace(): void {
+    if (workspaceLoading) return;
+    void window.api.saveClipWorkspace(clipBatchItems.map(({ transfer: _transfer, ...item }) => item)).then(saved => {
+        if (saved === false) showClipNotice(currentLanguage === 'de' ? 'Liste konnte nicht gespeichert werden.' : 'Could not save the list.', true);
+    }).catch(() => showClipNotice(currentLanguage === 'de' ? 'Liste konnte nicht gespeichert werden.' : 'Could not save the list.', true));
+}
+
+function receiveClipProgress(progress: ClipTransferProgress): void {
+    latestClipProgress.set(progress.url, progress);
+    const item = clipBatchItems.find(candidate => candidate.url === progress.url);
+    if (!item || (activeClipRequestId && activeClipRequestId !== progress.requestId)) return;
+    item.transfer = progress;
+    item.state = progress.state;
+    item.error = progress.error;
+    if (progress.filename) item.filename = progress.filename;
+    if (progress.state === 'active') activeClipRequestId = progress.requestId;
+    if (restoredClipDownload && progress.state !== 'active') {
+        restoredClipDownload = false;
+        clipDownloadInFlight = false;
+        clipBatchStopRequested = false;
+        activeClipRequestId = null;
+        renderClipBatch();
+    } else scheduleClipBatchRender(item);
+}
+
+async function restoreWorkspace(): Promise<void> {
+    window.api.onClipProgress(receiveClipProgress);
+    window.api.onMergeFinished(result => {
+        if (workspaceLoading) latestMergeFinish = result;
+        if (!restoredMergeDownload) return;
+        restoredMergeDownload = false;
+        isMerging = false;
+        if (result.success) mergeFiles = [];
+        byId('mergeProgress').classList.remove('show');
+        renderMergeFiles();
+        showAppToast(result.success ? UI_TEXT.merge.success : UI_TEXT.merge.failed, result.success ? 'info' : 'warn');
+    });
+    try {
+        const session = await window.api.getWorkspaceSession();
+        if (session) {
+            clipBatchItems = session.clips;
+            byId<HTMLTextAreaElement>('clipUrl').value = clipBatchItems.map(item => item.url).join('\n');
+            mergeFiles = session.mergeFiles;
+            isMerging = restoredMergeDownload = Boolean(session.mergeActive && !latestMergeFinish);
+            if (session.mergeActive && latestMergeFinish?.success) mergeFiles = [];
+            byId('mergeProgress').classList.toggle('show', isMerging);
+            byId('mergeProgressBar').style.width = (session.mergeProgress || 0) + '%';
+            byId('mergeProgressText').textContent = Math.round(session.mergeProgress || 0) + '%';
+            if (session.activeClip) {
+                clipDownloadInFlight = restoredClipDownload = true;
+                receiveClipProgress(latestClipProgress.get(session.activeClip.url) || session.activeClip);
+            }
+        }
+    } catch { showAppToast(currentLanguage === 'de' ? 'Listen konnten nicht geladen werden.' : 'Could not restore the lists.', 'warn'); }
+    finally {
+        workspaceLoading = false;
+        requestClipMetadata();
+        requestMergeDurations();
+        renderClipBatch();
+        renderMergeFiles();
+    }
 }
 
 function canonicalClipLink(line: string): { url: string; valid: boolean } {
@@ -2103,7 +2187,8 @@ function completeClipMetadata(url: string, info: { title: string; broadcaster_na
         }
     }
     requestClipMetadata();
-    scheduleClipBatchRender();
+    clipMetadataDirty = true;
+    scheduleClipBatchRender(item);
 }
 
 function requestClipMetadata(): void {
@@ -2117,6 +2202,7 @@ function requestClipMetadata(): void {
         const url = item.url;
         item.metadataState = 'loading';
         clipMetadataRequests.add(url);
+        scheduleClipBatchRender(item);
         void Promise.resolve().then(() => window.api.getClipInfo(url)).then(
             info => completeClipMetadata(url, info),
             () => completeClipMetadata(url, undefined)
@@ -2125,7 +2211,7 @@ function requestClipMetadata(): void {
 }
 
 function updateClipLinks(): void {
-    if (clipDownloadInFlight) return;
+    if (clipDownloadInFlight || workspaceLoading) return;
     const lines = byId<HTMLTextAreaElement>('clipUrl').value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     const seen = new Set<string>();
     const previous = new Map(clipBatchItems.map(item => [item.url, item]));
@@ -2141,6 +2227,7 @@ function updateClipLinks(): void {
     showClipNotice(clipBatchLimitExceeded ? UI_TEXT.clips.limitReached : '', true);
     requestClipMetadata();
     renderClipBatch();
+    persistClipWorkspace();
 }
 
 function clearClipLinks(): void {
@@ -2150,9 +2237,14 @@ function clearClipLinks(): void {
 }
 
 function stopClipBatch(): void {
-    if (!clipDownloadInFlight) return;
+    if (!clipDownloadInFlight || clipBatchStopRequested) return;
     clipBatchStopRequested = true;
-    renderClipBatch();
+    renderClipBatchSummary();
+    if (activeClipRequestId) void window.api.cancelClipDownload(activeClipRequestId).catch(() => {
+        clipBatchStopRequested = false;
+        renderClipBatchSummary();
+        showClipNotice(currentLanguage === 'de' ? 'Abbruch fehlgeschlagen.' : 'Could not cancel the download.', true);
+    });
 }
 
 function createClipBatchRow(url: string): ClipBatchRow {
@@ -2240,8 +2332,11 @@ function clipBatchTitle(item: ClipBatchItem): string {
     return de ? 'Titel wird geladen …' : 'Loading title …';
 }
 
-function renderClipBatch(): void {
-    if (clipBatchRenderFrame !== null) { cancelAnimationFrame(clipBatchRenderFrame); clipBatchRenderFrame = null; }
+function setClipText(element: HTMLElement, value: string): void {
+    if (element.textContent !== value) element.textContent = value;
+}
+
+function renderClipBatchSummary(): void {
     const done = clipBatchItems.filter(item => item.state === 'done').length;
     const failed = clipBatchItems.filter(item => item.state === 'failed' || item.state === 'invalid').length;
     const ready = clipBatchItems.some(item => item.state === 'ready' || item.state === 'stopped');
@@ -2254,10 +2349,10 @@ function renderClipBatch(): void {
     gauge.setAttribute('aria-valuenow', String(progress));
     gauge.querySelector<HTMLElement>('span')!.style.transition = clipDownloadInFlight ? '' : 'none';
     gauge.querySelector<HTMLElement>('span')!.style.width = progress + '%';
-    byId<HTMLTextAreaElement>('clipUrl').disabled = clipDownloadInFlight;
-    byId<HTMLButtonElement>('clipsClearBtn').disabled = clipDownloadInFlight || !clipBatchItems.length;
+    byId<HTMLTextAreaElement>('clipUrl').disabled = clipDownloadInFlight || workspaceLoading;
+    byId<HTMLButtonElement>('clipsClearBtn').disabled = clipDownloadInFlight || workspaceLoading || !clipBatchItems.length;
     const button = byId<HTMLButtonElement>('btnClip');
-    button.disabled = clipDownloadInFlight || clipBatchLimitExceeded || !ready;
+    button.disabled = clipDownloadInFlight || workspaceLoading || clipBatchLimitExceeded || !ready;
     button.textContent = clipDownloadInFlight ? UI_TEXT.clips.loadingButton : UI_TEXT.clips.downloadButton;
     const toolbarButton = byId<HTMLButtonElement>('toolbarClipDownloadBtn');
     toolbarButton.disabled = button.disabled;
@@ -2267,7 +2362,49 @@ function renderClipBatch(): void {
     stop.textContent = clipBatchStopRequested ? UI_TEXT.clips.stopping : UI_TEXT.clips.stopBatch;
     const retry = byId<HTMLButtonElement>('clipsRetryBtn');
     retry.hidden = !clipBatchItems.some(item => item.state === 'failed');
-    retry.disabled = clipDownloadInFlight || clipBatchLimitExceeded;
+    retry.disabled = clipDownloadInFlight || workspaceLoading || clipBatchLimitExceeded;
+}
+
+function renderClipBatchRow(item: ClipBatchItem, index: number): void {
+    const list = byId<HTMLElement>('clipsDownloadList');
+    let elements = clipBatchRows.get(item.url);
+    if (!elements) {
+        elements = createClipBatchRow(item.url);
+        elements.row.dataset.clipUrl = item.url;
+        clipBatchRows.set(item.url, elements);
+    }
+    const rowClass = 'clip-result-row ' + item.state;
+    if (elements.row.className !== rowClass) elements.row.className = rowClass;
+    setClipText(elements.number, formatUiNumber(index + 1));
+    const title = clipBatchTitle(item);
+    setClipText(elements.label, title);
+    elements.label.title = item.metadataState === 'ready' ? title : item.url;
+    setClipText(elements.streamer, item.streamer);
+    elements.streamer.hidden = !item.streamer;
+    elements.streamer.title = item.streamer;
+    const transfer = item.state === 'active' ? item.transfer : undefined;
+    const status = transfer ? transfer.phase === 'preparing' ? (currentLanguage === 'de' ? 'Vorbereiten …' : 'Preparing …')
+        : transfer.phase === 'saving' ? (currentLanguage === 'de' ? 'Speichern …' : 'Saving …')
+        : formatBytesForMetrics(transfer.bytes) + ' · ' + formatBytesForMetrics(transfer.bytesPerSecond) + '/s'
+        : item.state === 'invalid' ? UI_TEXT.clips.invalidUrl : item.error || UI_TEXT.clips[item.state];
+    setClipText(elements.status, status);
+    elements.status.title = status;
+    const kind = item.state === 'done' ? 'done' : item.state === 'failed' || item.state === 'invalid' ? 'error' : item.state === 'active' || item.metadataState === 'loading' ? 'loading' : 'ready';
+    updateClipBatchSymbol(elements, kind);
+    for (const [button, label] of [[elements.open, UI_TEXT.static.archiveOpen], [elements.folder, UI_TEXT.static.archiveShowInFolder], [elements.remove, UI_TEXT.merge.removeAria]] as const) {
+        button.setAttribute('aria-label', label);
+        button.title = label;
+    }
+    elements.open.style.visibility = elements.folder.style.visibility = item.filename ? 'visible' : 'hidden';
+    elements.open.disabled = elements.folder.disabled = !item.filename;
+    elements.remove.disabled = clipDownloadInFlight || workspaceLoading;
+    if (list.children[index] !== elements.row) list.insertBefore(elements.row, list.children[index] || null);
+}
+
+function renderClipBatch(): void {
+    if (clipBatchRenderFrame !== null) { cancelAnimationFrame(clipBatchRenderFrame); clipBatchRenderFrame = null; }
+    dirtyClipRows.clear();
+    renderClipBatchSummary();
     const list = byId<HTMLElement>('clipsDownloadList');
     const scrollTop = list.scrollTop;
     const urls = new Set(clipBatchItems.map(item => item.url));
@@ -2277,9 +2414,6 @@ function renderClipBatch(): void {
             clipBatchRows.delete(url);
         }
     }
-    const setText = (element: HTMLElement, value: string) => {
-        if (element.textContent !== value) element.textContent = value;
-    };
     if (!clipBatchItems.length) {
         let empty = list.querySelector<HTMLLIElement>('.clips-list-empty');
         if (!empty) {
@@ -2287,45 +2421,16 @@ function renderClipBatch(): void {
             empty.className = 'clips-list-empty';
             list.append(empty);
         }
-        setText(empty, UI_TEXT.clips.listEmpty);
+        setClipText(empty, UI_TEXT.clips.listEmpty);
     } else {
         list.querySelector('.clips-list-empty')?.remove();
     }
-    clipBatchItems.forEach((item, index) => {
-        let elements = clipBatchRows.get(item.url);
-        if (!elements) {
-            elements = createClipBatchRow(item.url);
-            elements.row.dataset.clipUrl = item.url;
-            clipBatchRows.set(item.url, elements);
-        }
-        const rowClass = 'clip-result-row ' + item.state;
-        if (elements.row.className !== rowClass) elements.row.className = rowClass;
-        setText(elements.number, formatUiNumber(index + 1));
-        const title = clipBatchTitle(item);
-        setText(elements.label, title);
-        elements.label.title = item.metadataState === 'ready' ? title : item.url;
-        setText(elements.streamer, item.streamer);
-        elements.streamer.hidden = !item.streamer;
-        elements.streamer.title = item.streamer;
-        const status = item.state === 'invalid' ? UI_TEXT.clips.invalidUrl : item.error || UI_TEXT.clips[item.state];
-        setText(elements.status, status);
-        elements.status.title = status;
-        const kind = item.state === 'done' ? 'done' : item.state === 'failed' || item.state === 'invalid' ? 'error' : item.state === 'active' || item.metadataState === 'loading' ? 'loading' : 'ready';
-        updateClipBatchSymbol(elements, kind);
-        for (const [button, label] of [[elements.open, UI_TEXT.static.archiveOpen], [elements.folder, UI_TEXT.static.archiveShowInFolder], [elements.remove, UI_TEXT.merge.removeAria]] as const) {
-            button.setAttribute('aria-label', label);
-            button.title = label;
-        }
-        elements.open.style.visibility = elements.folder.style.visibility = item.filename ? 'visible' : 'hidden';
-        elements.open.disabled = elements.folder.disabled = !item.filename;
-        elements.remove.disabled = clipDownloadInFlight;
-        if (list.children[index] !== elements.row) list.insertBefore(elements.row, list.children[index] || null);
-    });
+    clipBatchItems.forEach(renderClipBatchRow);
     list.scrollTop = scrollTop;
 }
 
 async function downloadClip(retryFailed = false): Promise<void> {
-    if (clipDownloadInFlight) return;
+    if (clipDownloadInFlight || workspaceLoading) return;
     if (!clipBatchItems.length) updateClipLinks();
     if (clipBatchLimitExceeded) {
         showClipNotice(UI_TEXT.clips.limitReached, true);
@@ -2345,6 +2450,8 @@ async function downloadClip(retryFailed = false): Promise<void> {
         if (item.metadataState === 'missing' || item.metadataState === 'unavailable') item.metadataState = 'pending';
     }
     requestClipMetadata();
+    renderClipBatch();
+    persistClipWorkspace();
     try {
         for (const item of pending) {
             if (clipBatchStopRequested) {
@@ -2353,12 +2460,14 @@ async function downloadClip(retryFailed = false): Promise<void> {
             }
             if (item.state === 'failed' && item.metadataState === 'missing') continue;
             item.state = 'active';
-            renderClipBatch();
+            item.transfer = undefined;
+            activeClipRequestId = crypto.randomUUID();
+            scheduleClipBatchRender(item);
             try {
-                const result = await window.api.downloadClip(item.url);
-                item.state = result?.success ? 'done' : 'failed';
+                const result = await window.api.downloadClip(item.url, activeClipRequestId);
+                item.state = result?.cancelled ? 'stopped' : result?.success ? 'done' : 'failed';
                 if (result?.success) item.filename = result.filename;
-                if (!result?.success) item.error = result?.error?.trim() || UI_TEXT.clips.unknownError;
+                if (!result?.success && !result?.cancelled) item.error = result?.error?.trim() || UI_TEXT.clips.unknownError;
                 else if (item.metadataState === 'missing' || item.metadataState === 'unavailable') {
                     item.metadataState = 'pending';
                     requestClipMetadata();
@@ -2367,12 +2476,14 @@ async function downloadClip(retryFailed = false): Promise<void> {
                 item.state = 'failed';
                 item.error = UI_TEXT.clips.unknownError;
             }
-            renderClipBatch();
+            scheduleClipBatchRender(item);
         }
     } finally {
+        activeClipRequestId = null;
         clipDownloadInFlight = false;
         clipBatchStopRequested = false;
         renderClipBatch();
+        persistClipWorkspace();
     }
     const done = clipBatchItems.filter(item => item.state === 'done').length;
     const failed = clipBatchItems.filter(item => item.state === 'failed' || item.state === 'invalid').length;
@@ -2434,13 +2545,86 @@ function initSegmentedIndicators(): void {
 
 let mergeFilePickerInFlight = false;
 
+const mergeInfoRequests = new Set<string>();
+const mergeInfoRequested = new Set<string>();
+let mergeDurationFrame: number | null = null;
+let draggedMergeId: string | null = null;
+
+function persistMergeWorkspace(): void {
+    if (workspaceLoading) return;
+    void window.api.saveMergeWorkspace(mergeFiles.map(file => file.id)).then(saved => {
+        if (saved === false) showAppToast(currentLanguage === 'de' ? 'Liste konnte nicht gespeichert werden.' : 'Could not save the list.', 'warn');
+    }).catch(() => showAppToast(currentLanguage === 'de' ? 'Liste konnte nicht gespeichert werden.' : 'Could not save the list.', 'warn'));
+}
+
+function formatMergeDuration(seconds: number): string {
+    const total = Math.round(Math.max(0, seconds));
+    return [Math.floor(total / 3600), Math.floor(total / 60) % 60, total % 60].map(value => String(value).padStart(2, '0')).join(':');
+}
+
+function renderMergeDurations(): void {
+    const durations = new Map(mergeFiles.map(file => [file.id, file]));
+    byId<HTMLElement>('mergeFileList').querySelectorAll<HTMLElement>('[data-file-id]').forEach(row => {
+        const file = durations.get(row.dataset.fileId!);
+        if (!file) return;
+        const duration = row.querySelector<HTMLElement>('.file-duration')!;
+        duration.textContent = file.missing ? (currentLanguage === 'de' ? 'Datei fehlt oder wurde geändert' : 'File missing or changed')
+            : file.durationSeconds === undefined ? mergeInfoRequests.has(file.id) ? '…' : '—' : formatMergeDuration(file.durationSeconds);
+        row.classList.toggle('file-unavailable', Boolean(file.missing));
+    });
+    const total = mergeFiles.reduce((sum, file) => sum + (file.durationSeconds || 0), 0);
+    const complete = mergeFiles.every(file => file.durationSeconds !== undefined && !file.missing);
+    byId('mergeTotalDuration').textContent = mergeFiles.length ? formatUiNumber(mergeFiles.length) + (mergeFiles.length === 1 ? ' Video · ' : currentLanguage === 'de' ? ' Videos · ' : ' videos · ') + (complete ? formatMergeDuration(total) : '—') : '';
+    byId<HTMLButtonElement>('btnMerge').disabled = workspaceLoading || isMerging || mergeFilePickerInFlight || mergeFiles.length < 2 || mergeFiles.some(file => file.missing);
+}
+
+function requestMergeDurations(): void {
+    for (const file of mergeFiles) {
+        if (mergeInfoRequests.size >= 3) break;
+        if (file.durationSeconds !== undefined || file.missing || mergeInfoRequested.has(file.id)) continue;
+        mergeInfoRequested.add(file.id);
+        mergeInfoRequests.add(file.id);
+        void window.api.getMergeVideoInfo(file.id).then(info => {
+            if (info && mergeFiles.includes(file)) Object.assign(file, info);
+        }).catch(() => {}).finally(() => {
+            mergeInfoRequests.delete(file.id);
+            requestMergeDurations();
+            if (mergeDurationFrame === null) mergeDurationFrame = requestAnimationFrame(() => { mergeDurationFrame = null; renderMergeDurations(); });
+        });
+    }
+}
+
+function clearMergeDrag(): void {
+    draggedMergeId = null;
+    byId<HTMLElement>('mergeFileList').querySelectorAll('.file-item').forEach(row => row.classList.remove('dragging', 'drop-before', 'drop-after'));
+}
+
+function dropMergeFile(targetId: string, after: boolean): void {
+    if (isMerging || mergeFilePickerInFlight || !draggedMergeId || draggedMergeId === targetId) return;
+    const source = mergeFiles.findIndex(file => file.id === draggedMergeId);
+    const target = mergeFiles.find(file => file.id === targetId);
+    if (source < 0 || !target) return;
+    const [file] = mergeFiles.splice(source, 1);
+    mergeFiles.splice(mergeFiles.indexOf(target) + Number(after), 0, file);
+    clearMergeDrag();
+    renderMergeFiles();
+    persistMergeWorkspace();
+}
+
+
+
 async function addMergeFiles(): Promise<void> {
-    if (isMerging || mergeFilePickerInFlight) return;
+    if (workspaceLoading || isMerging || mergeFilePickerInFlight) return;
     mergeFilePickerInFlight = true;
     renderMergeFiles();
     try {
         const files = await window.api.selectMultipleVideos();
-        if (files?.length) mergeFiles = [...mergeFiles, ...files];
+        if (files?.length) {
+            if (mergeFiles.length + files.length > 500) showAppToast(currentLanguage === 'de' ? 'Maximal 500 Videos.' : 'Maximum 500 videos.', 'warn');
+            mergeFiles = [...mergeFiles, ...files].slice(0, 500);
+            persistMergeWorkspace();
+            requestMergeDurations();
+        }
     } catch {
         showAppToast(UI_TEXT.merge.selectFailed, 'warn');
     } finally {
@@ -2451,9 +2635,9 @@ async function addMergeFiles(): Promise<void> {
 
 function renderMergeFiles(): void {
     const list = byId<HTMLElement>('mergeFileList');
-    byId<HTMLButtonElement>('btnMerge').disabled = isMerging || mergeFilePickerInFlight || mergeFiles.length < 2;
+    byId<HTMLButtonElement>('btnMerge').disabled = workspaceLoading || isMerging || mergeFilePickerInFlight || mergeFiles.length < 2 || mergeFiles.some(file => file.missing);
     byId('btnMerge').textContent = isMerging ? UI_TEXT.merge.merging : UI_TEXT.merge.merge;
-    byId<HTMLButtonElement>('mergeAddBtn').disabled = isMerging || mergeFilePickerInFlight;
+    byId<HTMLButtonElement>('mergeAddBtn').disabled = workspaceLoading || isMerging || mergeFilePickerInFlight || mergeFiles.length >= 500;
     if (!mergeFiles.length) {
         const wrap = document.createElement('div');
         wrap.className = 'empty-state merge-empty-state';
@@ -2468,13 +2652,55 @@ function renderMergeFiles(): void {
         text.textContent = UI_TEXT.merge.empty;
         wrap.append(icon, text);
         list.replaceChildren(wrap);
+        renderMergeDurations();
         return;
     }
+    const scrollTop = list.scrollTop;
     const fragment = document.createDocumentFragment();
     mergeFiles.forEach((file, index) => {
         const row = document.createElement('div');
         row.className = 'file-item';
         row.dataset.index = String(index);
+        row.dataset.fileId = file.id;
+        const grip = document.createElement('button');
+        grip.type = 'button';
+        grip.className = 'file-drag';
+        grip.draggable = !isMerging && !mergeFilePickerInFlight;
+        grip.disabled = isMerging || mergeFilePickerInFlight;
+        grip.setAttribute('aria-label', currentLanguage === 'de' ? 'Reihenfolge ändern' : 'Reorder');
+        const gripIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        gripIcon.setAttribute('viewBox', '0 0 24 24');
+        gripIcon.setAttribute('aria-hidden', 'true');
+        for (const x of [8, 16]) for (const y of [5, 12, 19]) {
+            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            dot.setAttribute('cx', String(x)); dot.setAttribute('cy', String(y)); dot.setAttribute('r', '1.6'); gripIcon.append(dot);
+        }
+        grip.append(gripIcon);
+        grip.addEventListener('dragstart', event => {
+            if (isMerging || mergeFilePickerInFlight) { event.preventDefault(); return; }
+            draggedMergeId = file.id;
+            event.dataTransfer!.effectAllowed = 'move';
+            event.dataTransfer!.setData('text/plain', file.id);
+            event.dataTransfer!.setDragImage(row, 30, row.clientHeight / 2);
+            row.classList.add('dragging');
+        });
+        grip.addEventListener('dragend', clearMergeDrag);
+        row.addEventListener('dragover', event => {
+            if (!draggedMergeId || isMerging || mergeFilePickerInFlight) return;
+            event.preventDefault();
+            event.dataTransfer!.dropEffect = 'move';
+            const after = event.clientY >= row.getBoundingClientRect().top + row.clientHeight / 2;
+            list.querySelectorAll('.drop-before, .drop-after').forEach(item => item.classList.remove('drop-before', 'drop-after'));
+            if (draggedMergeId !== file.id) row.classList.add(after ? 'drop-after' : 'drop-before');
+            const bounds = list.getBoundingClientRect();
+            if (event.clientY < bounds.top + 40) list.scrollTop -= 24;
+            if (event.clientY > bounds.bottom - 40) list.scrollTop += 24;
+        });
+        row.addEventListener('drop', event => {
+            if (!draggedMergeId) return;
+            event.preventDefault();
+            dropMergeFile(file.id, event.clientY >= row.getBoundingClientRect().top + row.clientHeight / 2);
+        });
         const number = document.createElement('div');
         number.className = 'file-order';
         number.textContent = formatUiNumber(index + 1);
@@ -2482,6 +2708,11 @@ function renderMergeFiles(): void {
         name.className = 'file-name';
         name.textContent = file.name;
         name.title = file.name;
+        const content = document.createElement('div');
+        content.className = 'file-content';
+        const duration = document.createElement('span');
+        duration.className = 'file-duration';
+        content.append(name, duration);
         const actions = document.createElement('div');
         actions.className = 'file-actions';
         const addAction = (label: string, pathData: string, disabled: boolean, callback: () => void, remove = false) => {
@@ -2504,10 +2735,12 @@ function renderMergeFiles(): void {
         addAction(UI_TEXT.merge.moveUpAria, 'm6 14 6-6 6 6', index === 0, () => moveMergeFile(index, -1));
         addAction(UI_TEXT.merge.moveDownAria, 'm6 10 6 6 6-6', index === mergeFiles.length - 1, () => moveMergeFile(index, 1));
         addAction(UI_TEXT.merge.removeAria, 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7', false, () => removeMergeFile(index), true);
-        row.append(number, name, actions);
+        row.append(grip, number, content, actions);
         fragment.append(row);
     });
     list.replaceChildren(fragment);
+    renderMergeDurations();
+    list.scrollTop = scrollTop;
 }
 
 function moveMergeFile(index: number, direction: number): void {
@@ -2515,6 +2748,7 @@ function moveMergeFile(index: number, direction: number): void {
     if (isMerging || mergeFilePickerInFlight || !Number.isInteger(index) || !mergeFiles[index] || !mergeFiles[next] || Math.abs(direction) !== 1) return;
     [mergeFiles[index], mergeFiles[next]] = [mergeFiles[next], mergeFiles[index]];
     renderMergeFiles();
+    persistMergeWorkspace();
     byId<HTMLElement>('mergeFileList').children[next]?.querySelector<HTMLButtonElement>(direction < 0 ? '.file-btn' : '.file-btn:nth-child(2)')?.focus({ preventScroll: true });
 }
 
@@ -2522,10 +2756,11 @@ function removeMergeFile(index: number): void {
     if (isMerging || mergeFilePickerInFlight || !Number.isInteger(index) || !mergeFiles[index]) return;
     mergeFiles.splice(index, 1);
     renderMergeFiles();
+    persistMergeWorkspace();
 }
 
 async function startMerging(): Promise<void> {
-    if (mergeFiles.length < 2 || isMerging || mergeFilePickerInFlight) return;
+    if (workspaceLoading || mergeFiles.length < 2 || isMerging || mergeFilePickerInFlight || mergeFiles.some(file => file.missing)) return;
     isMerging = true;
     renderMergeFiles();
     try {
@@ -2542,6 +2777,7 @@ async function startMerging(): Promise<void> {
         }
         showAppToast(UI_TEXT.merge.success);
         mergeFiles = [];
+        persistMergeWorkspace();
     } catch {
         showAppToast(UI_TEXT.merge.failed, 'warn');
     } finally {
