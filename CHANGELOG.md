@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## 1.0.30 - 2026-10-10
+
+This update adds per-VOD quality selection and fixes five interface issues in the video editor, export queue, clip search and statistics.
+
+### VOD quality
+
+- Choose the download quality before adding an individual VOD to the queue or opening it for trimming. Source is selected by default.
+- The dialog lists the qualities actually available for that VOD, including 1440p when Twitch provides it. H.264, HEVC and AV1 variants are recognized; availability depends on the recording.
+- The chosen quality is retained in the queue, after restarting the app and when downloading or merging parts. An explicitly chosen quality is not silently replaced with another one.
+- Failed quality lookups can be retried, and the dialog can be cancelled without adding a download. Bulk and automatic downloads continue to use Source.
+
+### Video editor and export queue
+
+- The timeline and playback controls retain the space they need instead of being cut off when the window is shorter or export jobs are present.
+- The editing page can scroll to the cut fields and export jobs. The last job remains reachable in a longer queue.
+- Queue export is now visible beside Merge in the merge workspace. Its availability follows the selected files and current operation. Queuing an export and starting it immediately remain separate actions.
+
+### Clip search
+
+- Changing the channel or date range clears results, selections and pagination from the previous search.
+- A failed new search can no longer leave clips from another channel available for import or pagination.
+- Late responses cannot overwrite a newer search. Closing and reopening the dialog during a search leaves the controls usable.
+- A failed request for the next page preserves the matching results already loaded.
+
+### Statistics and interface
+
+- Activity chart tooltips show the complete date range, including the year, when a bar combines several days. The total is no longer attributed to a single day.
+- The Update button is vertically centered in the top bar, with consistent text size and spacing.
+
+### Verification
+
+- 949 unit tests and 42 additional checks passed, covering Chromium, WebKit and the native Electron app.
+- Targeted checks covered 188 layout states, 88 interaction cases and nine native layout cases. Existing checks also covered editing, queues, project recovery, backups, archive operations and real audio/HDR exports.
+
+The Windows installer is unsigned, as with previous releases.
+
 ## 1.0.29 - 2026-10-10
 
 This update fixes an overlapping preview in the video editor that could cover the project name and project actions.
