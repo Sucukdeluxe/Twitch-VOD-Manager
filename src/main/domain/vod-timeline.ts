@@ -55,7 +55,7 @@ export function normalizeVodChapters(edges: unknown[], duration: number): VodCha
         if (!node || node.type !== 'GAME_CHANGE') continue;
         const startMs = node.positionMilliseconds, lengthMs = node.durationMilliseconds;
         if (typeof startMs !== 'number' || typeof lengthMs !== 'number' || !Number.isFinite(startMs)
-            || !Number.isFinite(lengthMs) || startMs < 0 || lengthMs <= 0 || startMs >= duration * 1000) continue;
+            || !Number.isFinite(lengthMs) || startMs < 0 || lengthMs < 0 || startMs >= duration * 1000) continue;
         const game = record(record(node.details)?.game);
         const name = text(game?.displayName || node.description, 300);
         if (!name) continue;
@@ -65,7 +65,7 @@ export function normalizeVodChapters(edges: unknown[], duration: number): VodCha
             if (url.protocol === 'https:' && url.hostname === 'static-cdn.jtvnw.net' && !url.username && !url.password && !url.port) image = url.href;
         } catch {}
         const start = startMs / 1000;
-        unique.set(start, { id: `chapter-${startMs}`, start, end: Math.min(duration, start + lengthMs / 1000),
+        unique.set(start, { id: `chapter-${startMs}`, start, end: lengthMs === 0 ? duration : Math.min(duration, start + lengthMs / 1000),
             name, game_id: text(game?.id, 80), image, precision: 'source' });
     }
     const chapters = [...unique.values()].sort((a, b) => a.start - b.start);
