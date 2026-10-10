@@ -65,7 +65,7 @@ The application works in public mode without a Twitch login. Connecting a Twitch
 ## Installation
 
 1. Open the [latest GitHub release](https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/latest).
-2. Download `Twitch-VOD-Manager-Setup-1.0.30.exe`.
+2. Download `Twitch-VOD-Manager-Setup-1.0.31.exe`.
 3. Run the installer and choose the installation directory.
 4. Start Twitch VOD Manager and add a streamer.
 
@@ -149,3 +149,4 @@ The Windows installer and updater metadata are written to `release/`. Verificati
 ## License
 
 Twitch VOD Manager is released under the [MIT License](LICENSE).
+
