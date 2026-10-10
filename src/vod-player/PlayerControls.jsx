@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useFloating, offset, flip, shift, size, autoUpdate, useClick, useDismiss, useRole, useInteractions, FloatingPortal, FloatingFocusManager, useTransitionStyles } from "@floating-ui/react";
 import { ratePosition, positionRate, playerPortalRoot } from "./player-settings.js";
 
@@ -31,6 +31,19 @@ export function PlayerButton({ name, label, className = "", ...props }) {
 
 export function PlayerPanel({ label, trigger, root, children, className = "", onOpenChange }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const dialog = root.current?.closest('dialog[open]');
+    if (!open || !dialog) return;
+    const escape = event => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      onOpenChange?.(false);
+    };
+    dialog.addEventListener('keydown', escape, true);
+    return () => dialog.removeEventListener('keydown', escape, true);
+  }, [open, root, onOpenChange]);
   const { refs, floatingStyles, context } = useFloating({
     open, onOpenChange(value) { setOpen(value); onOpenChange?.(value); },
     placement: "top-end", strategy: "fixed", whileElementsMounted: autoUpdate,

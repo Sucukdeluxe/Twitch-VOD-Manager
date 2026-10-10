@@ -511,6 +511,8 @@ interface ApiBridge {
     getVodStoryboard(vodId: string): Promise<VodStoryboard | null>;
     getVodQualities(request: { id: string; url: string }): Promise<import('./main/domain/vod-quality').VodQualityOption[] | null>;
     cancelVodQualities(id: string): Promise<void>;
+    openClipPlayback(request: { id: string; url: string }): Promise<{ id: string; sourceUrl: string; quality: string } | null>;
+    closeClipPlayback(id: string): Promise<void>;
     openVodPlayback(request: { id: string; url: string }): Promise<{ id: string; sourceUrl: string; quality: string } | null>;
     getVodTimeline(request: { id: string; url: string }): Promise<import('./main/domain/vod-timeline').VodTimeline | null>;
     closeVodPlayback(id: string): Promise<void>;
@@ -606,6 +608,7 @@ interface Window {
         }): { update(state: LocalCutterViewState): void; updatePosition(time: number): void; destroy(): void };
     };
     VodPlayer: {
+        mountPreview(element: HTMLElement, options: { id: string; sourceUrl: string; duration: number; language: string; onError(): void }): { destroy(): void };
         planEditedVod: typeof import('./main/domain/vod-edit-plan').planEditedVod;
         mount(element: HTMLElement, options: {
             url: string; title: string; duration: number; date: string; language: string;

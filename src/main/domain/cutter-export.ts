@@ -204,7 +204,7 @@ export function parseCutterHardwareEncoders(ffmpegEncodersOutput: string): Cutte
 }
 
 export function getCutterHardwareProbeArguments(encoder: CutterHardwareEncoder): string[] {
-    return ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=16x16:r=1', '-frames:v', '1', '-c:v', encoder, '-f', 'null', '-'];
+    return ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=320x180:r=30', '-frames:v', '1', '-c:v', encoder, '-f', 'null', '-'];
 }
 
 export async function probeCutterHardwareEncoders(

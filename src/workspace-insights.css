@@ -671,3 +671,15 @@ body.theme-light .clip-discovery-fields input[type="date"] { color-scheme: light
 
 .clip-discovery-dialog :is(button, input, select, label) { font-size:14px; }
 .vod-library-dialog .clip-discovery-list { padding:0 12px; }
+
+.clip-discovery-choice{display:flex;align-items:center;gap:12px;min-width:0;flex:1;cursor:pointer}
+.clip-discovery-preview{flex:none}
+.clip-preview-dialog{margin:auto;width:min(980px,calc(100vw - 32px));max-height:calc(100dvh - 32px);box-sizing:border-box;overflow:auto;padding:20px;border:1px solid var(--workspace-border);border-radius:12px;background:var(--workspace-panel);color:var(--workspace-text);font-size:14px}
+.clip-preview-dialog::backdrop{background:#0009}
+.clip-preview-dialog h2{overflow-wrap:anywhere}
+.clip-preview-meta{font-size:14px;margin:12px 0}
+.clip-preview-player{min-width:0}
+.clip-preview-player .archive-player{width:100%;min-height:0}
+.clip-preview-player .archive-screen{max-height:calc(100dvh - 260px);aspect-ratio:16/9}
+.clip-preview-dialog [hidden]{display:none}
+@media(max-width:520px){.clip-discovery-row{flex-wrap:wrap}.clip-discovery-preview{margin-left:auto}.clip-preview-dialog{padding:12px}.clip-preview-player .archive-screen{max-height:calc(100dvh - 220px)}}

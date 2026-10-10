@@ -164,6 +164,8 @@ contextBridge.exposeInMainWorld('api', {
     getVODs: (userId: string, forceRefresh: boolean = false) => ipcRenderer.invoke('get-vods', userId, forceRefresh),
     getVodQualities: (request: { id: string; url: string }): Promise<import('./main/domain/vod-quality').VodQualityOption[] | null> => ipcRenderer.invoke('get-vod-qualities', request),
     cancelVodQualities: (id: string): Promise<void> => ipcRenderer.invoke('cancel-vod-qualities', id),
+    openClipPlayback: (request: { id: string; url: string }) => ipcRenderer.invoke('open-clip-playback', request),
+    closeClipPlayback: (id: string) => ipcRenderer.invoke('close-clip-playback', id),
     openVodPlayback: (request: { id: string; url: string }) => ipcRenderer.invoke('open-vod-playback', request),
     getVodTimeline: (request: { id: string; url: string }) => ipcRenderer.invoke('get-vod-timeline', request),
     closeVodPlayback: (id: string) => ipcRenderer.invoke('close-vod-playback', id),

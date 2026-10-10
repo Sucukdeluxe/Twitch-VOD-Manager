@@ -8,5 +8,5 @@ export function positionRate(position) {
 }
 
 export function playerPortalRoot(player, fullscreenElement, body) {
-  return player && fullscreenElement === player ? player : player?.closest('[role="dialog"]') || body;
+  return player && fullscreenElement === player ? player : player?.closest('dialog[open], [role="dialog"]') || body;
 }

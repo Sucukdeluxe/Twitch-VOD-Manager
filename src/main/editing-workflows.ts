@@ -143,6 +143,8 @@ export async function registerEditingWorkflows(dependencies: EditingWorkflowDepe
     handle('editing-job-action', async (_event, action: unknown, id?: unknown) => {
         if (action === 'start') { if (dependencies.mediaBusy()) throw new Error('Another media export is running'); queue.start(); }
         else if (action === 'pause') queue.pause();
+        else if (action === 'clear-completed') await queue.clearCompleted();
+        else if (typeof id === 'string' && (action === 'move-up' || action === 'move-down')) await queue.move(id, action === 'move-up' ? -1 : 1);
         else if (typeof id === 'string' && action === 'cancel') await queue.cancel(id);
         else if (typeof id === 'string' && action === 'retry') await queue.retry(id);
         else if (typeof id === 'string' && action === 'remove') await queue.remove(id);

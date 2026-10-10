@@ -937,6 +937,7 @@ const currentCutterInfoProcesses = new Set<ChildProcess>();
 const currentCutterExportProcesses = new Set<ChildProcess>();
 const currentCutterPreviewProcesses = new Set<ChildProcess>();
 const vodPlaybackService = new VodPlaybackService();
+const clipPlaybackService = new VodPlaybackService();
 const vodTimelineService = new VodTimelineService();
 const currentCutterFrameProcesses = new Set<ChildProcess>();
 const currentCutterFrameFiles = new Set<string>();
@@ -8057,6 +8058,16 @@ registerTrustedIpcHandler(ipcMain, 'open-vod-playback', isTrustedRendererEvent, 
     }
 });
 
+registerTrustedIpcHandler(ipcMain, 'open-clip-playback', isTrustedRendererEvent, () => Promise.resolve(null), async (_, request: unknown) => {
+    if (appShutdownStarted) return null;
+    try { return await clipPlaybackService.openClip(request, { prepare: ensureStreamlinkInstalled, streamlink: getStreamlinkCommand, quality: 'source,best' }); }
+    catch { return null; }
+});
+
+registerTrustedIpcHandler(ipcMain, 'close-clip-playback', isTrustedRendererEvent, () => Promise.resolve(), async (_, id: unknown) => {
+    if (typeof id === 'string') await clipPlaybackService.close(id);
+});
+
 registerTrustedIpcHandler(ipcMain, 'get-vod-timeline', isTrustedRendererEvent, () => Promise.resolve(null), async (_, request: unknown) => {
     if (appShutdownStarted) return null;
     try { return await vodTimelineService.load(request, config.download_path); }
@@ -8885,6 +8896,7 @@ async function shutdownCleanup(reason: 'window-all-closed' | 'before-quit'): Pro
         ['storage-cleanup', async () => { cleanupAbortController.abort(); await cleanupPending; }],
         ['editing-workflows', async () => { await editingWorkflows?.dispose(); }],
         ['vod-playback', () => vodPlaybackService.close()],
+        ['clip-playback', () => clipPlaybackService.close()],
         ['vod-timeline', () => vodTimelineService.close()],
         ['metadata-cache-timer', () => stopMetadataCacheCleanup()],
         ['metadata-cache-files', () => cleanupMetadataCaches('shutdown')],

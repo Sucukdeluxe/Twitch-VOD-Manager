@@ -195,6 +195,31 @@ export async function createExportJobQueue(options: ExportJobQueueOptions) {
             pump();
             return retried;
         },
+        async move(id: string, direction: -1 | 1): Promise<boolean> {
+            assertOpen();
+            if (direction !== -1 && direction !== 1) throw new Error('Invalid move direction');
+            return serial(async () => {
+                const waiting = jobs.filter(job => job.status === 'queued');
+                const index = waiting.findIndex(job => job.id === id);
+                const neighbor = waiting[index + direction];
+                if (index < 0 || !neighbor) return false;
+                const next = [...jobs];
+                const from = next.findIndex(job => job.id === id);
+                const to = next.findIndex(job => job.id === neighbor.id);
+                [next[from], next[to]] = [next[to], next[from]];
+                await commit(next);
+                return true;
+            });
+        },
+        async clearCompleted(): Promise<number> {
+            assertOpen();
+            return serial(async () => {
+                const next = jobs.filter(job => job.status !== 'completed');
+                const removed = jobs.length - next.length;
+                if (removed) await commit(next);
+                return removed;
+            });
+        },
         async remove(id: string): Promise<boolean> {
             assertOpen();
             return serial(async () => {

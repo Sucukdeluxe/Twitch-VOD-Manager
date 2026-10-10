@@ -270,6 +270,13 @@ function Workspace({ options, bind }) {
 }
 
 window.VodPlayer = {
+  mountPreview(element, options) {
+    const root = createRoot(element);
+    const language = options.language === 'en' ? 'en' : 'de';
+    const t = key => playerTexts[language][key] || key;
+    root.render(<ArchivePlayer id={options.id} userId="tvm-clip-preview" parts={[{ id:options.id, url:options.sourceUrl, duration:options.duration }]} seconds={0} started t={t} onProgress={() => {}} onError={options.onError}/>);
+    return { destroy() { root.unmount(); } };
+  },
   planEditedVod,
   mount(element, options) {
     const root = createRoot(element), bind = { current: null };

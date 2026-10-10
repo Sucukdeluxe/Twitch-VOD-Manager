@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Reorder waiting exports while retaining keyboard focus, remove saved jobs together without deleting files, and see numeric progress.
+- Show VOD frame rates and available codec metadata. Repeated quality lookups are cached briefly.
+- Preview discovered clips with the shared player and view their duration before downloading.
+- Search saved projects by project or source name and sort by date or name.
+- Use a supported frame size when detecting hardware encoders, avoiding false negatives on NVIDIA and Intel GPUs.
+- Keep shared player menus in the active dialog so clip preview controls stay visible.
+
 ## 1.0.30 - 2026-10-10
 
 This update adds per-VOD quality selection and fixes five interface issues in the video editor, export queue, clip search and statistics.

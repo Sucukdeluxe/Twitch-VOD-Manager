@@ -15,3 +15,17 @@
 
 .editing-merge-queue-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 #mergeTab .merge-actions { flex-wrap: wrap; }
+
+.editing-jobs-header{flex-wrap:wrap}.editing-jobs-header #editingJobsClear{margin-left:0}.editing-job-percentage{grid-column:1/-1;font-variant-numeric:tabular-nums;text-align:right;font-size:13px}.editing-job-percentage[hidden]{display:none}
+
+#editingRecentProjects{height:min(650px,calc(100dvh - 48px));overflow:hidden}
+#editingRecentProjects[open]{display:flex;flex-direction:column;gap:14px}
+#editingRecentProjects h2{margin:0}
+.editing-recent-filters{display:flex;flex-wrap:wrap;gap:12px;align-items:end;flex-shrink:0}
+.editing-recent-filters label{display:grid;gap:6px;min-width:0;flex:1 1 160px}
+.editing-recent-filters input,.editing-recent-filters select{width:100%;height:38px;box-sizing:border-box;font-size:14px}
+.editing-recent-filters select{padding-right:36px;user-select:none}
+#editingProjectCount{font-size:12px;font-variant-numeric:tabular-nums}
+#editingRecentProjects .editing-recent-list{min-height:0;flex:1;margin:0;max-height:none;align-content:start}
+.editing-recent-list time{font-size:12px;font-weight:normal;color:var(--text-secondary)}
+#editingRecentProjects>button{align-self:flex-end;flex-shrink:0}

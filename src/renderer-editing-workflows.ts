@@ -22,7 +22,7 @@ interface EditingWorkflowApi {
     enqueueCutterExport(token: string, project: unknown): Promise<EditingWorkflowResponse>;
     inspectMergeExport(ids: string[]): Promise<EditingWorkflowResponse>;
     enqueueMergeExport(ids: string[], mode: 'copy' | 'encode'): Promise<EditingWorkflowResponse>;
-    exportJobAction(action: 'start' | 'pause' | 'cancel' | 'retry' | 'remove' | 'reveal', id?: string): Promise<EditingWorkflowResponse>;
+    exportJobAction(action: 'start' | 'pause' | 'cancel' | 'retry' | 'remove' | 'reveal' | 'move-up' | 'move-down' | 'clear-completed', id?: string): Promise<EditingWorkflowResponse>;
     onExportJobsChanged(callback: (state: { jobs: EditingWorkflowJob[]; paused: boolean }) => void): () => void;
 }
 let editingWorkflowInitialized = false;
@@ -51,6 +51,9 @@ function editingErrorMessage(error: unknown): string {
 function editingApi(): EditingWorkflowApi { return window.api as typeof window.api & EditingWorkflowApi; }
 async function editingOperation(operation: () => Promise<EditingWorkflowResponse>, after?: (result: EditingWorkflowResponse) => Promise<void> | void): Promise<void> {
     if (editingWorkflowBusy) return;
+    const focused = document.activeElement as HTMLElement | null;
+    const focusedJob = focused?.closest<HTMLElement>('.editing-job')?.dataset.jobId;
+    const focusedAction = focused?.dataset.action;
     editingWorkflowBusy = true;
     const previousError = document.getElementById('editingWorkflowError'); if (previousError) previousError.hidden = true;
     refreshEditingWorkflowControls();
@@ -65,6 +68,11 @@ async function editingOperation(operation: () => Promise<EditingWorkflowResponse
     } finally {
         editingWorkflowBusy = false;
         refreshEditingWorkflowControls();
+        if (focusedJob && document.activeElement === document.body) {
+            const controls = Array.from(editingWorkflowRows.get(focusedJob)?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || []);
+            const target = controls.find(button => button.dataset.action === focusedAction) || controls[0];
+            target?.focus({ preventScroll: true });
+        }
     }
 }
 async function openNamedEditingProject(id?: string): Promise<void> {
@@ -92,17 +100,34 @@ async function saveNamedEditingProject(saveAs = false): Promise<void> {
         showAppToast(editingText('Projekt gespeichert.', 'Project saved.'), 'info');
     });
 }
+let editingRecentProjects: NonNullable<EditingWorkflowResponse['projects']> = [];
+function renderRecentEditingProjects(): void {
+    const dialog = document.getElementById('editingRecentProjects');
+    const list = dialog?.querySelector<HTMLElement>('.editing-recent-list');
+    if (!list) return;
+    const query = (dialog!.querySelector<HTMLInputElement>('#editingProjectSearch')?.value || '').trim().toLocaleLowerCase(currentLanguage);
+    const order = dialog!.querySelector<HTMLSelectElement>('#editingProjectSort')?.value || 'recent';
+    const collator = new Intl.Collator(currentLanguage, { numeric: true, sensitivity: 'base' });
+    const projects = editingRecentProjects.filter(project => [project.name, project.sourceName].some(value => value.toLocaleLowerCase(currentLanguage).includes(query)));
+    projects.sort((a, b) => order === 'name' ? collator.compare(a.name, b.name) || b.updatedAt - a.updatedAt : (order === 'oldest' ? a.updatedAt - b.updatedAt : b.updatedAt - a.updatedAt) || collator.compare(a.name, b.name));
+    list.replaceChildren();
+    for (const project of projects) {
+        const button = editingButton(project.name, () => { (dialog as HTMLDialogElement).close(); void openNamedEditingProject(project.id); });
+        button.dataset.projectId = project.id;
+        const source = document.createElement('span'); source.textContent = project.sourceName;
+        const date = document.createElement('time'); date.dateTime = new Date(project.updatedAt).toISOString(); date.textContent = new Intl.DateTimeFormat(currentLanguage, { dateStyle: 'medium', timeStyle: 'short' }).format(project.updatedAt);
+        button.append(source, date); list.append(button);
+    }
+    if (!projects.length) list.textContent = editingRecentProjects.length ? editingText('Keine passenden Projekte.', 'No matching projects.') : editingText('Keine gespeicherten Projekte.', 'No saved projects.');
+    const count = document.getElementById('editingProjectCount'); if (count) count.textContent = formatUiNumber(projects.length) + ' / ' + formatUiNumber(editingRecentProjects.length);
+}
 async function showRecentEditingProjects(): Promise<void> {
     await editingOperation(() => editingApi().listNamedCutterProjects(), result => {
         const dialog = document.getElementById('editingRecentProjects') as HTMLDialogElement;
-        const list = dialog.querySelector('.editing-recent-list')!;
-        list.replaceChildren();
-        for (const project of result.projects || []) {
-            const button = editingButton(project.name, () => { dialog.close(); void openNamedEditingProject(project.id); });
-            const source = document.createElement('span'); source.textContent = project.sourceName; button.append(source); list.append(button);
-        }
-        if (!result.projects?.length) list.textContent = editingText('Keine gespeicherten Projekte.', 'No saved projects.');
+        editingRecentProjects = result.projects || [];
+        renderRecentEditingProjects();
         dialog.showModal();
+        dialog.querySelector<HTMLInputElement>('#editingProjectSearch')?.focus();
     });
 }
 function renderEditingJobs(): void {
@@ -110,36 +135,51 @@ function renderEditingJobs(): void {
     if (!list) return;
     const present = new Set(editingWorkflowJobs.map(job => job.id));
     for (const [id, row] of editingWorkflowRows) if (!present.has(id)) { row.remove(); editingWorkflowRows.delete(id); }
-    for (const job of editingWorkflowJobs) {
+    const waiting = editingWorkflowJobs.filter(job => job.status === 'queued');
+    const waitingPositions = new Map(waiting.map((job, index) => [job.id, index]));
+    const percentageFormat = new Intl.NumberFormat(currentLanguage, { style: 'percent', maximumFractionDigits: 1 });
+    for (const [index, job] of editingWorkflowJobs.entries()) {
         let row = editingWorkflowRows.get(job.id);
         if (!row) {
             row = document.createElement('article'); row.className = 'editing-job'; row.dataset.jobId = job.id;
             const title = document.createElement('strong'); title.className = 'editing-job-title'; row.append(title);
             const state = document.createElement('span'); state.className = 'editing-job-state'; row.append(state);
             const progress = document.createElement('progress'); progress.max = 100; row.append(progress);
+            const percentage = document.createElement('span'); percentage.className = 'editing-job-percentage'; row.append(percentage);
             const actions = document.createElement('div'); actions.className = 'editing-job-actions'; row.append(actions);
             const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = editingText('Details', 'Details'); details.append(summary, document.createElement('pre')); row.append(details);
             editingWorkflowRows.set(job.id, row); list.append(row);
         }
+        if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
         row.querySelector('strong')!.textContent = job.name;
+        const percentage = row.querySelector<HTMLElement>('.editing-job-percentage')!;
+        percentage.hidden = job.status !== 'running';
+        percentage.textContent = percentageFormat.format(job.progress / 100);
         row.querySelector('.editing-job-state')!.textContent = ({ queued: editingText('Bereit', 'Ready'), running: editingText('Exportiert', 'Exporting'), completed: editingText('Gespeichert', 'Saved'), failed: editingText('Fehlgeschlagen', 'Failed'), cancelled: editingText('Abgebrochen', 'Cancelled') })[job.status];
         const progress = row.querySelector('progress')!; progress.value = job.progress; progress.hidden = job.status !== 'running'; progress.setAttribute('aria-label', job.name);
         const details = row.querySelector('details')!; details.hidden = !job.error; details.querySelector('pre')!.textContent = job.error || '';
         details.querySelector('summary')!.textContent = job.error ? editingErrorMessage(job.error) : editingText('Details', 'Details');
         const actions = row.querySelector('.editing-job-actions')!;
-        const desired = job.status === 'running' || job.status === 'queued' ? ['cancel'] : job.status === 'failed' || job.status === 'cancelled' ? ['retry', 'remove'] : ['reveal', 'remove'];
+        const desired = job.status === 'queued' ? ['move-up', 'move-down', 'cancel'] : job.status === 'running' ? ['cancel'] : job.status === 'failed' || job.status === 'cancelled' ? ['retry', 'remove'] : ['reveal', 'remove'];
         const actionKey = desired.join('|') + '|' + currentLanguage;
         if (actions.getAttribute('data-actions') !== actionKey) {
             actions.setAttribute('data-actions', actionKey); actions.replaceChildren();
             for (const action of desired) {
-                const label = ({ cancel: editingText('Abbrechen', 'Cancel'), retry: editingText('Erneut versuchen', 'Retry'), remove: editingText('Entfernen', 'Remove'), reveal: editingText('Ordner', 'Folder') })[action as 'cancel' | 'retry' | 'remove' | 'reveal'];
-                actions.append(editingButton(label, () => { void editingOperation(() => editingApi().exportJobAction(action as 'cancel' | 'retry' | 'remove' | 'reveal', job.id)); }));
+                const label = ({ cancel: editingText('Abbrechen', 'Cancel'), retry: editingText('Erneut versuchen', 'Retry'), remove: editingText('Entfernen', 'Remove'), reveal: editingText('Ordner', 'Folder'), 'move-up': editingText('Nach oben', 'Move up'), 'move-down': editingText('Nach unten', 'Move down') })[action as 'cancel' | 'retry' | 'remove' | 'reveal' | 'move-up' | 'move-down'];
+                const button = editingButton(label, () => { void editingOperation(() => editingApi().exportJobAction(action as 'cancel' | 'retry' | 'remove' | 'reveal' | 'move-up' | 'move-down', job.id)); });
+                button.dataset.action = action; actions.append(button);
             }
         }
+        for (const button of Array.from(actions.querySelectorAll<HTMLButtonElement>('button'))) {
+            const position = waitingPositions.get(job.id) ?? -1;
+            button.disabled = editingWorkflowBusy || button.dataset.action === 'move-up' && position <= 0 || button.dataset.action === 'move-down' && position >= waiting.length - 1;
+        }
     }
+    const clear = document.getElementById('editingJobsClear') as HTMLButtonElement | null;
+    if (clear) clear.disabled = editingWorkflowBusy || !editingWorkflowJobs.some(job => job.status === 'completed');
     const empty = document.getElementById('editingJobsEmpty'); if (empty) empty.hidden = editingWorkflowJobs.length > 0;
     const start = document.getElementById('editingJobsStart') as HTMLButtonElement | null;
-    if (start) { start.textContent = editingWorkflowPaused ? editingText('Starten', 'Start') : editingText('Anhalten', 'Pause'); start.disabled = !editingWorkflowJobs.some(job => job.status === 'queued' || job.status === 'running'); }
+    if (start) { start.textContent = editingWorkflowPaused ? editingText('Starten', 'Start') : editingText('Anhalten', 'Pause'); start.disabled = editingWorkflowBusy || !editingWorkflowJobs.some(job => job.status === 'queued' || job.status === 'running'); }
     const count = document.getElementById('editingJobCount'); if (count) count.textContent = formatUiNumber(editingWorkflowJobs.length);
 }
 function initializeEditingWorkflows(): void {
@@ -167,10 +207,22 @@ function initializeEditingWorkflows(): void {
     const error = document.createElement('details'); error.id = 'editingWorkflowError'; error.hidden = true; const errorTitle = document.createElement('summary'); errorTitle.textContent = editingText('Fehlerdetails', 'Error details'); error.append(errorTitle, document.createElement('pre')); toolbar.after(error);
     const recent = document.createElement('dialog'); recent.id = 'editingRecentProjects'; recent.className = 'editing-recent-dialog';
     const heading = document.createElement('h2'); heading.textContent = editingText('Zuletzt verwendete Projekte', 'Recent projects'); recent.append(heading);
+    const filters = document.createElement('div'); filters.className = 'editing-recent-filters';
+    const searchLabel = document.createElement('label');
+    const searchCaption = document.createElement('span'); searchCaption.id = 'editingProjectSearchLabel'; searchCaption.textContent = editingText('Suche', 'Search');
+    const search = document.createElement('input'); search.id = 'editingProjectSearch'; search.type = 'search'; search.maxLength = 200; search.autocomplete = 'off'; search.addEventListener('input', renderRecentEditingProjects); searchLabel.append(searchCaption, search);
+    const sortLabel = document.createElement('label');
+    const sortCaption = document.createElement('span'); sortCaption.id = 'editingProjectSortLabel'; sortCaption.textContent = editingText('Sortierung', 'Sort order');
+    const sort = document.createElement('select'); sort.id = 'editingProjectSort';
+    for (const [value, caption] of [['recent', editingText('Zuletzt geändert', 'Recently changed')], ['oldest', editingText('Älteste zuerst', 'Oldest first')], ['name', editingText('Name', 'Name')]]) sort.add(new Option(caption, value));
+    sort.addEventListener('change', renderRecentEditingProjects); sortLabel.append(sortCaption, sort);
+    const projectCount = document.createElement('span'); projectCount.id = 'editingProjectCount'; projectCount.setAttribute('role', 'status');
+    filters.append(searchLabel, sortLabel, projectCount); recent.append(filters);
     const recentList = document.createElement('div'); recentList.className = 'editing-recent-list'; recent.append(recentList, editingButton(editingText('Schließen', 'Close'), () => recent.close())); document.body.append(recent);
     const panel = document.createElement('section'); panel.className = 'editing-jobs-panel'; panel.id = 'editingJobsPanel';
     const header = document.createElement('div'); header.className = 'editing-jobs-header'; const title = document.createElement('h3'); title.textContent = editingText('Exportaufträge', 'Export queue'); const count = document.createElement('span'); count.id = 'editingJobCount'; header.append(title, count);
-    const start = editingButton(editingText('Starten', 'Start'), () => { void editingOperation(() => editingApi().exportJobAction(editingWorkflowPaused ? 'start' : 'pause')); }); start.id = 'editingJobsStart'; header.append(start); panel.append(header);
+    const start = editingButton(editingText('Starten', 'Start'), () => { void editingOperation(() => editingApi().exportJobAction(editingWorkflowPaused ? 'start' : 'pause')); }); start.id = 'editingJobsStart'; header.append(start);
+    const clear = editingButton(editingText('Gespeicherte entfernen', 'Remove saved'), () => { void editingOperation(() => editingApi().exportJobAction('clear-completed')); }); clear.id = 'editingJobsClear'; header.append(clear); panel.append(header);
     const empty = document.createElement('p'); empty.id = 'editingJobsEmpty'; empty.textContent = editingText('Keine Exportaufträge.', 'No export jobs.'); panel.append(empty);
     const list = document.createElement('div'); list.id = 'editingJobList'; list.className = 'editing-job-list'; panel.append(list); host.append(panel);
     const mergeToolbar = document.querySelector('#mergeTab .merge-actions');
@@ -209,8 +261,14 @@ function refreshEditingWorkflowLanguage(): void {
     const update = (selector: string, text: string) => { const node = document.querySelector(selector); if (node) node.textContent = text; };
     update('#editingWorkflowError summary', editingText('Fehlerdetails', 'Error details'));
     update('#editingRecentProjects h2', editingText('Zuletzt verwendete Projekte', 'Recent projects'));
+    update('#editingProjectSearchLabel', editingText('Suche', 'Search'));
+    update('#editingProjectSortLabel', editingText('Sortierung', 'Sort order'));
+    update('#editingProjectSort option[value=recent]', editingText('Zuletzt geändert', 'Recently changed'));
+    update('#editingProjectSort option[value=oldest]', editingText('Älteste zuerst', 'Oldest first'));
+    renderRecentEditingProjects();
     update('#editingRecentProjects > button', editingText('Schließen', 'Close'));
     update('.editing-jobs-header h3', editingText('Exportaufträge', 'Export queue'));
+    update('#editingJobsClear', editingText('Gespeicherte entfernen', 'Remove saved'));
     update('#editingJobsEmpty', editingText('Keine Exportaufträge.', 'No export jobs.'));
     update('#editingMergeQueue', editingText('Export vormerken', 'Queue export'));
     update('#editingMergeMode h2', editingText('Zusammenfügen', 'Merge'));
@@ -219,6 +277,7 @@ function refreshEditingWorkflowLanguage(): void {
 }
 
 function refreshEditingWorkflowControls(): void {
+    renderEditingJobs();
     const mergeQueue = document.getElementById('editingMergeQueue') as HTMLButtonElement | null;
     const mergeNow = document.getElementById('btnMerge') as HTMLButtonElement | null;
     const mergeDisabled = editingWorkflowBusy || !mergeNow || mergeNow.disabled;

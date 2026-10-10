@@ -13,6 +13,46 @@ const RendererClipDiscovery = (() => {
     let lastRequest: Request | null = null;
     let sequence = 0;
     let busy = false;
+    let previewDialog: HTMLDialogElement | null = null;
+    let previewId: string | null = null;
+    let previewPlayer: { destroy(): void } | null = null;
+    function stopPreview(): void {
+        previewPlayer?.destroy(); previewPlayer = null;
+        const id = previewId; previewId = null;
+        if (id) void bridge().closeClipPlayback(id).catch(() => undefined);
+    }
+    function clipDuration(seconds: number): string {
+        if (!Number.isFinite(seconds) || seconds <= 0) return '';
+        const whole = Math.round(seconds);
+        const hours = Math.floor(whole / 3600);
+        return (hours ? hours + ':' : '') + String(Math.floor(whole / 60) % 60).padStart(2, '0') + ':' + String(whole % 60).padStart(2, '0');
+    }
+    async function showPreview(clip: Clip): Promise<void> {
+        stopPreview();
+        if (!previewDialog) {
+            previewDialog = element('dialog', 'clip-preview-dialog'); previewDialog.id = 'clipPreviewDialog';
+            previewDialog.setAttribute('aria-labelledby', 'clipPreviewTitle');
+            previewDialog.addEventListener('close', stopPreview);
+            document.body.append(previewDialog);
+        }
+        const header = element('header', 'clip-discovery-header');
+        const title = element('h2', '', clip.title || clip.id); title.id = 'clipPreviewTitle';
+        header.append(title, button(text('Schließen', 'Close'), () => previewDialog?.close()));
+        const host = element('div', 'clip-preview-player');
+        const status = element('p', 'clip-preview-status', text('Clip wird geöffnet …', 'Opening clip …')); status.setAttribute('role', 'status');
+        const retry = button(text('Erneut laden', 'Retry'), () => { void showPreview(clip); }); retry.hidden = true;
+        previewDialog.replaceChildren(header, element('p', 'clip-preview-meta', [clip.channel, clipDuration(clip.duration)].filter(Boolean).join(' · ')), host, status, retry);
+        if (!previewDialog.open) previewDialog.showModal();
+        const id = crypto.randomUUID(); previewId = id;
+        const failed = () => { if (previewId !== id) return; status.hidden = false; status.textContent = text('Clip konnte nicht geladen werden.', 'Could not load the clip.'); retry.hidden = false; };
+        try {
+            const result = await bridge().openClipPlayback({ id, url: clip.url });
+            if (previewId !== id || !previewDialog.open) { void bridge().closeClipPlayback(id).catch(() => undefined); return; }
+            if (!result || !window.VodPlayer?.mountPreview) { failed(); return; }
+            status.hidden = true;
+            previewPlayer = window.VodPlayer.mountPreview(host, { id: 'clip-' + clip.id, sourceUrl: result.sourceUrl, duration: clip.duration, language: currentLanguage, onError: failed });
+        } catch { failed(); }
+    }
     const text = (de: string, en: string) => currentLanguage === 'de' ? de : en;
     const element = RendererElements.element;
     const input = (id: string) => document.getElementById(id) as HTMLInputElement;
@@ -43,7 +83,8 @@ const RendererClipDiscovery = (() => {
         const more = button(text('Mehr laden', 'Load more'), () => { void search(true); }); more.id = 'clipDiscoveryMore';
         const add = button(text('Auswahl übernehmen', 'Import selection'), () => { void importSelection(); }); add.id = 'clipDiscoveryImport';
         footer.append(all, more, add); dialog.append(header, fields, status, list, footer);
-        dialog.addEventListener('close', () => { sequence++; busy = false; notice(''); render(); });
+        dialog.addEventListener('close', () => { previewDialog?.close(); stopPreview(); sequence++; busy = false; notice(''); render(); });
+        window.addEventListener('pagehide', stopPreview);
         document.body.append(dialog); return dialog;
     }
     function labels(): void {
@@ -57,7 +98,8 @@ const RendererClipDiscovery = (() => {
         const scroll = list.scrollTop;
         const fragment = document.createDocumentFragment();
         for (const clip of clips) {
-            const row = element('label', 'clip-discovery-row');
+            const row = element('article', 'clip-discovery-row');
+            const choice = element('label', 'clip-discovery-choice');
             const checkbox = element('input', ''); checkbox.type = 'checkbox'; checkbox.checked = selected.has(clip.id); checkbox.disabled = busy;
             checkbox.setAttribute('aria-label', clip.title || clip.id);
             checkbox.addEventListener('change', () => {
@@ -65,8 +107,10 @@ const RendererClipDiscovery = (() => {
                 if (checkbox.checked) selected.add(clip.id); else selected.delete(clip.id); updateButtons();
             });
             const body = element('span', 'clip-discovery-copy'); body.append(element('strong', '', clip.title || clip.id));
-            body.append(element('span', 'clip-discovery-meta', [clip.channel, clip.createdAt ? formatUiDate(new Date(clip.createdAt)) : '', formatUiNumber(clip.views) + text(' Aufrufe', ' views'), clip.downloaded ? text('Bereits heruntergeladen', 'Already downloaded') : ''].filter(Boolean).join(' · ')));
-            row.append(checkbox, body); fragment.append(row);
+            body.append(element('span', 'clip-discovery-meta', [clip.channel, clipDuration(clip.duration), clip.createdAt ? formatUiDate(new Date(clip.createdAt)) : '', formatUiNumber(clip.views) + text(' Aufrufe', ' views'), clip.downloaded ? text('Bereits heruntergeladen', 'Already downloaded') : ''].filter(Boolean).join(' · ')));
+            choice.append(checkbox, body);
+            const preview = button(text('Vorschau', 'Preview'), () => { void showPreview(clip); }); preview.classList.add('clip-discovery-preview'); preview.disabled = busy;
+            row.append(choice, preview); fragment.append(row);
         }
         if (!clips.length) fragment.append(element('div', 'insights-empty', text('Keine Clips angezeigt.', 'No clips displayed.')));
         list.replaceChildren(fragment); list.scrollTop = scroll; list.setAttribute('aria-busy', String(busy)); updateButtons();
@@ -77,6 +121,7 @@ const RendererClipDiscovery = (() => {
         const add = document.getElementById('clipDiscoveryImport'); if (add) add.textContent = text('Übernehmen', 'Import') + ' (' + formatUiNumber(selected.size) + ')';
     }
     function resetResults(): void {
+        previewDialog?.close(); stopPreview();
         sequence++;
         busy = false;
         clips = [];

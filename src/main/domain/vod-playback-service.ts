@@ -2,6 +2,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { parseTwitchClipId } from '../twitch/clip-url';
 import { runMediaProcess } from './media-process';
 
 export function validateVodPlaybackRequest(value: unknown): { id: string; url: string } {
@@ -63,7 +64,17 @@ export class VodPlaybackService {
     }
 
     async open(value: unknown, tools: PlaybackTools): Promise<{ id: string; sourceUrl: string; quality: string }> {
-        const request = validateVodPlaybackRequest(value);
+        return this.openRequest(validateVodPlaybackRequest(value), tools, true);
+    }
+
+    async openClip(value: unknown, tools: PlaybackTools): Promise<{ id: string; sourceUrl: string; quality: string }> {
+        const request = value as { id?: unknown; url?: unknown } | null;
+        const clipId = typeof request?.url === 'string' ? parseTwitchClipId(request.url) : null;
+        if (!request || typeof request.id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(request.id) || !clipId) throw new Error('Invalid clip playback request');
+        return this.openRequest({ id: request.id, url: 'https://clips.twitch.tv/' + clipId }, tools, false);
+    }
+
+    private async openRequest(request: { id: string; url: string }, tools: PlaybackTools, playlist: boolean): Promise<{ id: string; sourceUrl: string; quality: string }> {
         const previous = this.close();
         const session: PlaybackSession = {
             id: request.id, controller: new AbortController(), server: null,
@@ -104,7 +115,7 @@ export class VodPlaybackService {
             const address = server.address();
             if (!address || typeof address === 'string') throw new Error('Playback server unavailable');
             session.origin = `http://127.0.0.1:${address.port}`;
-            return { id: request.id, sourceUrl: session.origin + this.register(session, source, true), quality: tools.quality };
+            return { id: request.id, sourceUrl: session.origin + this.register(session, source, playlist), quality: tools.quality };
         } catch (error) {
             session.controller.abort();
             await this.stopServer(session);
