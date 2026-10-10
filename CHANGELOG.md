@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 1.0.33 - 2026-10-11
+
+This patch makes Twitch's hidden Source renditions available for VOD quality selection and download.
+
+### VOD Source quality
+
+- Detect Twitch `unavailable-media` renditions such as 1440p60 HEVC that are hidden from the regular Streamlink quality list.
+- Show the actual Source resolution, frame rate and codec in the quality dialog.
+- Download Source and explicitly selected high-resolution renditions through the direct Twitch HLS manifest when available, while keeping standard 1080p and lower qualities on the existing Streamlink path.
+- Use the same high-resolution Source path for VOD preview playback.
+
+### Verification
+
+- 959 unit tests, build, ESLint and headless VOD/player audits passed.
+- VOD 2897060167 verified as a 2560×1440 HEVC 60 fps Source stream through the real HLS path.
+- Windows installer remains unsigned, as in previous releases.
+
 ## 1.0.32 - 2026-10-10
 
 This patch fixes category selection in the VOD trimming workflow so a selected Twitch chapter is downloaded as the requested range only.
