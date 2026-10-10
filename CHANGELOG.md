@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.0.29 - 2026-10-10
+
+This update fixes an overlapping preview in the video editor that could cover the project name and project actions.
+
+### Video editor
+
+- The project toolbar keeps its full height instead of collapsing beneath the preview.
+- The empty preview is centered and sized to fit the available window height while retaining its 16:9 aspect ratio.
+- The loaded editing workspace continues to use its flexible layout.
+
 ## 1.0.28 - 2026-10-10
 
 This update adds reusable editing projects, a persistent export queue, full application backups, and more precise control over source formats, audio and automated downloads. It also expands the archive, download history and clip browser.
