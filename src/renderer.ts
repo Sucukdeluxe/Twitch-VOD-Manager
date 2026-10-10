@@ -1958,16 +1958,6 @@ async function confirmClipDialog(): Promise<void> {
         ...(clipOmissionState?.config ? { omissions: clipOmissionState.config } : {})
     };
 
-    if ((config.prevent_duplicate_downloads as boolean) !== false && hasActiveQueueDuplicate(
-        clipDialogData.url,
-        clipDialogData.streamer,
-        clipDialogData.date,
-        customClip
-    )) {
-        alert(UI_TEXT.queue.duplicateSkipped);
-        return;
-    }
-
     const submittingDialog = clipDialogData;
     const failureMessage = currentLanguage === 'de' ? 'Einreihen fehlgeschlagen. Bitte erneut versuchen.' : 'Could not add the download. Please try again.';
     let submissionError = '';
@@ -1975,9 +1965,11 @@ async function confirmClipDialog(): Promise<void> {
     clipQueueError = '';
     updateClipOmissionState();
     try {
+        const quality = await chooseVodQuality(submittingDialog.url, submittingDialog.title);
+        if (!quality || clipDialogData !== submittingDialog) return;
         const result = await window.api.addToQueueWithResult({
             url: submittingDialog.url, title: submittingDialog.title, date: submittingDialog.date,
-            streamer: submittingDialog.streamer, duration_str: submittingDialog.duration, customClip,
+            streamer: submittingDialog.streamer, duration_str: submittingDialog.duration, customClip, quality,
         });
         queue = result.queue;
         renderQueue();

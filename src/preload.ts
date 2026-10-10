@@ -162,14 +162,16 @@ contextBridge.exposeInMainWorld('api', {
     // Twitch API
     getUserId: (username: string) => ipcRenderer.invoke('get-user-id', username),
     getVODs: (userId: string, forceRefresh: boolean = false) => ipcRenderer.invoke('get-vods', userId, forceRefresh),
+    getVodQualities: (request: { id: string; url: string }): Promise<import('./main/domain/vod-quality').VodQualityOption[] | null> => ipcRenderer.invoke('get-vod-qualities', request),
+    cancelVodQualities: (id: string): Promise<void> => ipcRenderer.invoke('cancel-vod-qualities', id),
     openVodPlayback: (request: { id: string; url: string }) => ipcRenderer.invoke('open-vod-playback', request),
     getVodTimeline: (request: { id: string; url: string }) => ipcRenderer.invoke('get-vod-timeline', request),
     closeVodPlayback: (id: string) => ipcRenderer.invoke('close-vod-playback', id),
 
     // Queue
     getQueue: () => ipcRenderer.invoke('get-queue'),
-    addToQueue: (item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip'>) => ipcRenderer.invoke('add-to-queue', item),
-    addToQueueWithResult: (item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip'>): Promise<QueueAdditionResult> => ipcRenderer.invoke('add-to-queue-with-result', item),
+    addToQueue: (item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip' | 'quality'>) => ipcRenderer.invoke('add-to-queue', item),
+    addToQueueWithResult: (item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip' | 'quality'>): Promise<QueueAdditionResult> => ipcRenderer.invoke('add-to-queue-with-result', item),
     startLiveRecording: (streamerName: string) => ipcRenderer.invoke('start-live-recording', streamerName),
     removeFromQueue: (id: string) => ipcRenderer.invoke('remove-from-queue', id),
     reorderQueue: (orderIds: string[]) => ipcRenderer.invoke('reorder-queue', orderIds),

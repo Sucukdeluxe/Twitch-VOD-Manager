@@ -1,3 +1,4 @@
+import { VodQualityService, normalizeVodQuality, vodQualityStreamArg, TWITCH_VIDEO_CODEC_ARGS } from './main/domain/vod-quality';
 import { createIndexedArchiveReader } from './main/domain/archive-index';
 import { normalizeAutoVodRules, normalizeAutoVodRule, evaluateAutoVodRule, type AutoVodRules } from './main/domain/auto-vod-rules';
 import { validAudioProcessing, type AudioProcessingOptions } from './main/domain/audio-processing';
@@ -522,11 +523,8 @@ const defaultConfig: Config = {
     delete_parts_after_merge: false
 };
 
-// normalize* helpers + VALID_STREAMLINK_QUALITIES + isPlainObject + normalizeLogin
-// kommen aus ./main/domain/config-normalize. getStreamlinkStreamArg bleibt
-// hier, da es config liest.
-function getStreamlinkStreamArg(): string {
-    return `${normalizeStreamlinkQuality(config.streamlink_quality)},best`;
+function getStreamlinkStreamArg(quality?: string): string {
+    return vodQualityStreamArg(quality);
 }
 
 function createDownloadThrottleTransform(): Transform | undefined {
@@ -666,7 +664,7 @@ function sanitizeMergeGroup(raw: unknown): MergeGroup | undefined {
         if (typeof mi.url !== 'string' || typeof mi.title !== 'string'
             || typeof mi.date !== 'string' || typeof mi.streamer !== 'string'
             || typeof mi.duration_str !== 'string') continue;
-        items.push({ url: mi.url, title: mi.title, date: mi.date, streamer: mi.streamer, duration_str: mi.duration_str });
+        items.push({ url: mi.url, title: mi.title, date: mi.date, streamer: mi.streamer, duration_str: mi.duration_str, quality: normalizeVodQuality(mi.quality) || undefined });
     }
     if (items.length < 2) return undefined;
 
@@ -739,6 +737,7 @@ function sanitizeQueueItem(raw: unknown): QueueItem | null {
         id,
         createdAt: new Date(createdAtMs).toISOString(),
         url: raw.url,
+        quality: normalizeVodQuality(raw.quality) || undefined,
         title: typeof raw.title === 'string' ? raw.title : '',
         date: typeof raw.date === 'string' ? raw.date : '',
         streamer: typeof raw.streamer === 'string' ? raw.streamer : '',
@@ -1823,7 +1822,7 @@ function getRuntimeMetricsSnapshot(): RuntimeMetricsSnapshot {
     };
 }
 
-function getQueueItemFingerprint(item: Pick<QueueItem, 'url' | 'streamer' | 'date' | 'customClip'>): string {
+function getQueueItemFingerprint(item: Pick<QueueItem, 'url' | 'streamer' | 'date' | 'customClip' | 'quality'>): string {
     return canonicalQueueItemIdentity(item);
 }
 
@@ -1831,7 +1830,7 @@ function isQueueItemActive(item: QueueItem): boolean {
     return item.status === 'pending' || item.status === 'downloading' || item.status === 'paused';
 }
 
-function hasActiveDuplicate(candidate: Pick<QueueItem, 'url' | 'streamer' | 'date' | 'customClip'>): boolean {
+function hasActiveDuplicate(candidate: Pick<QueueItem, 'url' | 'streamer' | 'date' | 'customClip' | 'quality'>): boolean {
     const candidateFingerprint = getQueueItemFingerprint(candidate);
 
     return downloadQueue.some((existing) => {
@@ -4010,14 +4009,15 @@ async function downloadVODPart(
         gesetzt ist, ueberschrieben aus dort. Wenn startTime und endTime null
         sind (Full-VOD), kann Caller hier die VOD-Gesamtdauer reingeben,
         damit der Bar nicht in indeterminate haengt. 0 = unknown. */
-    expectedTotalSec: number = 0
+    expectedTotalSec: number = 0,
+    quality?: string
 ): Promise<DownloadResult> {
     if (!(await ensureFfmpegInstalled())) return { success: false, error: tBackend('ffmpegAutoInstallFailed') };
     if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) return { success: false, error: tBackend('downloadCancelled') };
     const streamlinkCmd = await getStreamlinkCommand();
     if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) return { success: false, error: tBackend('downloadCancelled') };
     return new Promise((resolve) => {
-        const args = [...streamlinkCmd.prefixArgs, url, getStreamlinkStreamArg(), '--stdout'];
+        const args = [...streamlinkCmd.prefixArgs, ...TWITCH_VIDEO_CODEC_ARGS, url, getStreamlinkStreamArg(quality), '--stdout'];
         if (config.streamlink_disable_ads !== false) {
             // Skips Twitch mid-roll ads which would otherwise be embedded
             // in the VOD output. Off only if the user explicitly disabled it.
@@ -5464,7 +5464,7 @@ async function downloadLiveStream(
             const partStartedAt = Date.now();
             appendDebugLog('recording-part-start', { itemId: item.id, partNumber, filename: path.basename(partFilename) });
 
-            const partResult = await downloadVODPart(item.url, partFilename, null, null, wrappedProgress, item.id, partNumber, partNumber);
+            const partResult = await downloadVODPart(item.url, partFilename, null, null, wrappedProgress, item.id, partNumber, partNumber, 0, item.quality);
 
             // Accumulate this part's final bytes into the running total so
             // the next part's meta line continues from the correct figure.
@@ -5732,7 +5732,7 @@ async function downloadVOD(
                         const milliseconds = Math.round(seconds * 1000);
                         return formatDuration(Math.floor(milliseconds / 1000)) + '.' + String(milliseconds % 1000).padStart(3, '0');
                     };
-                    const result = await downloadVODPart(item.url, filename, clock(range.start), clock(range.end - range.start), value => progress(value.progress), item.id, 1, 1);
+                    const result = await downloadVODPart(item.url, filename, clock(range.start), clock(range.end - range.start), value => progress(value.progress), item.id, 1, 1, 0, item.quality);
                     if (!result.success) throw new Error(result.error || tBackend('editedVodFailed'));
                 },
                 filename(part) {
@@ -5820,7 +5820,9 @@ async function downloadVOD(
                     onProgress,
                     item.id,
                     i + 1,
-                    numParts
+                    numParts,
+                    0,
+                    item.quality
                 );
 
                 if (!result.success) return result;
@@ -5843,7 +5845,9 @@ async function downloadVOD(
                 onProgress,
                 item.id,
                 1,
-                1
+                1,
+                0,
+                item.quality
             );
             return result.success ? { ...result, outputFiles: [filename] } : result;
         }
@@ -5861,7 +5865,7 @@ async function downloadVOD(
             0,
             totalDuration
         ), item.id);
-        const result = await downloadVODPart(item.url, filename, null, null, onProgress, item.id, 1, 1, totalDuration);
+        const result = await downloadVODPart(item.url, filename, null, null, onProgress, item.id, 1, 1, totalDuration, item.quality);
         return result.success ? { ...result, outputFiles: [filename] } : result;
     } else {
         // Part-based download — wrappt onProgress mit einem Aggregator, der
@@ -5912,7 +5916,8 @@ async function downloadVOD(
                 item.id,
                 i + 1,
                 numParts,
-                duration
+                duration,
+                item.quality
             );
 
             if (!result.success) {
@@ -6062,7 +6067,9 @@ async function processDownloadMergeGroup(
                 },
                 item.id,
                 i + 1,
-                mg.items.length
+                mg.items.length,
+                0,
+                vodItem.quality
             );
 
             if (!result.success) {
@@ -7558,7 +7565,8 @@ ipcMain.handle('create-merge-group', (event, itemIds: string[]) => {
             title: item.title,
             date: item.date,
             streamer: item.streamer,
-            duration_str: item.duration_str
+            duration_str: item.duration_str,
+            quality: item.quality
         })),
         mergePhase: 'downloading',
         currentItemIndex: 0,
@@ -8021,6 +8029,18 @@ registerTrustedIpcHandler(ipcMain, 'download-clip', isTrustedRendererEvent, () =
 
 registerTrustedIpcHandler(ipcMain, 'run-preflight', isTrustedRendererEvent, () => Promise.resolve(null), async (_, autoFix: boolean = false) => {
     return await runPreflight(autoFix);
+});
+
+const vodQualityService = new VodQualityService();
+
+registerTrustedIpcHandler(ipcMain, 'get-vod-qualities', isTrustedRendererEvent, () => Promise.resolve(null), async (_, request: unknown) => {
+    if (appShutdownStarted) return null;
+    try { return await vodQualityService.load(request, { prepare: ensureStreamlinkInstalled, streamlink: getStreamlinkCommand }); }
+    catch { return null; }
+});
+
+registerTrustedIpcHandler(ipcMain, 'cancel-vod-qualities', isTrustedRendererEvent, () => Promise.resolve(), async (_, id: unknown) => {
+    vodQualityService.cancel(id);
 });
 
 registerTrustedIpcHandler(ipcMain, 'open-vod-playback', isTrustedRendererEvent, () => Promise.resolve(null), async (_, request: unknown) => {

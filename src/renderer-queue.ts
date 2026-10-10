@@ -180,7 +180,7 @@ async function copyQueueUrl(url: string): Promise<void> {
     }
 }
 
-function buildQueueFingerprint(url: string, streamer: string, date: string, customClip?: CustomClip): string {
+function buildQueueFingerprint(url: string, streamer: string, date: string, customClip?: CustomClip, quality?: string): string {
     const clipFingerprint = customClip
         ? [
             'clip',
@@ -197,7 +197,8 @@ function buildQueueFingerprint(url: string, streamer: string, date: string, cust
         (url || '').trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, ''),
         (streamer || '').trim().toLowerCase(),
         (date || '').trim(),
-        clipFingerprint
+        clipFingerprint,
+        quality || 'source'
     ].join('|');
 }
 
@@ -213,31 +214,132 @@ function getQueueRenderFingerprint(items: QueueItem[]): string {
 
 const queueRowCache = new Map<string, { element: HTMLElement; fingerprint: string }>();
 
-function hasActiveQueueDuplicate(url: string, streamer: string, date: string, customClip?: CustomClip): boolean {
-    const target = buildQueueFingerprint(url, streamer, date, customClip);
+function hasActiveQueueDuplicate(url: string, streamer: string, date: string, customClip?: CustomClip, quality?: string): boolean {
+    const target = buildQueueFingerprint(url, streamer, date, customClip, quality);
     return queue.some((item) => {
         if (item.status !== 'pending' && item.status !== 'downloading' && item.status !== 'paused') {
             return false;
         }
 
-        return buildQueueFingerprint(item.url, item.streamer, item.date, item.customClip) === target;
+        return buildQueueFingerprint(item.url, item.streamer, item.date, item.customClip, item.quality) === target;
+    });
+}
+
+let vodQualityDialogOpen = false;
+
+async function chooseVodQuality(url: string, title: string): Promise<string | null> {
+    if (vodQualityDialogOpen) return null;
+    vodQualityDialogOpen = true;
+    const english = currentLanguage === 'en';
+    const dialog = document.createElement('dialog');
+    dialog.className = 'vod-quality-dialog';
+    dialog.setAttribute('aria-labelledby', 'vodQualityTitle');
+    const heading = document.createElement('h2');
+    heading.id = 'vodQualityTitle';
+    heading.textContent = english ? 'Download quality' : 'Downloadqualität';
+    const subtitle = document.createElement('p');
+    subtitle.className = 'vod-quality-subtitle';
+    subtitle.textContent = title;
+    const status = document.createElement('p');
+    status.className = 'vod-quality-status';
+    status.setAttribute('role', 'status');
+    const options = document.createElement('div');
+    options.className = 'vod-quality-options';
+    options.setAttribute('role', 'radiogroup');
+    options.setAttribute('aria-labelledby', heading.id);
+    const actions = document.createElement('div');
+    actions.className = 'vod-quality-actions';
+    const cancel = document.createElement('button');
+    cancel.className = 'btn-secondary';
+    cancel.textContent = english ? 'Cancel' : 'Abbrechen';
+    const retry = document.createElement('button');
+    retry.className = 'btn-secondary';
+    retry.textContent = english ? 'Retry' : 'Erneut versuchen';
+    retry.hidden = true;
+    const confirm = document.createElement('button');
+    confirm.className = 'btn-primary';
+    confirm.textContent = english ? 'Add to queue' : 'Zur Warteschlange';
+    confirm.disabled = true;
+    actions.append(cancel, retry, confirm);
+    dialog.append(heading, subtitle, status, options, actions);
+    document.body.append(dialog);
+    let selected = 'source';
+    let requestId = '';
+    let settled = false;
+    return await new Promise<string | null>(resolve => {
+        const finish = (value: string | null): void => {
+            if (settled) return;
+            settled = true;
+            void window.api.cancelVodQualities(requestId).catch(() => {});
+            dialog.close();
+            dialog.remove();
+            vodQualityDialogOpen = false;
+            resolve(value);
+        };
+        const load = async (): Promise<void> => {
+            requestId = crypto.randomUUID();
+            const id = requestId;
+            confirm.disabled = true;
+            retry.hidden = true;
+            options.replaceChildren();
+            status.hidden = false;
+            status.textContent = english ? 'Loading available qualities…' : 'Verfügbare Qualitäten werden geladen…';
+            try {
+                const qualities = await window.api.getVodQualities({ id, url });
+                if (settled || requestId !== id) return;
+                if (!qualities?.length) throw new Error('No qualities');
+                selected = 'source';
+                for (const quality of qualities) {
+                    const label = document.createElement('label');
+                    label.className = 'vod-quality-option';
+                    const radio = document.createElement('input');
+                    radio.type = 'radio';
+                    radio.name = 'vod-quality';
+                    radio.value = quality.id;
+                    radio.checked = quality.id === selected;
+                    radio.addEventListener('change', () => { selected = quality.id; });
+                    const text = document.createElement('span');
+                    text.textContent = quality.label;
+                    label.append(radio, text);
+                    options.append(label);
+                }
+                status.hidden = true;
+                confirm.disabled = false;
+            } catch {
+                if (settled || requestId !== id) return;
+                status.textContent = english ? 'Could not load the available qualities.' : 'Verfügbare Qualitäten konnten nicht geladen werden.';
+                retry.hidden = false;
+            }
+        };
+        cancel.addEventListener('click', () => finish(null));
+        confirm.addEventListener('click', () => { if (!confirm.disabled) finish(selected); });
+        retry.addEventListener('click', () => { void load(); });
+        dialog.addEventListener('cancel', event => { event.preventDefault(); finish(null); });
+        dialog.addEventListener('close', () => finish(null));
+        dialog.addEventListener('keydown', event => event.stopPropagation());
+        dialog.showModal();
+        void load();
     });
 }
 
 async function addToQueue(url: string, title: string, date: string, streamer: string, duration: string): Promise<void> {
-    if ((config.prevent_duplicate_downloads as boolean) !== false && hasActiveQueueDuplicate(url, streamer, date)) {
+    const quality = await chooseVodQuality(url, title);
+    if (!quality) return;
+    if ((config.prevent_duplicate_downloads as boolean) !== false && hasActiveQueueDuplicate(url, streamer, date, undefined, quality)) {
         alert(UI_TEXT.queue.duplicateSkipped);
         return;
     }
 
-    queue = await window.api.addToQueue({
-        url,
-        title,
-        date,
-        streamer,
-        duration_str: duration
-    });
-    renderQueue();
+    try {
+        const result = await window.api.addToQueueWithResult({ url, title, date, streamer, duration_str: duration, quality });
+        queue = result.queue;
+        renderQueue();
+        if (!result.accepted) {
+            alert(result.reason === 'duplicate' ? UI_TEXT.queue.duplicateSkipped : currentLanguage === 'en' ? 'Could not add the download. Please try again.' : 'Einreihen fehlgeschlagen. Bitte erneut versuchen.');
+        }
+    } catch {
+        alert(currentLanguage === 'en' ? 'Could not add the download. Please try again.' : 'Einreihen fehlgeschlagen. Bitte erneut versuchen.');
+    }
 }
 
 async function removeFromQueue(id: string): Promise<void> {
@@ -820,11 +922,13 @@ async function toggleDownload(): Promise<void> {
 }
 
 function renderQueueDetails(item: QueueItem): string {
+    const quality = [...new Set((item.mergeGroup?.items || [item]).map(source => !source.quality || source.quality === 'source' ? 'Source' : source.quality))].join(' · ');
     return `                        <div class="queue-details-clip"><div class="queue-details-content">
                         <div class="queue-url-row"><span class="queue-detail-label">URL:</span><button class="queue-url-copy" type="button" data-queue-action="copy-url" aria-label="${escapeHtml(UI_TEXT.queue.ctxCopyUrl)}" title="${escapeHtml(UI_TEXT.queue.ctxCopyUrl)}: ${escapeHtml(item.url)}">${escapeHtml(item.url)}</button></div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailStreamer)}</span> <span class="queue-streamer-name">${escapeHtml(getStreamerDisplayName(item.streamer))}</span></div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDuration)}</span> ${escapeHtml(item.duration_str)}</div>
                         <div><span class="queue-detail-label">${escapeHtml(UI_TEXT.queue.detailDate)}</span> ${escapeHtml(formatUiDateTime(item.date))}</div>
+                        <div><span class="queue-detail-label">${currentLanguage === 'en' ? 'Quality:' : 'Qualität:'}</span> ${escapeHtml(quality)}</div>
                         ${renderQueueOmissions(item)}
                         ${renderQueueItemFileActions(item)}
                         </div></div>`;

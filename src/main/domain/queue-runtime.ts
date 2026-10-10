@@ -1,6 +1,6 @@
 import type { DownloadProgress, QueueItem } from '../../types';
 
-type QueueIdentityInput = Pick<QueueItem, 'url' | 'customClip'>;
+type QueueIdentityInput = Pick<QueueItem, 'url' | 'customClip' | 'quality'>;
 type QueueTransitionStatus = QueueItem['status'];
 
 function onlyDigits(value: string): boolean {
@@ -53,7 +53,7 @@ export function getQueueCreatedAtMs(item: Pick<QueueItem, 'id' | 'createdAt'>, f
 }
 
 export function canonicalQueueItemIdentity(item: QueueIdentityInput): string {
-    const mediaIdentity = normalizedUrlIdentity(item.url);
+    const mediaIdentity = normalizedUrlIdentity(item.url) + (item.quality && item.quality !== 'source' && item.quality !== 'best' ? '|quality:' + item.quality : '');
     if (!item.customClip) return `${mediaIdentity}|full`;
     return [
         mediaIdentity,

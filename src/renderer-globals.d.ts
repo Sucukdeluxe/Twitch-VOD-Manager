@@ -72,6 +72,7 @@ interface MergeGroupItem {
     date: string;
     streamer: string;
     duration_str: string;
+    quality?: string;
 }
 
 interface MergeGroup {
@@ -93,6 +94,7 @@ interface QueueItem {
     date: string;
     streamer: string;
     duration_str: string;
+    quality?: string;
     status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error';
     progress: number;
     currentPart?: number;
@@ -467,8 +469,8 @@ interface ApiBridge {
     getUserId(username: string): Promise<string | null>;
     getVODs(userId: string, forceRefresh?: boolean): Promise<VOD[]>;
     getQueue(): Promise<QueueItem[]>;
-    addToQueue(item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip'>): Promise<QueueItem[]>;
-    addToQueueWithResult(item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip'>): Promise<QueueAdditionResult>;
+    addToQueue(item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip' | 'quality'>): Promise<QueueItem[]>;
+    addToQueueWithResult(item: Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'customClip' | 'quality'>): Promise<QueueAdditionResult>;
     startLiveRecording(streamerName: string): Promise<{ success: boolean; error?: string; streamer?: string; title?: string }>;
     removeFromQueue(id: string): Promise<QueueItem[]>;
     reorderQueue(orderIds: string[]): Promise<QueueItem[]>;
@@ -507,6 +509,8 @@ interface ApiBridge {
     getStreamerProfile(login: string, forceRefresh?: boolean): Promise<StreamerProfile | null>;
     getStreamerDisplayNames(logins: string[]): Promise<Record<string, string>>;
     getVodStoryboard(vodId: string): Promise<VodStoryboard | null>;
+    getVodQualities(request: { id: string; url: string }): Promise<import('./main/domain/vod-quality').VodQualityOption[] | null>;
+    cancelVodQualities(id: string): Promise<void>;
     openVodPlayback(request: { id: string; url: string }): Promise<{ id: string; sourceUrl: string; quality: string } | null>;
     getVodTimeline(request: { id: string; url: string }): Promise<import('./main/domain/vod-timeline').VodTimeline | null>;
     closeVodPlayback(id: string): Promise<void>;

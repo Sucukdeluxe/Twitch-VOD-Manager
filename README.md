@@ -32,7 +32,7 @@ The application works in public mode without a Twitch login. Connecting a Twitch
 
 ### Download and process
 
-- Download complete VODs or selected time ranges in Source quality
+- Download complete VODs or selected time ranges with per-VOD quality selection (Source by default)
 - Paste up to 200 clip links with title previews, duplicate detection and retry controls
 - Edit local videos with frame-accurate trimming, removable ranges, timeline zoom, waveform guidance and undo or redo
 - Split and merge recordings with dedicated tools
@@ -108,6 +108,8 @@ npm run dev
 Stylesheet changes apply live in the development application, including player styles, without reloading the page or resetting editing state. Invalid stylesheet updates leave the previous styles active. Logic and HTML changes take effect after the next restart; they never automatically interrupt an active session. The development badge tooltip shows whether a restart is pending or an update failed.
 
 On Windows, double-click `scripts/start-development.vbs` to build and open the current development version without a terminal window. It uses the separate development data directories and exits when the application closes. Live stylesheet updates also work through this launcher.
+
+Adding an individual VOD or trimmed range to the queue opens the quality selection. The list comes from the available Twitch streams, including 1440p when provided. H.264, HEVC and AV1 are requested for downloads; a selected resolution is retained across restarts and does not silently fall back to another quality. Bulk and automatic downloads continue to use Source. Availability depends on Twitch and the current playback access.
 
 The VOD trim workspace uses the Streamrecorder player to play and seek through the complete VOD without downloading it in full. It includes fine seeking, exact timestamps, speed and volume controls, cinema mode, fullscreen and picture-in-picture. The history stays beside the player, with a full-width cut workspace below. Set the range using synchronized in/out markers on either timeline, time inputs (HH:MM:SS.mmm or seconds), or the I/O shortcuts. Zoom the lower timeline to the selection for finer adjustments and preview the selection before adding it to the queue. The history sidebar shows Twitch game chapters with cover images, time ranges and direct seeking. Hovering over the player timeline shows the category, VOD position and original broadcast date/time. Select a category to use its complete range for trimming. Title changes are shown when matching local live-recording event logs are available; the stored VOD title is displayed separately and is not treated as a historical title timeline. Filename and continuation settings are available beneath the cut timeline. Downloads preserve the selected stream quality and are remuxed into MP4 without re-encoding. The local video cutter re-encodes edited exports according to the selected export profile.
 

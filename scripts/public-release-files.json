@@ -94,6 +94,7 @@
     "src/main/domain/vod-library.ts",
     "src/main/domain/vod-playback-service.ts",
     "src/main/domain/vod-preview.ts",
+    "src/main/domain/vod-quality.ts",
     "src/main/domain/vod-timeline.ts",
     "src/main/domain/workspace-session.ts",
     "src/main/editing-workflows.ts",

@@ -13,6 +13,7 @@ export interface MergeGroupItem {
     date: string;
     streamer: string;
     duration_str: string;
+    quality?: string;
 }
 
 export interface MergeGroup {
@@ -37,6 +38,7 @@ export interface QueueItem {
     date: string;
     streamer: string;
     duration_str: string;
+    quality?: string;
     status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error';
     progress: number;
     currentPart?: number;

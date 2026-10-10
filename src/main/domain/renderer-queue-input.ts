@@ -1,7 +1,8 @@
+import { normalizeVodQuality } from './vod-quality';
 import { parseOmissionConfig } from './vod-edit-plan';
 import type { CustomClip, QueueItem } from '../../types';
 
-export type RendererQueueInput = Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str'> & { customClip?: CustomClip };
+export type RendererQueueInput = Pick<QueueItem, 'url' | 'title' | 'date' | 'streamer' | 'duration_str' | 'quality'> & { customClip?: CustomClip };
 
 function normalizedString(value: unknown, maximumLength: number): string | null {
     if (typeof value !== 'string') return null;
@@ -52,6 +53,8 @@ export function normalizeRendererQueueInput(value: unknown): RendererQueueInput 
         return null;
     }
     if (!title || !date || !streamer || !/^[a-z0-9_]+$/i.test(streamer) || !duration) return null;
+    const quality = normalizeVodQuality(raw.quality);
+    if (!quality) return null;
     const customClip = raw.customClip === undefined ? undefined : normalizeCustomClip(raw.customClip);
     if (raw.customClip !== undefined && !customClip) return null;
     return {
@@ -60,6 +63,7 @@ export function normalizeRendererQueueInput(value: unknown): RendererQueueInput 
         date,
         streamer: streamer.toLowerCase(),
         duration_str: duration,
+        ...(raw.quality !== undefined ? { quality } : {}),
         ...(customClip ? { customClip } : {}),
     };
 }
