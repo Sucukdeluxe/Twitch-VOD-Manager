@@ -115,9 +115,13 @@
 @container (max-width: 800px) { .local-cutter-controls .local-frame-controls { display: none !important; } .local-cutter-controls .player-button.player-rate-button { width: 74px; } }
 @container (max-width: 550px) { .local-cutter-controls .player-volume-control { display: none; } .local-cutter-controls .player-button { width: 36px; } }
 @media (min-width: 1001px) and (min-height: 760px) {
-  #cutterTab { overflow: hidden; }
+  #cutterTab { overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
   #cutterTab .cutter-container { height: 100%; display: flex; flex-direction: column; }
-  #cutterTab .cutter-workspace { flex: 1 1 0; min-height: 250px; }
+  #cutterTab .cutter-workspace { flex: 1 0 0; min-height: min-content; }
+  #cutterTab .cutter-workspace.shown .cutter-preview-panel, #cutterTab .cutter-workspace.shown #cutterPlayer { min-height: min-content; }
+  #cutterTab .cutter-workspace.shown #cutterPlayer .video-preview { height: 140px; flex: 1 1 140px; aspect-ratio: auto; }
+  #cutterPlayerControls { flex: 0 0 auto; }
+  #cutterTab .editing-jobs-panel, #cutterTab #editingWorkflowError { flex: 0 0 auto; }
   #cutterTab .cutter-workspace:not(.shown) { flex: 0 0 auto; height: auto; min-height: 0; }
   #cutterTab .cutter-source-bar, #cutterTab .cutter-recovery-panel { flex: 0 0 auto; }
   #cutterTab .cutter-preview-panel { height: 100%; }

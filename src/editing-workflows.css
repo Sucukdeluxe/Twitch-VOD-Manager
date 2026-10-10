@@ -12,3 +12,6 @@
 .cutter-audio-fades input { width:100%; max-width:120px; box-sizing:border-box; }
 #cutterAudioError { color:var(--text-primary); padding:10px; border:1px solid var(--border-color); border-radius:6px; }
 #cutterAudioError[hidden] { display:none; }
+
+.editing-merge-queue-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+#mergeTab .merge-actions { flex-wrap: wrap; }

@@ -122,25 +122,28 @@ function renderStatsTopStreamers(top: ArchiveStatsTopStreamer[], totalBytes: num
 
 function renderStatsActivity(days: ArchiveStatsDay[], unknownDates = 0): void {
     const originalDays = days;
+    let buckets = days.map(day => ({ ...day, endDate: day.date }));
     if (days.length > 90) {
         const width = Math.ceil(days.length / 90);
-        days = [];
+        buckets = [];
         for (let i = 0; i < originalDays.length; i += width) {
             const group = originalDays.slice(i, i + width);
-            days.push({ date: group[0].date, count: group.reduce((sum, day) => sum + day.count, 0), bytes: group.reduce((sum, day) => sum + day.bytes, 0) });
+            buckets.push({ date: group[0].date, endDate: group[group.length - 1].date, count: group.reduce((sum, day) => sum + day.count, 0), bytes: group.reduce((sum, day) => sum + day.bytes, 0) });
         }
     }
     setText('statsActivityTitle', (currentLanguage === 'de' ? 'Download-Aktivität · ' : 'Download activity · ') + formatUiNumber(originalDays.length) + (currentLanguage === 'de' ? ' Tage' : ' days'));
     const container = document.getElementById('statsActivity');
     if (!container) return;
-    const totalCount = days.reduce((sum, day) => sum + day.count, 0);
-    const totalBytes = days.reduce((sum, day) => sum + day.bytes, 0);
-    const maxCount = Math.max(1, ...days.map(day => day.count));
-    const bars = days.map((day, index) => {
+    const totalCount = buckets.reduce((sum, day) => sum + day.count, 0);
+    const totalBytes = buckets.reduce((sum, day) => sum + day.bytes, 0);
+    const maxCount = Math.max(1, ...buckets.map(day => day.count));
+    const fullDate = new Intl.DateTimeFormat(getIntlLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
+    const bars = buckets.map((day, index) => {
         const date = new Date(day.date + 'T12:00:00');
         const dateLabel = new Intl.DateTimeFormat(getIntlLocale(), { day: 'numeric', month: 'short' }).format(date);
-        const tooltip = dateLabel + ': ' + formatUiNumber(day.count) + ' ' + UI_TEXT.static.statsDownloads + ' · ' + formatBytes(day.bytes);
-        const showLabel = index === 0 || index === days.length - 1 || (index % Math.max(7, Math.ceil(days.length / 5)) === 0 && days.length - 1 - index >= 4);
+        const dateRange = fullDate.format(date) + (day.endDate !== day.date ? ' – ' + fullDate.format(new Date(day.endDate + 'T12:00:00')) : '');
+        const tooltip = dateRange + ': ' + formatUiNumber(day.count) + ' ' + UI_TEXT.static.statsDownloads + ' · ' + formatBytes(day.bytes);
+        const showLabel = index === 0 || index === buckets.length - 1 || (index % Math.max(7, Math.ceil(buckets.length / 5)) === 0 && buckets.length - 1 - index >= 4);
         const height = day.count > 0 ? Math.max(3, day.count / maxCount * 100) : 0;
         return '<div class="stats-day-col" title="' + escapeHtml(tooltip) + '"><div class="stats-day-bar-track"><div class="stats-day-bar-fill" style="height:' + height + '%"></div></div><span class="stats-day-label">' + (showLabel ? escapeHtml(dateLabel) : '') + '</span></div>';
     }).join('');

@@ -33,6 +33,8 @@ const RendererClipDiscovery = (() => {
         const until = element('input', ''); until.type = 'date'; field('clipDiscoveryUntil', text('Bis', 'Until'), until);
         days.addEventListener('change', () => { since.parentElement!.hidden = until.parentElement!.hidden = days.value !== 'custom'; }); since.parentElement!.hidden = until.parentElement!.hidden = true;
         const find = element('button', 'btn-primary', text('Suchen', 'Search')); find.id = 'clipDiscoverySearch'; find.type = 'submit'; fields.append(find);
+        fields.addEventListener('input', resetResults);
+        fields.addEventListener('change', resetResults);
         fields.addEventListener('submit', event => { event.preventDefault(); void search(false); });
         const status = element('div', 'clip-discovery-status'); status.id = 'clipDiscoveryStatus'; status.setAttribute('role', 'status');
         const list = element('div', 'clip-discovery-list'); list.id = 'clipDiscoveryList';
@@ -41,7 +43,7 @@ const RendererClipDiscovery = (() => {
         const more = button(text('Mehr laden', 'Load more'), () => { void search(true); }); more.id = 'clipDiscoveryMore';
         const add = button(text('Auswahl übernehmen', 'Import selection'), () => { void importSelection(); }); add.id = 'clipDiscoveryImport';
         footer.append(all, more, add); dialog.append(header, fields, status, list, footer);
-        dialog.addEventListener('close', () => { sequence++; busy = false; });
+        dialog.addEventListener('close', () => { sequence++; busy = false; notice(''); render(); });
         document.body.append(dialog); return dialog;
     }
     function labels(): void {
@@ -74,10 +76,22 @@ const RendererClipDiscovery = (() => {
         set('clipDiscoverySearch', busy); set('clipDiscoveryMore', busy || !cursor || clips.length >= 1000); set('clipDiscoverySelect', busy || !clips.length); set('clipDiscoveryImport', busy || !selected.size);
         const add = document.getElementById('clipDiscoveryImport'); if (add) add.textContent = text('Übernehmen', 'Import') + ' (' + formatUiNumber(selected.size) + ')';
     }
+    function resetResults(): void {
+        sequence++;
+        busy = false;
+        clips = [];
+        selected.clear();
+        cursor = null;
+        cursors.clear();
+        lastRequest = null;
+        render();
+        notice('');
+    }
     async function search(more: boolean): Promise<void> {
         if (busy || (more && (!cursor || !lastRequest))) return;
         const request: Request = more ? { ...lastRequest!, cursor: cursor! } : { channel: input('clipDiscoveryChannel').value.trim() };
         if (!more) {
+            resetResults();
             const days = input('clipDiscoveryDays').value;
             if (days === 'custom') { request.since = input('clipDiscoverySince').value; request.until = input('clipDiscoveryUntil').value; if (!request.since || !request.until || request.since > request.until) { notice(text('Zeitraum prüfen.', 'Check the date range.')); return; } }
             else request.days = Number(days) as 1 | 7 | 30 | 90;
@@ -88,7 +102,7 @@ const RendererClipDiscovery = (() => {
             const result = await bridge().discoverClips(request);
             if (current !== sequence) return;
             if (result.status !== 'success') { notice(result.status === 'auth-required' ? text('Für die Clip-Suche bei Twitch anmelden.', 'Sign in to Twitch to find clips.') : text('Streamer nicht gefunden.', 'Channel not found.')); return; }
-            if (!more) { clips = []; selected.clear(); cursors.clear(); lastRequest = request; }
+            if (!more) lastRequest = request;
             const known = new Set(clips.map(clip => clip.id));
             clips.push(...result.clips.filter(clip => !known.has(clip.id)).slice(0, 1000 - clips.length));
             cursor = result.cursor && !cursors.has(result.cursor) ? result.cursor : null;

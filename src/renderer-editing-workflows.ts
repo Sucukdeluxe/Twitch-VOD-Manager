@@ -53,7 +53,7 @@ async function editingOperation(operation: () => Promise<EditingWorkflowResponse
     if (editingWorkflowBusy) return;
     editingWorkflowBusy = true;
     const previousError = document.getElementById('editingWorkflowError'); if (previousError) previousError.hidden = true;
-    document.querySelectorAll<HTMLButtonElement>('[data-editing-operation]').forEach(button => { button.disabled = true; });
+    refreshEditingWorkflowControls();
     try {
         const result = await operation();
         if (!result.success && !result.cancelled) throw new Error(result.error || 'Operation failed');
@@ -173,10 +173,14 @@ function initializeEditingWorkflows(): void {
     const start = editingButton(editingText('Starten', 'Start'), () => { void editingOperation(() => editingApi().exportJobAction(editingWorkflowPaused ? 'start' : 'pause')); }); start.id = 'editingJobsStart'; header.append(start); panel.append(header);
     const empty = document.createElement('p'); empty.id = 'editingJobsEmpty'; empty.textContent = editingText('Keine Exportaufträge.', 'No export jobs.'); panel.append(empty);
     const list = document.createElement('div'); list.id = 'editingJobList'; list.className = 'editing-job-list'; panel.append(list); host.append(panel);
-    const mergeToolbar = document.getElementById('toolbarMergeBtn')?.parentElement;
+    const mergeToolbar = document.querySelector('#mergeTab .merge-actions');
     if (mergeToolbar) {
         const mergeButton = editingButton(editingText('Export vormerken', 'Queue export'), () => { void showMergeExportOptions(false); });
-        mergeButton.id = 'editingMergeQueue'; mergeToolbar.append(mergeButton);
+        mergeButton.id = 'editingMergeQueue';
+        const actions = document.createElement('div'); actions.className = 'editing-merge-queue-actions';
+        actions.append(mergeButton);
+        const mergeNow = document.getElementById('btnMerge'); if (mergeNow) actions.append(mergeNow);
+        mergeToolbar.append(actions);
     }
     const mergeMode = document.createElement('dialog'); mergeMode.id = 'editingMergeMode'; mergeMode.className = 'editing-recent-dialog';
     document.body.append(mergeMode);
@@ -189,7 +193,7 @@ function initializeEditingWorkflows(): void {
     for (const id of ['cutterTab', 'mergeTab']) { const tab = document.getElementById(id); if (tab) observer.observe(tab, { attributes: true, attributeFilter: ['class'] }); }
     movePanel();
     const controlObserver = new MutationObserver(refreshEditingWorkflowControls);
-    for (const id of ['btnCut', 'cutterSaveProjectBtn']) { const control = document.getElementById(id); if (control) controlObserver.observe(control, { attributes: true, attributeFilter: ['disabled'] }); }
+    for (const id of ['btnCut', 'cutterSaveProjectBtn', 'btnMerge']) { const control = document.getElementById(id); if (control) controlObserver.observe(control, { attributes: true, attributeFilter: ['disabled'] }); }
     refreshEditingWorkflowControls();
     editingApi().onExportJobsChanged(state => { editingWorkflowJobs = state.jobs; editingWorkflowPaused = state.paused; renderEditingJobs(); });
     void editingOperation(() => editingApi().listExportJobs(), result => { editingWorkflowJobs = result.jobs || []; editingWorkflowPaused = result.paused !== false; renderEditingJobs(); });
@@ -215,6 +219,10 @@ function refreshEditingWorkflowLanguage(): void {
 }
 
 function refreshEditingWorkflowControls(): void {
+    const mergeQueue = document.getElementById('editingMergeQueue') as HTMLButtonElement | null;
+    const mergeNow = document.getElementById('btnMerge') as HTMLButtonElement | null;
+    const mergeDisabled = editingWorkflowBusy || !mergeNow || mergeNow.disabled;
+    if (mergeQueue && mergeQueue.disabled !== mergeDisabled) mergeQueue.disabled = mergeDisabled;
     const input = document.getElementById('editingProjectName') as HTMLInputElement | null;
     if (input && cutterFile && input.dataset.source !== cutterFile.token) {
         input.dataset.source = cutterFile.token;
