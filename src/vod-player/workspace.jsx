@@ -228,6 +228,18 @@ function Workspace({ options, bind }) {
     selectedPlayback.current = true; setSelectionPlaying(true);
     setSeekRequest({ seconds:range.start, playing:true });
   }
+  function selectChapter(chapter) {
+    if (editing !== null) setEditing(null);
+    if (omitting) {
+      modeRanges.current.omission = { ...range };
+      modeRanges.current.excerpt = { start:chapter.start, end:chapter.end };
+      setOmitting(false);
+      options.onMode?.(false);
+    }
+    setRange({ start:chapter.start, end:chapter.end });
+    options.onRange(chapter.start, chapter.end);
+    seek(chapter.start);
+  }
   return <div ref={host} className="vod-player-workspace" onKeyDown={event => {
     if (event.ctrlKey || event.altKey || event.metaKey || event.target.closest('input, textarea, button, [contenteditable="true"]')) return;
     if (event.key.toLowerCase() === 'i' || event.key.toLowerCase() === 'o') { event.preventDefault(); mark(event.key.toLowerCase() === 'i' ? 'start' : 'end'); }
@@ -246,7 +258,7 @@ function Workspace({ options, bind }) {
       {metadataState === 'ready' && <>
         <TitleHistory id={options.url} chapters={chapters} history={metadata.titleHistory} parts={parts} started={started} seconds={position}
           onSeek={seek} onTitleSeek={title => seek(title.seconds)} onHover={setHoveredChapter} onFocus={setFocusedChapter}
-          onSelectRange={chapter => { if (omitting && editing === null) beginRange(-1, chapter); else { changeRange(chapter.start, chapter.end); seek(chapter.start); } }} t={t}/>
+          onSelectRange={selectChapter} t={t}/>
         {metadata.chaptersStatus === 'unavailable' && <p className="vod-history-status">{t('historyNoChapterSource')}</p>}
       </>}
     </div>, document.getElementById('clipHistory'))}
