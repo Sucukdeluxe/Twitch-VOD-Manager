@@ -36,6 +36,7 @@ interface PlaybackTools {
     prepare: () => Promise<boolean>;
     streamlink: () => { command: string; prefixArgs: string[] } | Promise<{ command: string; prefixArgs: string[] }>;
     quality: string;
+    sourceUrl?: string | null;
 }
 
 export class VodPlaybackService {
@@ -92,12 +93,17 @@ export class VodPlaybackService {
             });
             signal.throwIfAborted();
             if (!prepared) throw new Error('Playback tools unavailable');
-            const streamlink = await tools.streamlink();
-            const output = await runMediaProcess(streamlink.command, [
-                ...streamlink.prefixArgs, '--loglevel', 'none', '--stream-url', request.url, tools.quality,
-            ], { signal, timeoutMs: 60000 });
-            signal.throwIfAborted();
-            const source = validateVodMediaUrl(output.trim()).href;
+            let source: string;
+            if (tools.sourceUrl) {
+                source = validateVodMediaUrl(tools.sourceUrl).href;
+            } else {
+                const streamlink = await tools.streamlink();
+                const output = await runMediaProcess(streamlink.command, [
+                    ...streamlink.prefixArgs, '--loglevel', 'none', '--stream-url', request.url, tools.quality,
+                ], { signal, timeoutMs: 60000 });
+                signal.throwIfAborted();
+                source = validateVodMediaUrl(output.trim()).href;
+            }
             const server = createServer((req, res) => { void this.serve(session, req, res); });
             session.server = server;
             await new Promise<void>((resolve, reject) => {

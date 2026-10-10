@@ -1,4 +1,4 @@
-import { VodQualityService, normalizeVodQuality, vodQualityStreamArg, TWITCH_VIDEO_CODEC_ARGS } from './main/domain/vod-quality';
+import { VodQualityService, normalizeVodQuality, resolveVodQualitySource, vodQualityStreamArg, TWITCH_VIDEO_CODEC_ARGS } from './main/domain/vod-quality';
 import { createIndexedArchiveReader } from './main/domain/archive-index';
 import { normalizeAutoVodRules, normalizeAutoVodRule, evaluateAutoVodRule, type AutoVodRules } from './main/domain/auto-vod-rules';
 import { validAudioProcessing, type AudioProcessingOptions } from './main/domain/audio-processing';
@@ -4015,11 +4015,26 @@ async function downloadVODPart(
 ): Promise<DownloadResult> {
     if (!(await ensureFfmpegInstalled())) return { success: false, error: tBackend('ffmpegAutoInstallFailed') };
     if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) return { success: false, error: tBackend('downloadCancelled') };
-    const streamlinkCmd = await getStreamlinkCommand();
+    const requestedQuality = quality ?? config.streamlink_quality;
+    const directSource = await resolveVodQualitySource(url, requestedQuality);
+    const streamlinkCmd = directSource ? { command: '', prefixArgs: [] } : await getStreamlinkCommand();
+    const ffmpegPath = directSource ? await getFFmpegPath() : null;
     if (appShutdownStarted || !(await waitForQueuePhaseBoundary(itemId))) return { success: false, error: tBackend('downloadCancelled') };
     return new Promise((resolve) => {
+        const command = directSource ? ffmpegPath! : streamlinkCmd.command;
         const args = [...streamlinkCmd.prefixArgs, ...TWITCH_VIDEO_CODEC_ARGS, url, getStreamlinkStreamArg(quality), '--stdout'];
-        if (config.streamlink_disable_ads !== false) {
+        if (directSource) {
+            args.length = 0;
+            args.push(
+                '-hide_banner', '-loglevel', 'error',
+                ...(startTime ? ['-ss', startTime] : []),
+                '-i', directSource,
+                '-map', '0:v:0', '-map', '0:a?', '-c', 'copy',
+                ...(endTime ? ['-t', endTime] : []),
+                '-f', 'mpegts', 'pipe:1',
+            );
+        }
+        if (!directSource && config.streamlink_disable_ads !== false) {
             // Skips Twitch mid-roll ads which would otherwise be embedded
             // in the VOD output. Off only if the user explicitly disabled it.
             args.push('--twitch-disable-ads');
@@ -4028,32 +4043,32 @@ async function downloadVODPart(
         // statt komplett zu sterben. Twitch hat 2025/26 oefter transiente 403/
         // timeout-Errors auf einzelne HLS-Segments. Default ist 3 — 5 ist ein
         // pragmatischer Kompromiss zwischen Resilience und Failing-Fast.
-        args.push('--stream-segment-attempts', '5');
-        args.push('--stream-segment-timeout', '20');
-        args.push('--stream-timeout', '120');
+        if (!directSource) args.push('--stream-segment-attempts', '5');
+        if (!directSource) args.push('--stream-segment-timeout', '20');
+        if (!directSource) args.push('--stream-timeout', '120');
         // Streamlink-Plugin retry: bei "stream not found on URL"-Erstabfrage
         // einmal nachhaken, bevor wir den ganzen Run failen.
-        args.push('--retry-streams', '3');
-        args.push('--retry-max', '2');
+        if (!directSource) args.push('--retry-streams', '3');
+        if (!directSource) args.push('--retry-max', '2');
         let lastErrorLine = '';
         const stderrBuffer: string[] = [];
         const expectedDurationSeconds = parseClockDurationSeconds(endTime);
         let lastStreamlinkPercent = 0;
 
-        if (startTime) {
+        if (!directSource && startTime) {
             args.push('--hls-start-offset', startTime);
         }
-        if (endTime) {
+        if (!directSource && endTime) {
             args.push('--hls-duration', endTime);
         }
 
         // download-part-start in the debug log captures the same info
         // for support / forensics — no need to flood stdout too.
-        appendDebugLog('download-part-start', { itemId, command: streamlinkCmd.command, filename, args });
+        appendDebugLog('download-part-start', { itemId, command, filename, args, directQuality: directSource ? requestedQuality : undefined });
 
         const partialFilename = partialDownloadRegistry.begin(filename);
-        recordManagedToolExecution('streamlink', streamlinkCmd.command);
-        const proc = spawn(streamlinkCmd.command, args, { windowsHide: true });
+        recordManagedToolExecution(directSource ? 'ffmpeg' : 'streamlink', command);
+        const proc = spawn(command, args, { windowsHide: true });
         const outputStream = fs.createWriteStream(partialFilename, { flags: 'w' });
         if (!proc.stdout) {
             outputStream.destroy();
@@ -8047,10 +8062,15 @@ registerTrustedIpcHandler(ipcMain, 'cancel-vod-qualities', isTrustedRendererEven
 registerTrustedIpcHandler(ipcMain, 'open-vod-playback', isTrustedRendererEvent, () => Promise.resolve(null), async (_, request: unknown) => {
     if (appShutdownStarted) return null;
     try {
+        const requestedQuality = config.streamlink_quality;
+        const directSource = typeof (request as { url?: unknown } | null)?.url === 'string'
+            ? await resolveVodQualitySource((request as { url: string }).url, requestedQuality)
+            : null;
         return await vodPlaybackService.open(request, {
             prepare: ensureStreamlinkInstalled,
             streamlink: getStreamlinkCommand,
             quality: getStreamlinkStreamArg(),
+            sourceUrl: directSource,
         });
     } catch {
         appendDebugLog('vod-playback-unavailable');
