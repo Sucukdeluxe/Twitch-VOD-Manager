@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 1.0.32 - 2026-10-10
+
+This patch fixes category selection in the VOD trimming workflow so a selected Twitch chapter is downloaded as the requested range only.
+
+### VOD chapter trimming
+
+- Make “Kategorie zuschneiden” select the chapter as the download excerpt in every editing mode.
+- Leave “Bereiche auslassen” when a chapter is selected instead of treating the chapter as content to exclude.
+- Preserve exact chapter start and end boundaries in the queue plan, preventing preceding categories from being downloaded accidentally.
+
+### Verification
+
+- 959 unit tests and the release checks passed.
+- A deterministic four-hour VOD regression check confirms that a chapter from 03:00:00 to 04:00:00 produces exactly one 03:00:00–04:00:00 download range.
+- The Windows installer is unsigned, as in previous releases.
+
 ## 1.0.31 - 2026-10-10
 
 - Reorder waiting exports while retaining keyboard focus, remove saved jobs together without deleting files, and see numeric progress.
