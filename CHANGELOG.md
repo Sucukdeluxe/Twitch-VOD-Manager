@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 1.0.34 - 2026-10-11
+
+This patch makes Windows updates from older Twitch VOD Manager releases reliable on GitHub release assets.
+
+### Updater
+
+- Disable multipart range requests for GitHub release assets, which can reject differential updater requests.
+- Use the release directory URL with an explicit trailing slash for deterministic metadata and installer resolution.
+- Keep the updater on the verified full installer path for unsigned Windows releases.
+
+### Verification
+
+- The real packaged 1.0.32 to 1.0.33 updater path downloaded and SHA-512 verified the installer.
+- The new packaged updater path is verified against the public release assets before publishing.
+- The Windows installer remains unsigned, as in previous releases.
+
 ## 1.0.33 - 2026-10-11
 
 This patch makes Twitch's hidden Source renditions available for VOD quality selection and download.

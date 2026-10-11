@@ -6936,7 +6936,8 @@ async function requestUpdateCheck(source: UpdateCheckSource, force = false): Pro
             if (tagName) {
                 autoUpdater.setFeedURL({
                     provider: 'generic',
-                    url: `${GITHUB_RELEASES_DOWNLOAD_BASE_URL}/${tagName}`
+                    url: `${GITHUB_RELEASES_DOWNLOAD_BASE_URL}/${tagName}/`,
+                    useMultipleRangeRequest: false
                 });
                 appendDebugLog('github-feed-url-set', { tagName, owner: GITHUB_REPO_OWNER, repo: GITHUB_REPO_NAME });
             }

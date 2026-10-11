@@ -1,6 +1,6 @@
 {
   "name": "twitch-vod-manager",
-  "version": "1.0.33",
+  "version": "1.0.34",
   "description": "Twitch VOD Manager - Download Twitch VODs easily",
   "main": "dist/main.js",
   "author": "Sucukdeluxe",
@@ -136,7 +136,8 @@
     },
     "publish": {
       "provider": "generic",
-      "url": "https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/latest/download/"
+      "url": "https://github.com/Sucukdeluxe/Twitch-VOD-Manager/releases/latest/download/",
+      "useMultipleRangeRequest": false
     }
   }
 }
